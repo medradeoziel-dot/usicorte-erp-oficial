@@ -1,0 +1,656 @@
+@import "tailwindcss";
+
+/* ===================================================
+   1. CSS DE IMPRESSÃO E LAYOUTS (USICORTE METAIS)
+   =================================================== */
+@media print {
+  /* 0. Remove todas as margens padrão de página da impressora */
+  @page {
+    margin: 0;
+    size: auto;
+  }
+
+  /* 1. Oculta apenas as partes desnecessárias (menus, sidebars, cabeçalhos, botões, etc.) */
+  .no-print, 
+  .btn-no-print, 
+  nav, 
+  aside, 
+  sidebar, 
+  header.topbar,
+  header.header-principal, 
+  .topbar, 
+  .sidebar, 
+  .statusbar, 
+  .screen-header, 
+  button, 
+  .filtros-bar, 
+  .login-overlay,
+  #sidebarOverlay,
+  footer {
+    display: none !important;
+  }
+
+  /* 2. Garante que o documento raiz e containers principais fiquem visíveis (NÃO escondem o documento) */
+  html, body, #root, #app-root, .app-body, main, .content-area, #container-impressao, #screen-relatorios {
+    background: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    display: block !important;
+    box-shadow: none !important;
+    border: none !important;
+    position: static !important;
+  }
+
+  /* 3. Regras de exibição por Modo de Impressão */
+  /* Modo Pedido: oculta etiqueta e proposta, exibe pedido A4 */
+  body.print-pedido .secao-etiqueta { display: none !important; }
+  body.print-pedido .secao-proposta { display: none !important; }
+  body.print-pedido .secao-pedido { display: block !important; }
+
+  /* Modo Etiqueta: oculta pedido e proposta, exibe etiqueta 80x80 */
+  body.print-etiqueta .secao-pedido { display: none !important; }
+  body.print-etiqueta .secao-proposta { display: none !important; }
+  body.print-etiqueta .secao-etiqueta { display: flex !important; }
+
+  /* Modo Proposta: oculta etiqueta e pedido, exibe proposta A4 */
+  body.print-proposta .secao-etiqueta { display: none !important; }
+  body.print-proposta .secao-pedido { display: none !important; }
+  body.print-proposta .secao-proposta { display: block !important; }
+
+  /* ---------------------------------------------------
+     MODELO 1: PROPOSTA A4 INTEIRO
+     --------------------------------------------------- */
+  .secao-proposta {
+    width: 100% !important;
+    max-width: 100% !important;
+    color: #000 !important;
+    background: #fff !important;
+    padding: 0 !important;
+    margin: 0 auto !important;
+    box-shadow: none !important;
+    border: none !important;
+    page-break-after: avoid !important;
+    break-after: avoid !important;
+  }
+
+  /* ---------------------------------------------------
+     MODELO 2: PEDIDO A4 DIVIDIDO AO MEIO (2 VIAS)
+     Imprime APENAS a Via do Cliente e Via da Empresa/Produção.
+     --------------------------------------------------- */
+  .secao-pedido,
+  .modelo-duas-vias {
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: space-between !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    height: 270mm !important; /* Cabe em 1 única folha A4 */
+    min-height: 0 !important;
+    box-sizing: border-box !important;
+    padding: 2mm !important;
+    margin: 0 auto !important;
+    background: #fff !important;
+    color: #000 !important;
+    box-shadow: none !important;
+    border: none !important;
+    page-break-after: avoid !important;
+    break-after: avoid !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  .via-pedido {
+    height: 125mm !important;
+    min-height: 0 !important;
+    border: 1px solid #000 !important;
+    padding: 5mm 8mm !important;
+    border-radius: 4px !important;
+    box-sizing: border-box !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: space-between !important;
+    background: #fff !important;
+  }
+
+  .linha-corte {
+    border-top: 2px dashed #000 !important;
+    text-align: center !important;
+    margin: 3mm 0 !important;
+    position: relative !important;
+  }
+
+  .linha-corte span,
+  .linha-corte::after {
+    background: #fff !important;
+    padding: 0 10px !important;
+    font-size: 8pt !important;
+    font-weight: bold !important;
+    color: #000 !important;
+  }
+
+  /* ---------------------------------------------------
+     MODELO 3: ETIQUETA CUPOM 80x80mm (MAXIMIZADA)
+     Imprime APENAS a Etiqueta de Identificação da Peça.
+     --------------------------------------------------- */
+  .secao-etiqueta,
+  .modelo-etiqueta-80 {
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: space-between !important;
+    width: 80mm !important;
+    max-width: 80mm !important;
+    height: 80mm !important;
+    max-height: 80mm !important;
+    padding: 2mm 2.5mm !important;
+    box-sizing: border-box !important;
+    border: 1.5px solid #000 !important;
+    font-family: Arial, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+    background: #fff !important;
+    color: #000 !important;
+    margin: 0 auto !important;
+    box-shadow: none !important;
+    overflow: hidden !important; /* Evita gerar páginas em branco extras */
+    page-break-after: avoid !important;
+    break-after: avoid !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  .etiqueta-header {
+    border-bottom: 1px solid #000 !important;
+    padding-bottom: 1mm !important;
+    text-align: center !important;
+  }
+
+  .etiqueta-header strong,
+  .etiqueta-header h2 {
+    font-size: 11pt !important;
+    font-weight: 900 !important;
+    letter-spacing: 0.5px !important;
+    line-height: 1.1 !important;
+    color: #000 !important;
+    margin: 0 !important;
+    text-transform: uppercase !important;
+  }
+
+  .etiqueta-header span,
+  .etiqueta-header p {
+    font-size: 7.5pt !important;
+    font-weight: 700 !important;
+    color: #000 !important;
+    margin: 0.5mm 0 0 0 !important;
+  }
+
+  .etiqueta-corpo {
+    display: flex !important;
+    flex-direction: row !important;
+    align-items: stretch !important;
+    justify-content: space-between !important;
+    gap: 2mm !important;
+    margin: 1mm 0 !important;
+    flex: 1 !important;
+    min-height: 0 !important;
+  }
+
+  .etiqueta-dados {
+    flex: 1 !important;
+    font-size: 7.5pt !important;
+    min-width: 0 !important;
+    word-wrap: break-word !important;
+    word-break: break-word !important;
+    overflow: hidden !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: space-around !important;
+  }
+
+  .etiqueta-dados p {
+    margin: 0.3mm 0 !important;
+    line-height: 1.15 !important;
+  }
+
+  .lbl-cliente-nome {
+    display: -webkit-box !important;
+    -webkit-line-clamp: 2 !important;
+    -webkit-box-orient: vertical !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    line-height: 1.1 !important;
+    font-size: 7.5pt !important;
+    font-weight: bold !important;
+  }
+
+  .etiqueta-foto-box {
+    width: 32mm !important;
+    height: 32mm !important;
+    min-width: 32mm !important;
+    max-width: 32mm !important;
+    max-height: 32mm !important;
+    border: 1px dashed #000 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    background: #fbfbfb !important;
+    overflow: hidden !important;
+    margin: auto 0 !important;
+  }
+
+  .etiqueta-foto-box img {
+    max-width: 100% !important;
+    max-height: 100% !important;
+    width: 100% !important;
+    height: 100% !important;
+    object-fit: contain !important;
+  }
+
+  /* FORÇAR NITIDEZ E CONTRASTE MÁXIMO DO DESENHO TÉCNICO NA IMPRESSÃO */
+  .desenho-tecnico-img,
+  .etiqueta-foto-box img,
+  #img-desenho-etiqueta,
+  .box-foto-desenho img,
+  #box-foto-etiqueta img {
+    filter: contrast(300%) grayscale(100%) drop-shadow(0px 0px 0.5px #000) !important;
+    image-rendering: -webkit-optimize-contrast !important;
+    image-rendering: crisp-edges !important;
+    image-rendering: pixelated !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* AJUSTE DE TRAÇO PARA DESENHOS EM SVG INLINE NA IMPRESSÃO */
+  svg.desenho-tecnico-svg path, 
+  svg.desenho-tecnico-svg line, 
+  svg.desenho-tecnico-svg circle,
+  svg.desenho-tecnico-svg polyline,
+  svg.desenho-tecnico-svg polygon,
+  svg.desenho-tecnico-svg rect,
+  .etiqueta-foto-box svg path,
+  .etiqueta-foto-box svg line,
+  .etiqueta-foto-box svg circle,
+  .secao-etiqueta svg path,
+  .secao-etiqueta svg line,
+  .secao-etiqueta svg circle {
+    stroke: #000000 !important;
+    stroke-width: 1.5px !important;
+    vector-effect: non-scaling-stroke !important;
+  }
+
+  .etiqueta-footer {
+    border-top: 1px solid #000 !important;
+    padding-top: 1mm !important;
+    text-align: center !important;
+  }
+
+  .etiqueta-footer .site-url {
+    font-size: 8pt !important;
+    font-weight: 800 !important;
+    letter-spacing: 0.5px !important;
+    color: #000 !important;
+    display: block !important;
+  }
+
+  /* Ajustes de corpo por modo */
+  body.print-etiqueta {
+    width: 80mm !important;
+    max-width: 80mm !important;
+    height: 80mm !important;
+    max-height: 80mm !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+  }
+
+  body.print-pedido,
+  body.print-proposta {
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Layout de Impressão Direta da Tabela de Consulta */
+  .tabela-container { max-height: none !important; overflow: visible !important; border: none !important; }
+  .tabela-consulta th, .tabela-consulta td { border: 1px solid #000 !important; }
+}
+
+/* ===================================================
+   2. MÓDULO DE CONSULTA E FILTROS (ESTILOS TELA)
+   =================================================== */
+.filtros-bar {
+  background: var(--bg-panel, #111827);
+  padding: 15px;
+  border-radius: 12px;
+  border: 1px solid var(--border-color, #1e293b);
+  margin-bottom: 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.botoes-impressao {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--border-color, #1e293b);
+  padding-bottom: 12px;
+}
+
+.btn-print {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 16px;
+  background: #1e293b;
+  color: #fff;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: bold;
+  min-width: 75px;
+  transition: all 0.2s;
+}
+
+.btn-print:hover {
+  background: #2563eb;
+  border-color: #3b82f6;
+}
+
+.btn-print span {
+  font-size: 1.2rem;
+  margin-bottom: 3px;
+}
+
+.opcoes-pesquisa {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  flex-wrap: wrap;
+  font-size: 0.85rem;
+  color: #f1f5f9;
+}
+
+.opcoes-pesquisa label {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.input-busca-avancada {
+  flex: 1;
+  min-width: 250px;
+  padding: 8px 12px;
+  background: var(--bg-main, #090d16);
+  border: 1px solid var(--border-color, #334155);
+  border-radius: 6px;
+  color: #fff;
+  font-size: 0.9rem;
+}
+
+/* Tabela de Resultados da Consulta */
+.tabela-container {
+  max-height: 480px;
+  overflow-y: auto;
+  overflow-x: auto;
+  width: 100%;
+  max-width: 100%;
+  border: 1px solid var(--border-color, #334155);
+  border-radius: 8px;
+  background: #fff; /* Fundo claro para legibilidade estilo tabela técnica */
+}
+
+.tabela-consulta {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  color: #000;
+}
+
+.tabela-consulta th {
+  position: sticky;
+  top: 0;
+  background: #e2e8f0;
+  color: #000;
+  font-weight: bold;
+  padding: 8px 6px;
+  border: 1px solid #cbd5e1;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.tabela-consulta td {
+  padding: 6px;
+  border: 1px solid #e2e8f0;
+  white-space: nowrap;
+}
+
+.tabela-consulta tr:hover {
+  background-color: #e0f2fe;
+  cursor: pointer;
+}
+
+.tabela-consulta tr.linha-selecionada {
+  background-color: #bae6fd !important;
+}
+
+/* ===================================================
+   3. MÓDULO DE LOGIN E CADASTRO DE USUÁRIOS
+   IDENTIDADE VISUAL: USICORTE METAIS
+   =================================================== */
+:root {
+  --usicorte-red: #e52321;
+  --usicorte-dark: #111318;
+  --usicorte-card: #1a1d24;
+  --usicorte-border: #2e3340;
+  --usicorte-text: #ffffff;
+}
+
+/* Overlay de Login com Fundo Estilo Granilite/Escuro */
+.login-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: radial-gradient(circle at center, #1c2029 0%, #0a0b0e 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+/* Card Principal */
+.login-card {
+  background: var(--usicorte-card);
+  border: 1px solid var(--usicorte-border);
+  border-radius: 12px;
+  width: 100%;
+  max-width: 400px;
+  padding: 35px 30px;
+  box-shadow: 0 15px 35px rgba(0, 0, 0, 0.7), 0 0 15px rgba(229, 35, 33, 0.15);
+  text-align: center;
+  color: var(--usicorte-text);
+}
+
+/* Classe para renderizar a imagem sem fundo em qualquer tela */
+.logo-usicorte-img {
+  max-width: 260px;
+  height: auto;
+  display: block;
+  margin: 0 auto;
+  background: transparent !important;
+  /* Cria uma borda/sombra suave para destacar as letras vazadas sobre fundo escuro */
+  filter: drop-shadow(0px 0px 2px rgba(255, 255, 255, 0.8)) drop-shadow(0px 4px 10px rgba(0,0,0,0.5));
+}
+
+/* COMPONENTE DA LOGO REUTILIZÁVEL */
+.logo-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+}
+
+.logo-container svg {
+  width: 100%;
+  height: auto;
+  max-width: 320px;
+}
+
+/* CABEÇALHO DA INTERFACE PRINCIPAL */
+.header-principal {
+  text-align: center;
+  padding: 30px 20px;
+  background: #000000;
+  border-bottom: 1px solid #2b2b40;
+}
+
+.header-subtitle {
+  font-size: 0.85rem;
+  color: #a0a5b5;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  margin-top: 15px;
+}
+
+.header-description {
+  font-size: 0.9rem;
+  color: #8888a0;
+  margin-top: 10px;
+  max-width: 600px;
+  margin-left: auto;
+  margin-right: auto;
+  line-height: 1.4;
+}
+
+/* TELA DE LOGIN (MODAL / CARD) */
+.login-wrapper {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 40px 20px;
+  flex: 1;
+}
+
+.login-card {
+  background-color: #111318;
+  border: 1px solid #2b2b40;
+  border-radius: 12px;
+  padding: 30px;
+  width: 100%;
+  max-width: 400px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.6);
+}
+
+.login-card .logo-container svg {
+  max-width: 240px;
+}
+
+.login-subtitle {
+  font-size: 0.85rem;
+  color: #a0a5b5;
+  margin-bottom: 25px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+/* Campos do Formulário */
+.form-group {
+  text-align: left;
+  margin-bottom: 18px;
+}
+
+.form-group label {
+  display: block;
+  font-size: 0.8rem;
+  color: #c0c5d5;
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+
+.form-control {
+  width: 100%;
+  padding: 12px 14px;
+  background: #0f1115;
+  border: 1px solid var(--usicorte-border);
+  border-radius: 6px;
+  color: #fff;
+  font-size: 0.95rem;
+  box-sizing: border-box;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.form-control:focus {
+  outline: none;
+  border-color: var(--usicorte-red);
+  box-shadow: 0 0 8px rgba(229, 35, 33, 0.4);
+}
+
+/* Botão Vermelho Usicorte */
+.btn-login {
+  width: 100%;
+  padding: 12px;
+  background: var(--usicorte-red);
+  border: none;
+  border-radius: 6px;
+  color: #fff;
+  font-weight: bold;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.1s;
+  margin-top: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.btn-login:hover {
+  background: #c41c1a;
+}
+
+.btn-login:active {
+  transform: scale(0.98);
+}
+
+/* Botão Secundário Admin */
+.btn-admin-opt {
+  background: transparent;
+  border: 1px solid var(--usicorte-border);
+  color: #a0a5b5;
+  font-size: 0.8rem;
+  padding: 10px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  margin-top: 18px;
+  width: 100%;
+  transition: all 0.2s;
+}
+
+.btn-admin-opt:hover {
+  color: #fff;
+  border-color: var(--usicorte-red);
+}
+
+/* ===================================================
+   NITIDEZ E CONTRASTE DE DESENHOS TÉCNICOS (TELA)
+   =================================================== */
+.desenho-tecnico-img,
+.etiqueta-foto-box img,
+#img-desenho-etiqueta,
+.box-foto-desenho img {
+  filter: contrast(200%) brightness(80%);
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: crisp-edges;
+  image-rendering: pixelated;
+}
+
+
+

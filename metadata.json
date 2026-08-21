@@ -1,0 +1,6 @@
+{
+  "name": "Cadastro de Clientes & Vendas UsiCorte",
+  "description": "Sistema moderno de cadastro de clientes com consultas automáticas de CNPJ/CPF (SEFAZ/Receita/ViaCEP) e módulo completo de Vendas e Orçamentos com cálculos de constantes metalúrgicas e medidas industriais UsiCorte.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
