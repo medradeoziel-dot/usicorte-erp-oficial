@@ -6,6 +6,8 @@ const KEY = "sb_publishable_KcO_a5doEprHC607uoXxuA_7iLP9wUA"; // chave pública,
 
 export const db = createClient(URL, KEY);
 
+export type StatusCotacao = 'rascunho' | 'pendente' | 'aprovado' | 'rejeitado';
+
 export interface SupabaseCliente {
   id?: string;
   nome: string;

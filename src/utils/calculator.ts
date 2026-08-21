@@ -132,11 +132,11 @@ export function normalizeConstant(constant: number | string): number {
   return k;
 }
 
-// 3. Subtotal = Number((Valor_Unitario * Qtd).toFixed(2))
+// 3. Subtotal = Math.ceil(Valor_Unitario * Qtd) (Valores inteiros arredondados para cima)
 export function calculateItemSubtotal(unitPrice: number, quantity: number): number {
   const price = typeof unitPrice === 'number' && !isNaN(unitPrice) ? unitPrice : 0;
   const qty = typeof quantity === 'number' && !isNaN(quantity) ? quantity : 0;
-  return Number((price * qty).toFixed(2));
+  return Math.ceil(price * qty);
 }
 
 export type GeometryType = 'REDONDO_QUADRADO' | 'CHAPA_RETANGULO' | 'TUBO_BUCHA' | 'chapa' | 'macico' | 'bucha';
@@ -379,8 +379,8 @@ export function calculateItemUnitPrice({
 
   const pKg = typeof pricePerKg === 'number' && !isNaN(pricePerKg) ? pricePerKg : 0;
 
-  // Valor_Unitario = Number((Peso_Kg * Preco_Por_Kg).toFixed(2))
-  const unitPrice = Number((unitWeightKg * pKg).toFixed(2));
+  // Valor_Unitario = Math.ceil(Peso_Kg * Preco_Por_Kg) (Inteiro arredondado para cima)
+  const unitPrice = Math.ceil(unitWeightKg * pKg);
   return Math.max(0, unitPrice);
 }
 
@@ -934,7 +934,7 @@ export function calculateTheoreticalWeightAndPrice({
     quantity
   });
 
-  const suggestedUnitPrice = Number((unitWeightKg * baseKgPrice).toFixed(2));
+  const suggestedUnitPrice = Math.ceil(unitWeightKg * baseKgPrice);
 
   return {
     estimatedWeightKg: unitWeightKg,

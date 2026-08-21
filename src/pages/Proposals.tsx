@@ -9,10 +9,17 @@ import {
   Clipboard,
   ChevronDown,
   ImageIcon,
+  Database,
+  RefreshCw,
+  Save,
+  CheckCircle2,
+  Plus,
+  AlertCircle
 } from "lucide-react";
-import { clientes, pedidosPorCliente, itensPorPedido } from "@/lib/mockData";
-import type { ViewType, ItemPedido } from "@/lib/types";
+import { clientes as mockClientes, pedidosPorCliente as mockPedidos, itensPorPedido as mockItens } from "@/lib/mockData";
+import type { ViewType, ItemPedido, Cliente as LocalCliente, Pedido } from "@/lib/types";
 import { useLocalStorage } from "@/lib/useLocalStorage";
+import { db, type SupabaseCotacao, type SupabaseCliente, type SupabaseCotacaoItem, type StatusCotacao, uploadDesenhoStorage } from "@/lib/db";
 import LabelPreview from "@/components/LabelPreview";
 import A4Preview from "@/components/A4Preview";
 
@@ -24,7 +31,15 @@ const viewOptions: { value: ViewType; label: string }[] = [
 ];
 
 export default function Proposals() {
-  const [clienteId, setClienteId] = useLocalStorage<number>("clienteId", clientes[0].id);
+  // Lista de clientes e pedidos carregados do banco / mock
+  const [dbClientes, setDbClientes] = useState<LocalCliente[]>(mockClientes);
+  const [dbPedidosPorCliente, setDbPedidosPorCliente] = useState<Record<number, Pedido[]>>(mockPedidos);
+  const [dbItensPorPedido, setDbItensPorPedido] = useState<Record<string, ItemPedido[]>>(mockItens);
+  const [isLoadingDb, setIsLoadingDb] = useState<boolean>(false);
+  const [isSavingDb, setIsSavingDb] = useState<boolean>(false);
+  const [statusFeedback, setStatusFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  const [clienteId, setClienteId] = useLocalStorage<number>("clienteId", mockClientes[0].id);
   const [pedidoId, setPedidoId] = useLocalStorage<string>("pedidoId", "");
   const [viewType, setViewType] = useLocalStorage<ViewType>("viewType", "etiqueta-80x80");
   const [pecaAtiva, setPecaAtiva] = useLocalStorage<number>("pecaAtiva", 1);
@@ -32,18 +47,108 @@ export default function Proposals() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const pedidos = pedidosPorCliente[clienteId] ?? [];
-  const itens: ItemPedido[] = pedidoId ? (itensPorPedido[pedidoId] ?? []) : [];
-  const cliente = clientes.find((c) => c.id === clienteId) ?? null;
+  // Carregar clientes e cotações reais do Supabase
+  const loadDatabaseData = useCallback(async () => {
+    setIsLoadingDb(true);
+    try {
+      // 1. Clientes do Supabase
+      const { data: supaClientes, error: errClientes } = await db
+        .from("clientes")
+        .select("*")
+        .order("nome", { ascending: true });
+
+      // 2. Cotações do Supabase
+      const { data: supaCotacoes, error: errCotacoes } = await db
+        .from("cotacoes")
+        .select("*, cotacao_itens(*)")
+        .order("created_at", { ascending: false });
+
+      if (!errClientes && supaClientes && supaClientes.length > 0) {
+        const mappedClients: LocalCliente[] = supaClientes.map((c: any, index: number) => ({
+          id: typeof c.id === "number" ? c.id : (index + 100),
+          nome: c.nome || c.empresa || "Cliente",
+          cnpj: c.documento || "",
+          telefone: c.telefone || "",
+          cidade: c.endereco || "",
+          email: c.email || "",
+          contato: c.contato || "",
+        }));
+
+        // Unifica com os mocks para não perder referências pré-existentes
+        const combinedClients = [...mappedClients];
+        mockClientes.forEach((mc) => {
+          if (!combinedClients.some((c) => c.nome.toLowerCase() === mc.nome.toLowerCase())) {
+            combinedClients.push(mc);
+          }
+        });
+        setDbClientes(combinedClients);
+      }
+
+      if (!errCotacoes && supaCotacoes && supaCotacoes.length > 0) {
+        const newPedidosPorCliente: Record<number, Pedido[]> = { ...mockPedidos };
+        const newItensPorPedido: Record<string, ItemPedido[]> = { ...mockItens };
+
+        supaCotacoes.forEach((cot: any, idx: number) => {
+          const numId = cot.numero || `COT-DB-${cot.id ? String(cot.id).slice(0, 5) : idx + 1}`;
+          const clientMatch = dbClientes.find(
+            (c) => c.nome.toLowerCase() === (cot.cliente_nome || "").toLowerCase()
+          ) || dbClientes[0];
+
+          const cId = clientMatch ? clientMatch.id : 1;
+          if (!newPedidosPorCliente[cId]) {
+            newPedidosPorCliente[cId] = [];
+          }
+
+          if (!newPedidosPorCliente[cId].some((p) => p.id === numId)) {
+            newPedidosPorCliente[cId].unshift({
+              id: numId,
+              data: cot.data || new Date().toISOString().slice(0, 10),
+              status: cot.status === 'aprovado' ? 'Aprovado' : cot.status === 'rejeitado' ? 'Cancelado' : cot.status === 'pendente' ? 'Pendente' : 'Rascunho',
+              clienteNome: cot.cliente_nome,
+              total: Number(cot.valor_total) || 0
+            });
+          }
+
+          if (cot.cotacao_itens && cot.cotacao_itens.length > 0) {
+            newItensPorPedido[numId] = cot.cotacao_itens.map((it: any, itemIdx: number) => ({
+              id: it.ordem !== undefined ? it.ordem + 1 : itemIdx + 1,
+              descricao: it.descricao || it.produto || `Peça #${itemIdx + 1}`,
+              material: it.material || "Aço Carbono",
+              medida: it.medida || "Conforme desenho",
+              quantidade: Number(it.quantidade) || 1,
+              valorUnit: Number(it.valor_unitario) || 0,
+              observacoes: it.observacao || "",
+              foto: it.desenho_url || undefined
+            }));
+          }
+        });
+
+        setDbPedidosPorCliente(newPedidosPorCliente);
+        setDbItensPorPedido(newItensPorPedido);
+      }
+    } catch (error) {
+      console.warn("Conexão ao Supabase em modo local:", error);
+    } finally {
+      setIsLoadingDb(false);
+    }
+  }, [dbClientes]);
+
+  useEffect(() => {
+    loadDatabaseData();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const pedidos = dbPedidosPorCliente[clienteId] ?? [];
+  const itens: ItemPedido[] = pedidoId ? (dbItensPorPedido[pedidoId] ?? []) : [];
+  const cliente = dbClientes.find((c) => c.id === clienteId) ?? null;
   const pedido = pedidos.find((p) => p.id === pedidoId) ?? null;
 
   useEffect(() => {
-    const pedidosDoCliente = pedidosPorCliente[clienteId] ?? [];
+    const pedidosDoCliente = dbPedidosPorCliente[clienteId] ?? [];
     const pedidoValido = pedidosDoCliente.some((p) => p.id === pedidoId);
-    if (!pedidoValido) {
+    if (!pedidoValido && pedidosDoCliente.length > 0) {
       setPedidoId(pedidosDoCliente[0]?.id ?? "");
     }
-  }, [clienteId, pedidoId, setPedidoId]);
+  }, [clienteId, pedidoId, dbPedidosPorCliente, setPedidoId]);
 
   useEffect(() => {
     setPecaAtiva(itens[0]?.id ?? 1);
@@ -53,7 +158,7 @@ export default function Proposals() {
     (base64: string) => {
       setFotosPorPeca((prev) => ({ ...prev, [pecaAtiva]: base64 }));
     },
-    [pecaAtiva]
+    [pecaAtiva, setFotosPorPeca]
   );
 
   const readFileAsBase64 = (file: File) => {
@@ -67,9 +172,9 @@ export default function Proposals() {
 
   useEffect(() => {
     const handlePaste = (e: ClipboardEvent) => {
-      const items = e.clipboardData?.items;
-      if (!items) return;
-      for (const item of items) {
+      const pasteItems = e.clipboardData?.items;
+      if (!pasteItems) return;
+      for (const item of pasteItems) {
         if (item.type.startsWith("image/")) {
           const file = item.getAsFile();
           if (file) readFileAsBase64(file);
@@ -99,6 +204,84 @@ export default function Proposals() {
     window.print();
   };
 
+  // Salvar cotação ativa no Supabase (cotacoes + cotacao_itens)
+  const handleSaveToDatabase = async () => {
+    if (!pedidoId || !cliente) return;
+    setIsSavingDb(true);
+    setStatusFeedback(null);
+
+    try {
+      const totalGeral = itens.reduce((acc, it) => acc + (it.valorUnit * it.quantidade), 0);
+      const statusMap: Record<string, StatusCotacao> = {
+        'Aprovado': 'aprovado',
+        'Pendente': 'pendente',
+        'Cancelado': 'rejeitado',
+        'Rascunho': 'rascunho',
+      };
+      const statusSupa: StatusCotacao = statusMap[pedido?.status || 'Pendente'] || 'pendente';
+
+      // 1. Insere ou atualiza cabeçalho da cotação
+      const { data: cotacaoSalva, error: cotErr } = await db
+        .from("cotacoes")
+        .upsert(
+          {
+            numero: pedidoId,
+            data: pedido?.data || new Date().toISOString().slice(0, 10),
+            cliente_nome: cliente.nome,
+            contato: cliente.contato || "",
+            telefone: cliente.telefone || "",
+            email: cliente.email || "",
+            status: statusSupa,
+            observacoes: `Proposta gerada no Usicorte Vendas para ${cliente.nome}`,
+            valor_total: totalGeral,
+          },
+          { onConflict: 'numero' }
+        )
+        .select()
+        .single();
+
+      if (cotErr) throw cotErr;
+
+      // 2. Insere itens
+      if (cotacaoSalva?.id && itens.length > 0) {
+        // Limpa itens anteriores da cotação para re-gravação limpa
+        await db.from("cotacao_itens").delete().eq("cotacao_id", cotacaoSalva.id);
+
+        const itensPayload = itens.map((it, idx) => ({
+          cotacao_id: cotacaoSalva.id,
+          ordem: idx,
+          produto: it.descricao,
+          material: it.material,
+          medida: it.medida,
+          descricao: it.descricao,
+          observacao: it.observacoes || "",
+          quantidade: it.quantidade,
+          valor_unitario: it.valorUnit,
+          valor_total: it.valorUnit * it.quantidade,
+          desenho_url: fotosPorPeca[it.id] || null,
+          cortado: false,
+        }));
+
+        const { error: itemsErr } = await db.from("cotacao_itens").insert(itensPayload);
+        if (itemsErr) throw itemsErr;
+      }
+
+      setStatusFeedback({
+        type: 'success',
+        message: `Cotação ${pedidoId} e ${itens.length} itens gravados no banco Supabase com sucesso!`
+      });
+      setTimeout(() => setStatusFeedback(null), 4500);
+    } catch (err: any) {
+      console.error("Erro ao salvar no banco:", err);
+      setStatusFeedback({
+        type: 'error',
+        message: `Falha ao gravar no banco: ${err?.message || 'Verifique as permissões de acesso'}`
+      });
+    } finally {
+      setIsSavingDb(false);
+    }
+  };
+
   const handleExportCSV = () => {
     if (!itens.length) return;
     const header = ["Peça", "Descrição", "Material", "Medida", "Qtd", "Valor Unit.", "Total", "Observações"];
@@ -110,7 +293,7 @@ export default function Proposals() {
       i.quantidade,
       i.valorUnit.toFixed(2),
       (i.valorUnit * i.quantidade).toFixed(2),
-      `"${i.observacoes}"`,
+      `"${i.observacoes || ""}"`,
     ]);
     const csv = [header, ...rows].map((r) => r.join(";")).join("\n");
     downloadFile(csv, `${pedidoId}.csv`, "text/csv;charset=utf-8;");
@@ -122,6 +305,7 @@ export default function Proposals() {
       pedido: pedidoId,
       cliente: cliente,
       itens: itens,
+      fotos: fotosPorPeca
     };
     downloadFile(JSON.stringify(data, null, 2), `${pedidoId}.json`, "application/json");
   };
@@ -139,18 +323,34 @@ export default function Proposals() {
   const hasFotoAtiva = !!fotosPorPeca[pecaAtiva];
 
   return (
-    <div className="flex flex-col h-full min-h-0">
+    <div className="flex flex-col h-full min-h-0 bg-slate-950">
+      {/* Banner de feedback do banco */}
+      {statusFeedback && (
+        <div className={`px-6 py-2 text-xs font-semibold flex items-center gap-2 border-b ${
+          statusFeedback.type === 'success' 
+            ? 'bg-emerald-950/80 border-emerald-800 text-emerald-300' 
+            : 'bg-rose-950/80 border-rose-800 text-rose-300'
+        }`}>
+          {statusFeedback.type === 'success' ? <CheckCircle2 size={15} /> : <AlertCircle size={15} />}
+          <span>{statusFeedback.message}</span>
+        </div>
+      )}
+
+      {/* Barra superior de controles e filtros */}
       <div className="bg-slate-800/60 border-b border-slate-700/60 px-6 py-4 space-y-4 flex-shrink-0">
         <div className="flex flex-wrap items-end gap-4">
-          <div className="flex flex-col gap-1 min-w-[200px]">
-            <label className="text-slate-400 text-xs font-medium uppercase tracking-wider">Cliente</label>
+          <div className="flex flex-col gap-1 min-w-[220px]">
+            <label className="text-slate-400 text-xs font-medium uppercase tracking-wider flex items-center justify-between">
+              <span>Cliente</span>
+              {isLoadingDb && <span className="text-[10px] text-amber-400 animate-pulse">Sincronizando...</span>}
+            </label>
             <div className="relative">
               <select
                 value={clienteId}
                 onChange={(e) => setClienteId(Number(e.target.value))}
                 className="w-full bg-slate-700 border border-slate-600 text-white text-sm rounded-lg px-3 py-2 pr-8 appearance-none focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/40 cursor-pointer"
               >
-                {clientes.map((c) => (
+                {dbClientes.map((c) => (
                   <option key={c.id} value={c.id}>{c.nome}</option>
                 ))}
               </select>
@@ -158,7 +358,7 @@ export default function Proposals() {
             </div>
           </div>
 
-          <div className="flex flex-col gap-1 min-w-[200px]">
+          <div className="flex flex-col gap-1 min-w-[220px]">
             <label className="text-slate-400 text-xs font-medium uppercase tracking-wider">Pedido / Cotação</label>
             <div className="relative">
               <select
@@ -181,9 +381,9 @@ export default function Proposals() {
                 <button
                   key={opt.value}
                   onClick={() => setViewType(opt.value)}
-                  className={`px-3 py-1.5 text-xs rounded-md font-medium transition-all ${
+                  className={`px-3 py-1.5 text-xs rounded-md font-medium transition-all cursor-pointer ${
                     viewType === opt.value
-                      ? "bg-amber-500 text-slate-900"
+                      ? "bg-amber-500 text-slate-900 font-bold shadow"
                       : "text-slate-400 hover:text-white hover:bg-slate-600"
                   }`}
                 >
@@ -194,38 +394,63 @@ export default function Proposals() {
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2">
+        {/* Botões de Ação */}
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          {/* Botão de Salvar no Banco */}
+          <button
+            onClick={handleSaveToDatabase}
+            disabled={isSavingDb || !pedidoId}
+            className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-semibold px-3.5 py-2 rounded-lg transition-colors shadow-sm cursor-pointer"
+            title="Salvar esta cotação e seus itens diretamente na tabela cotacoes do Supabase"
+          >
+            <Save size={14} className={isSavingDb ? "animate-spin" : ""} />
+            {isSavingDb ? "Gravando no Banco..." : "Salvar no Banco (Supabase)"}
+          </button>
+
+          {/* Botão de Atualizar do Banco */}
+          <button
+            onClick={loadDatabaseData}
+            disabled={isLoadingDb}
+            className="flex items-center gap-1.5 bg-slate-700 hover:bg-slate-600 text-slate-200 text-xs font-medium px-3 py-2 rounded-lg transition-colors border border-slate-600 cursor-pointer"
+            title="Recarregar cotações e clientes mais recentes do Supabase"
+          >
+            <RefreshCw size={13} className={isLoadingDb ? "animate-spin" : ""} />
+            Atualizar
+          </button>
+
+          <div className="h-5 w-px bg-slate-700 mx-1 hidden sm:block" />
+
           <button
             onClick={handlePrint}
-            className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-white text-xs font-medium px-3 py-2 rounded-lg transition-colors border border-slate-600 hover:border-slate-500"
+            className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-white text-xs font-medium px-3 py-2 rounded-lg transition-colors border border-slate-600 hover:border-slate-500 cursor-pointer"
           >
             <Printer size={14} />
             Imprimir Pedido (A4)
           </button>
           <button
             onClick={handlePrint}
-            className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-white text-xs font-medium px-3 py-2 rounded-lg transition-colors border border-slate-600 hover:border-slate-500"
+            className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-white text-xs font-medium px-3 py-2 rounded-lg transition-colors border border-slate-600 hover:border-slate-500 cursor-pointer"
           >
             <Tag size={14} />
             Imprimir Etiqueta da Peça
           </button>
           <button
             onClick={handlePrint}
-            className="flex items-center gap-2 bg-amber-600 hover:bg-amber-500 text-white text-xs font-medium px-3 py-2 rounded-lg transition-colors"
+            className="flex items-center gap-2 bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold px-3 py-2 rounded-lg transition-colors cursor-pointer"
           >
             <FileText size={14} />
             Imprimir Proposta (A4)
           </button>
           <button
             onClick={handleExportCSV}
-            className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs font-medium px-3 py-2 rounded-lg transition-colors border border-slate-600"
+            className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs font-medium px-3 py-2 rounded-lg transition-colors border border-slate-600 cursor-pointer"
           >
             <Download size={14} />
             Exportar CSV
           </button>
           <button
             onClick={handleExportJSON}
-            className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs font-medium px-3 py-2 rounded-lg transition-colors border border-slate-600"
+            className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs font-medium px-3 py-2 rounded-lg transition-colors border border-slate-600 cursor-pointer"
           >
             <Download size={14} />
             Exportar JSON
@@ -233,6 +458,7 @@ export default function Proposals() {
         </div>
       </div>
 
+      {/* Conteúdo Principal / Visualizador */}
       <div className="flex flex-1 min-h-0 overflow-hidden">
         {viewType === "etiqueta-80x80" && (
           <div className="w-72 flex-shrink-0 bg-slate-800/40 border-r border-slate-700/60 flex flex-col overflow-y-auto">
@@ -243,7 +469,7 @@ export default function Proposals() {
                   <button
                     key={item.id}
                     onClick={() => setPecaAtiva(item.id)}
-                    className={`w-10 h-10 rounded-lg font-bold text-sm transition-all relative ${
+                    className={`w-10 h-10 rounded-lg font-bold text-sm transition-all relative cursor-pointer ${
                       item.id === pecaAtiva
                         ? "bg-amber-500 text-slate-900 shadow-lg shadow-amber-500/30"
                         : "bg-slate-700 text-slate-300 hover:bg-slate-600 border border-slate-600"
@@ -272,7 +498,7 @@ export default function Proposals() {
 
               <div className="flex items-center gap-2 bg-slate-700/40 border border-dashed border-slate-600 rounded-lg px-3 py-2.5 text-slate-400 text-xs">
                 <Clipboard size={13} />
-                <span>Pressione <kbd className="bg-slate-600 px-1 py-0.5 rounded text-slate-300">Ctrl+V</kbd> para colar</span>
+                <span>Pressione <kbd className="bg-slate-600 px-1 py-0.5 rounded text-slate-300 font-mono text-[10px]">Ctrl+V</kbd> para colar</span>
               </div>
 
               {hasFotoAtiva ? (
@@ -284,7 +510,7 @@ export default function Proposals() {
                     className="w-full h-36 object-contain bg-white"
                   />
                   <div className="absolute top-2 right-2">
-                    <span className="bg-green-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">OK</span>
+                    <span className="bg-green-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow">OK</span>
                   </div>
                 </div>
               ) : (
@@ -303,7 +529,7 @@ export default function Proposals() {
               />
               <button
                 onClick={() => fileInputRef.current?.click()}
-                className="w-full flex items-center justify-center gap-2 bg-slate-700 hover:bg-slate-600 border border-slate-600 hover:border-amber-500/50 text-slate-300 hover:text-white text-xs font-medium py-2.5 rounded-lg transition-all"
+                className="w-full flex items-center justify-center gap-2 bg-slate-700 hover:bg-slate-600 border border-slate-600 hover:border-amber-500/50 text-slate-300 hover:text-white text-xs font-medium py-2.5 rounded-lg transition-all cursor-pointer"
               >
                 <Upload size={13} />
                 {hasFotoAtiva ? "Alterar Arquivo" : "Carregar Arquivo"}
@@ -312,7 +538,7 @@ export default function Proposals() {
               {hasFotoAtiva && (
                 <button
                   onClick={handleRemoveFoto}
-                  className="w-full flex items-center justify-center gap-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 hover:border-red-500/60 text-red-400 text-xs font-medium py-2.5 rounded-lg transition-all"
+                  className="w-full flex items-center justify-center gap-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 hover:border-red-500/60 text-red-400 text-xs font-medium py-2.5 rounded-lg transition-all cursor-pointer"
                 >
                   <Trash2 size={13} />
                   Remover Foto — Peça #{pecaAtiva}
@@ -370,3 +596,4 @@ export default function Proposals() {
     </div>
   );
 }
+

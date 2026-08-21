@@ -337,14 +337,14 @@ const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNu
     thicknessStr: itemThickness
   });
 
-  // Theoretical unit price calculated in cascade: Peso Unitário (Kg) * Preço/Kg (R$) com trava toFixed(2)
+  // Theoretical unit price calculated in cascade: Peso Unitário (Kg) * Preço/Kg (R$) arredondando para cima inteiro (Math.ceil)
   const calculatedUnitPrice = currentFormUnitWeightKg > 0 && currentFormPriceKg > 0
-    ? Number((currentFormUnitWeightKg * currentFormPriceKg).toFixed(2))
+    ? Math.ceil(currentFormUnitWeightKg * currentFormPriceKg)
     : 0;
 
-  // Live unit price for form calculations (prioritizes active input or cascading result, com trava toFixed(2))
+  // Live unit price for form calculations (prioritizes active input or cascading result, arredondando para cima inteiro)
   const rawFormUnitPrice = parseNumberBR(itemUnitPrice) || calculatedUnitPrice;
-  const currentFormUnitPrice = Number(rawFormUnitPrice.toFixed(2));
+  const currentFormUnitPrice = Math.ceil(rawFormUnitPrice);
   const currentFormSubtotal = calculateItemSubtotal(currentFormUnitPrice, currentFormQty > 0 ? currentFormQty : 1);
 
   // Helper to recompute and update the Unit Price (R$) field whenever dimensions, constant or price/kg changes
@@ -377,7 +377,8 @@ const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNu
     });
 
     if (unitPrice > 0) {
-      setItemUnitPrice(unitPrice.toFixed(2).replace('.', ','));
+      const roundedPrice = Math.ceil(unitPrice);
+      setItemUnitPrice(roundedPrice.toFixed(2).replace('.', ','));
     }
   };
 
@@ -845,7 +846,7 @@ const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNu
     }
 
     const rawUnitPriceNum = parseNumberBR(itemUnitPrice) || calculatedUnitPrice;
-    const unitPriceNum = Number(rawUnitPriceNum.toFixed(2));
+    const unitPriceNum = Math.ceil(rawUnitPriceNum);
     if (unitPriceNum <= 0) {
       setErrorMessage('O valor unitário deve ser maior que zero (R$). Verifique as medidas ou o Preço/Kg.');
       setTimeout(() => setErrorMessage(null), 3500);
@@ -2342,7 +2343,7 @@ const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNu
             <div className="field field-resultado lg:col-span-2 space-y-1">
               <label htmlFor="valorUnitario" className="block text-xs font-bold text-indigo-900 flex items-center justify-between">
                 <span>Valor Unitário (R$)</span>
-                <span className="text-[9px] font-bold text-indigo-600 bg-indigo-50 px-1 rounded">Auto</span>
+                <span className="text-[9px] font-bold text-indigo-600 bg-indigo-50 px-1 rounded">Inteiro ↑</span>
               </label>
               <input
                 type="text"
@@ -2357,7 +2358,7 @@ const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNu
             <div className="field field-resultado lg:col-span-2 space-y-1">
               <label htmlFor="valorTotal" className="block text-xs font-bold text-slate-700 flex items-center justify-between">
                 <span>Valor Total (R$)</span>
-                <span className="text-[9px] font-bold text-rose-700 bg-rose-50 px-1 rounded">Subtotal</span>
+                <span className="text-[9px] font-bold text-rose-700 bg-rose-50 px-1 rounded">Inteiro ↑</span>
               </label>
               <input
                 type="text"
@@ -2442,10 +2443,10 @@ const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNu
               </div>
               <div className="text-[10px] font-mono font-bold text-indigo-700 bg-white px-2 py-0.5 rounded border border-indigo-200">
                 {itemGeometryType === 'bucha' || itemGeometryType === 'TUBO_BUCHA'
-                  ? 'Peso = ((ØExt² - ØInt²) × Comp × k / 1000).toFixed(3) | Unitário = (Peso × R$/Kg).toFixed(2)'
+                  ? 'Peso = ((ØExt² - ØInt²) × Comp × k / 1000).toFixed(3) | Unitário = Math.ceil(Peso × R$/Kg) | Total = Math.ceil(Unitário × Qtd)'
                   : itemGeometryType === 'macico' || itemGeometryType === 'REDONDO_QUADRADO'
-                  ? 'Peso = (d² × Comp × k / 1000).toFixed(3) | Unitário = (Peso × R$/Kg).toFixed(2)'
-                  : 'Peso = (Esp × Larg × Comp × k / 1000).toFixed(3) | Unitário = (Peso × R$/Kg).toFixed(2)'}
+                  ? 'Peso = (d² × Comp × k / 1000).toFixed(3) | Unitário = Math.ceil(Peso × R$/Kg) | Total = Math.ceil(Unitário × Qtd)'
+                  : 'Peso = (Esp × Larg × Comp × k / 1000).toFixed(3) | Unitário = Math.ceil(Peso × R$/Kg) | Total = Math.ceil(Unitário × Qtd)'}
               </div>
             </div>
 
