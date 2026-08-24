@@ -48,20 +48,45 @@
   }
 
   /* 3. Regras de exibição por Modo de Impressão */
-  /* Modo Pedido: oculta etiqueta e proposta, exibe pedido A4 */
+  /* Modo Pedido: oculta etiqueta, corte e proposta, exibe pedido A4 */
   body.print-pedido .secao-etiqueta { display: none !important; }
   body.print-pedido .secao-proposta { display: none !important; }
+  body.print-pedido .secao-proposta-resumida { display: none !important; }
+  body.print-pedido .secao-corte { display: none !important; }
   body.print-pedido .secao-pedido { display: block !important; }
 
-  /* Modo Etiqueta: oculta pedido e proposta, exibe etiqueta 80x80 */
+  /* Modo Etiqueta: oculta pedido, corte e proposta, exibe etiqueta 80x80 */
   body.print-etiqueta .secao-pedido { display: none !important; }
   body.print-etiqueta .secao-proposta { display: none !important; }
+  body.print-etiqueta .secao-proposta-resumida { display: none !important; }
+  body.print-etiqueta .secao-corte { display: none !important; }
   body.print-etiqueta .secao-etiqueta { display: flex !important; }
 
-  /* Modo Proposta: oculta etiqueta e pedido, exibe proposta A4 */
-  body.print-proposta .secao-etiqueta { display: none !important; }
-  body.print-proposta .secao-pedido { display: none !important; }
-  body.print-proposta .secao-proposta { display: block !important; }
+  /* Modo Proposta / Geral: */
+  body.print-proposta .secao-etiqueta,
+  body.print-geral .secao-etiqueta { display: none !important; }
+  body.print-proposta .secao-pedido,
+  body.print-geral .secao-pedido { display: none !important; }
+  body.print-proposta .secao-corte,
+  body.print-geral .secao-corte { display: none !important; }
+  body.print-proposta .secao-proposta-resumida,
+  body.print-geral .secao-proposta-resumida { display: none !important; }
+  body.print-proposta .secao-proposta,
+  body.print-geral .secao-proposta { display: block !important; }
+
+  /* Modo Empresa: */
+  body.print-empresa .secao-etiqueta { display: none !important; }
+  body.print-empresa .secao-pedido { display: none !important; }
+  body.print-empresa .secao-corte { display: none !important; }
+  body.print-empresa .secao-proposta { display: none !important; }
+  body.print-empresa .secao-proposta-resumida { display: block !important; }
+
+  /* Modo Corte: */
+  body.print-corte .secao-etiqueta { display: none !important; }
+  body.print-corte .secao-pedido { display: none !important; }
+  body.print-corte .secao-proposta { display: none !important; }
+  body.print-corte .secao-proposta-resumida { display: none !important; }
+  body.print-corte .secao-corte { display: block !important; }
 
   /* ---------------------------------------------------
      MODELO 1: PROPOSTA A4 INTEIRO
@@ -334,8 +359,11 @@
 
 .botoes-impressao {
   display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 10px;
   flex-wrap: wrap;
+  width: 100%;
   border-bottom: 1px solid var(--border-color, #1e293b);
   padding-bottom: 12px;
 }

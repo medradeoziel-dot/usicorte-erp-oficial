@@ -122,7 +122,7 @@ export default function DashboardView({ clients, currentQuote, trocarTela, setIs
             <span className="text-2xl font-mono font-black text-emerald-400 block">
               {formatCurrency(currentQuote.totalAmount || currentQuote.grandTotal || 0)}
             </span>
-            <span className="text-[10px] text-slate-400 font-medium">{currentQuote.quoteNumber || 'COT-2026-0001'}</span>
+            <span className="text-[10px] text-slate-400 font-medium">{currentQuote.quoteNumber || 'Sem cotação aberta'}</span>
           </div>
           <div className="p-3 bg-emerald-500/10 text-emerald-400 rounded-xl border border-emerald-500/20"><TrendingUp className="w-5 h-5" /></div>
         </div>

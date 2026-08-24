@@ -33,33 +33,15 @@ export default function DailyOSModule({ clients, onNavigateToClients }: DailyOSM
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.filter(os => !String(os.clienteId).startsWith('seed-') && os.id !== '1001');
+        }
       } catch (e) {
         console.error('Erro ao carregar ordens de serviço salvas', e);
       }
     }
-    // Initial sample seed if empty
-    const dataHoje = new Date().toISOString().split('T')[0];
-    const horaAtual = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-    return [
-      {
-        id: '1001',
-        clienteId: 'seed-1',
-        clienteNome: 'Brasil Tecnologias Ltda',
-        data: dataHoje,
-        status: 'ABERTA',
-        itens: [
-          {
-            id: 'item-os-1',
-            descricao: 'Corte Plasma Chapa Aço SAE 1020 1/2" x 1200 x 2400 mm',
-            quantidade: 2,
-            valorUnitario: 6316.57,
-            valorTotal: 12633.14,
-            horario: horaAtual
-          }
-        ]
-      }
-    ];
+    return [];
   });
 
   const [clienteSelecionado, setClienteSelecionado] = useState('');
@@ -74,12 +56,8 @@ export default function DailyOSModule({ clients, onNavigateToClients }: DailyOSM
     localStorage.setItem(STORAGE_KEY, JSON.stringify(ordens));
   }, [ordens]);
 
-  // Fallback client list if no props passed
-  const listaClientes = clients && clients.length > 0 ? clients : [
-    { id: '1', name: 'Metalúrgica Silva', document: '12.345.678/0001-90', phone: '(11) 98888-7777', email: 'contato@metalurgicasilva.com.br', type: 'CNPJ', cep: '', street: '', neighborhood: '', city: 'São Paulo', state: 'SP', situation: 'ATIVA', enabled: true, registrationDate: '' },
-    { id: '2', name: 'Indústria Mecânica AçoForte', document: '98.765.432/0001-10', phone: '(11) 97777-6666', email: 'compras@acoforte.ind.br', type: 'CNPJ', cep: '', street: '', neighborhood: '', city: 'Santo André', state: 'SP', situation: 'ATIVA', enabled: true, registrationDate: '' },
-    { id: '3', name: 'Usinagem Precision', document: '45.678.901/0001-22', phone: '(11) 96666-5555', email: 'precision@usinagem.com.br', type: 'CNPJ', cep: '', street: '', neighborhood: '', city: 'Bernardo do Campo', state: 'SP', situation: 'ATIVA', enabled: true, registrationDate: '' }
-  ];
+  // Client list from props
+  const listaClientes = clients && clients.length > 0 ? clients : [];
 
   // 1. Lógica Principal: Adicionar item à OS do Dia (Cria ou Reutiliza OS ABERTA do Cliente)
   const handleAdicionarItem = (e: React.FormEvent) => {

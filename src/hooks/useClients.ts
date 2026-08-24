@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { Client } from '../types';
-import { INITIAL_CLIENTS } from '../data/initialData';
 import { fetchClientesDb, saveClienteDb, deleteClienteDb } from '../lib/db';
 
 export function useClients() {
@@ -16,22 +15,21 @@ export function useClients() {
       let localClients: Client[] = [];
       if (saved) {
         try {
-          localClients = JSON.parse(saved);
-          setClients(localClients);
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) {
+            // Remove eventuais resquícios de sementes antigas de teste
+            localClients = parsed.filter(c => !String(c.id).startsWith('seed-'));
+            setClients(localClients);
+          }
         } catch (e) {
-          console.error('Error loading saved clients');
+          console.error('Error loading saved clients from localStorage:', e);
         }
-      } else {
-        localClients = INITIAL_CLIENTS;
-        setClients(INITIAL_CLIENTS);
-        localStorage.setItem('s_clientes', JSON.stringify(INITIAL_CLIENTS));
       }
 
       // 2. Tenta carregar do Supabase em background
       try {
         const dbClients = await fetchClientesDb();
         if (dbClients && dbClients.length > 0) {
-          // Mescla com dados locais se necessário
           setClients(dbClients);
           localStorage.setItem('s_clientes', JSON.stringify(dbClients));
           setIsDbSynced(true);
@@ -47,6 +45,7 @@ export function useClients() {
 
     loadData();
   }, []);
+
 
   const saveClientsToStorage = (updatedList: Client[]) => {
     setClients(updatedList);

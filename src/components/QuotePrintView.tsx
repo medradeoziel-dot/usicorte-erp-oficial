@@ -1,4 +1,5 @@
 import React from "react";
+import { formatSafeDate } from "../utils/calculator";
 
 // Types/Interfaces
 export interface QuoteItem {
@@ -98,8 +99,7 @@ export const QuotePrintView: React.FC<QuotePrintViewProps> = (props) => {
 
   const dataEmissao =
     props.dataEmissao ||
-    quote?.date ||
-    new Date().toLocaleDateString("pt-BR");
+    (quote?.date ? formatSafeDate(quote.date) : formatSafeDate(new Date()));
 
   const validade =
     props.validade ||

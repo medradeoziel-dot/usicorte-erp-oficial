@@ -51,7 +51,8 @@ export default function UsicorteCalculatorModal({
   onAddItemToQuote
 }: UsicorteCalculatorModalProps) {
   // Form State
-  const [materialIndex, setMaterialIndex] = useState<string>('18'); // Default: CHAPA ASTM 36
+  const defaultLaserIdx = tabelaConstantes.findIndex(m => m.nome === 'LASER A36');
+  const [materialIndex, setMaterialIndex] = useState<string>(() => defaultLaserIdx !== -1 ? String(defaultLaserIdx) : '19'); // Default: LASER A36
   const [tipo, setTipo] = useState<'chapa' | 'macico' | 'bucha'>('chapa');
   const [precoKg, setPrecoKg] = useState<string>('22');
   
@@ -60,7 +61,7 @@ export default function UsicorteCalculatorModal({
   const [largura, setLargura] = useState<string>('');
   const [comprimento, setComprimento] = useState<string>('');
   const [quantidade, setQuantidade] = useState<string>('1');
-  const [descricao, setDescricao] = useState<string>('CHAPA ASTM 36');
+  const [descricao, setDescricao] = useState<string>('LASER A36');
   const [observacao, setObservacao] = useState<string>('');
 
   const [showBitolasModal, setShowBitolasModal] = useState<boolean>(false);

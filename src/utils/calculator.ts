@@ -21,6 +21,78 @@ export function formatWeightKg(value: number, decimals: number = 3): string {
   return `${formatNumberBR(num, decimals)} Kg`;
 }
 
+/**
+ * Formata com segurança uma data recebida (seja ISO, YYYY-MM-DD, DD/MM/YYYY, timestamp ou nulo/inválido).
+ * Se a data for inválida, vazia ou nula, usa a data atual (new Date()) como fallback seguro, impedindo o texto '(Invalid Date)'.
+ */
+export function formatSafeDate(dateInput?: string | number | Date | null): string {
+  if (!dateInput) {
+    return new Date().toLocaleDateString('pt-BR');
+  }
+
+  if (dateInput instanceof Date) {
+    return isNaN(dateInput.getTime())
+      ? new Date().toLocaleDateString('pt-BR')
+      : dateInput.toLocaleDateString('pt-BR');
+  }
+
+  const str = String(dateInput).trim();
+  if (!str || str.toLowerCase() === 'invalid date' || str.toLowerCase() === 'null' || str.toLowerCase() === 'undefined') {
+    return new Date().toLocaleDateString('pt-BR');
+  }
+
+  // Se já está no formato DD/MM/YYYY
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(str)) {
+    return str;
+  }
+
+  // Se estiver no formato YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    const [y, m, d] = str.split('-');
+    return `${d}/${m}/${y}`;
+  }
+
+  const parsed = new Date(str);
+  if (isNaN(parsed.getTime())) {
+    return new Date().toLocaleDateString('pt-BR');
+  }
+
+  return parsed.toLocaleDateString('pt-BR');
+}
+
+/**
+ * Retorna uma data válida no formato ISO (YYYY-MM-DD) para inputs e registros no banco.
+ * Se a data for nula ou inválida, usa a data atual (new Date()) como fallback.
+ */
+export function getSafeISODate(dateInput?: string | number | Date | null): string {
+  if (!dateInput) {
+    return new Date().toISOString().split('T')[0];
+  }
+
+  const str = String(dateInput).trim();
+  if (!str || str.toLowerCase() === 'invalid date' || str.toLowerCase() === 'null' || str.toLowerCase() === 'undefined') {
+    return new Date().toISOString().split('T')[0];
+  }
+
+  // Se já está no formato YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    return str;
+  }
+
+  // Se está no formato DD/MM/YYYY
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(str)) {
+    const [d, m, y] = str.split('/');
+    return `${y}-${m}-${d}`;
+  }
+
+  const parsed = new Date(str);
+  if (isNaN(parsed.getTime())) {
+    return new Date().toISOString().split('T')[0];
+  }
+
+  return parsed.toISOString().split('T')[0];
+}
+
 export function parseNumberBR(input: string | number): number {
   if (typeof input === 'number') return isNaN(input) ? 0 : input;
   if (!input) return 0;

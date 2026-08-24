@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Quote } from '../types';
-import { formatCurrency } from '../utils/calculator';
+import { formatCurrency, formatSafeDate } from '../utils/calculator';
 import { 
   History, 
   Search, 
@@ -33,12 +33,31 @@ export default function QuoteHistoryModal({
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
 
-  const filteredQuotes = quotes.filter(q => {
+  // Deduplicação preventiva por id / quoteNumber
+  const uniqueQuotes = useMemo(() => {
+    const seen = new Set<string>();
+    const result: Quote[] = [];
+    quotes.forEach(q => {
+      const key = (q.quoteNumber || q.id || '').trim().toLowerCase();
+      if (key && !seen.has(key)) {
+        seen.add(key);
+        result.push(q);
+      } else if (!key) {
+        result.push(q);
+      }
+    });
+    return result;
+  }, [quotes]);
+
+  const filteredQuotes = uniqueQuotes.filter(q => {
+    const quoteNum = q.quoteNumber || q.id || '';
+    const cName = q.clientName || '';
+    const cPerson = q.contactPerson || '';
     const matchesSearch = 
-      q.quoteNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      q.clientName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (q.contactPerson && q.contactPerson.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      q.items.some(i => i.description.toLowerCase().includes(searchTerm.toLowerCase()));
+      quoteNum.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      cName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      cPerson.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (q.items || []).some(i => (i.description || i.descricao || '').toLowerCase().includes(searchTerm.toLowerCase()));
 
     const matchesStatus = filterStatus === 'ALL' || q.status === filterStatus;
 
@@ -178,7 +197,7 @@ export default function QuoteHistoryModal({
                     <span className="font-mono font-bold text-indigo-700 text-sm">{quote.quoteNumber}</span>
                     {getStatusBadge(quote.status)}
                     <span className="text-xs text-slate-400 flex items-center gap-1 font-mono">
-                      <Calendar className="w-3 h-3" /> {quote.date}
+                      <Calendar className="w-3 h-3" /> {formatSafeDate(quote.date || quote.createdAt)}
                     </span>
                   </div>
 

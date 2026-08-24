@@ -1,5 +1,6 @@
 
 import type { Cliente, ItemPedido, Pedido } from "../lib/types";
+import { formatSafeDate } from "../utils/calculator";
 
 interface A4PreviewProps {
   pedido: Pedido;
@@ -42,7 +43,7 @@ export default function A4Preview({ pedido, cliente, itens, fotosPorPeca, mode }
           <div className="a4-cotacao-box">
             <div className="a4-cotacao-label">COTAÇÃO / PROPOSTA</div>
             <div className="a4-cotacao-num">{pedido.id}</div>
-            <div className="a4-cotacao-date">Data: {new Date(pedido.data).toLocaleDateString("pt-BR")}</div>
+            <div className="a4-cotacao-date">Data: {formatSafeDate(pedido.data)}</div>
             <div className={`a4-status-badge a4-status--${pedido.status.toLowerCase().replace(" ", "-")}`}>
               {pedido.status}
             </div>

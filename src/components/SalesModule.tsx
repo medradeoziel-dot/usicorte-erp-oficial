@@ -11,6 +11,8 @@ import {
   formatCurrency, 
   formatNumberBR, 
   formatWeightKg,
+  formatSafeDate,
+  getSafeISODate,
   formatarMedidasLimpa,
   renderizarTabelaRelatorio,
   parseNumberBR, 
@@ -136,8 +138,8 @@ const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNu
   // Item form state
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [itemGeometryType, setItemGeometryType] = useState<GeometryType>('chapa');
-  const [itemConstantSelect, setItemConstantSelect] = useState<string>('chapa');
-  const [itemConstantName, setItemConstantName] = useState<string>('CHAPA');
+  const [itemConstantSelect, setItemConstantSelect] = useState<string>('laser_a36');
+  const [itemConstantName, setItemConstantName] = useState<string>('LASER A36');
   const [itemConstant, setItemConstant] = useState<string>('0.00785');
   const [itemPricePerKg, setItemPricePerKg] = useState<string>('22,00');
   const [itemDescription, setItemDescription] = useState<string>('');
@@ -211,9 +213,25 @@ const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNu
       if (saved) {
         try {
           localQuotes = JSON.parse(saved);
-          setSavedQuotes(localQuotes);
+          if (Array.isArray(localQuotes)) {
+            // Deduplica e sanitiza o localQuotes inicial
+            const localMap = new Map<string, Quote>();
+            localQuotes.forEach(lq => {
+              const key = String(lq.quoteNumber || lq.id || '').trim().toLowerCase();
+              if (key && !localMap.has(key)) {
+                localMap.set(key, {
+                  ...lq,
+                  date: getSafeISODate(lq.date || lq.createdAt),
+                  createdAt: lq.createdAt && !isNaN(new Date(lq.createdAt).getTime()) ? lq.createdAt : new Date().toISOString(),
+                  updatedAt: lq.updatedAt && !isNaN(new Date(lq.updatedAt).getTime()) ? lq.updatedAt : new Date().toISOString()
+                });
+              }
+            });
+            localQuotes = Array.from(localMap.values());
+            setSavedQuotes(localQuotes);
+          }
         } catch (e) {
-          console.error('Error loading saved quotes');
+          console.error('Error loading saved quotes from localStorage:', e);
         }
       }
 
@@ -221,49 +239,89 @@ const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNu
       try {
         const dbQuotes = await fetchCotacoesDb();
         if (dbQuotes && dbQuotes.length > 0) {
-          const mappedDbQuotes: Quote[] = dbQuotes.map(q => ({
-            id: q.id || q.numero,
-            quoteNumber: q.numero,
-            clientName: q.cliente_nome,
-            contactPerson: q.contato,
-            clientPhone: q.telefone,
-            clientEmail: q.email,
-            date: q.data,
-            validityDays: 10,
-            paymentTerms: 'À Vista',
-            status: mapSupabaseStatusToQuote(q.status),
-            observations: q.observacoes,
-            discount: 0,
-            shipping: 0,
-            subtotalTotal: q.valor_total,
-            grandTotal: q.valor_total,
-            createdAt: q.created_at || new Date().toISOString(),
-            updatedAt: q.updated_at || new Date().toISOString(),
-            items: (q.cotacao_itens || []).map((it, idx) => ({
-              id: String(it.id || idx),
-              date: q.data,
-              companyName: q.cliente_nome,
-              description: it.descricao || 'Item',
-              constant: '0.00785',
-              constantName: it.produto,
-              measure: it.medida || '',
-              diameter: '',
-              widthLength: '',
-              unitPrice: it.valor_unitario,
-              quantity: it.quantidade,
-              subtotal: it.valor_total,
-              notes: it.observacao,
-              drawingImage: it.desenho_url
-            }))
-          }));
+          // Mapeia cotações vindas do Supabase com validação e fallback seguro de data
+          const mappedDbQuotes: Quote[] = dbQuotes.map(q => {
+            const safeDateIso = getSafeISODate(q.data || q.created_at);
+            const safeCreatedAt = q.created_at && !isNaN(new Date(q.created_at).getTime())
+              ? new Date(q.created_at).toISOString()
+              : (q.data && !isNaN(new Date(q.data).getTime()) ? new Date(q.data).toISOString() : new Date().toISOString());
+            const safeUpdatedAt = q.updated_at && !isNaN(new Date(q.updated_at).getTime())
+              ? new Date(q.updated_at).toISOString()
+              : safeCreatedAt;
 
-          const combined = [...mappedDbQuotes];
+            return {
+              id: q.id || q.numero || `db-quote-${Date.now()}`,
+              quoteNumber: q.numero || q.id || 'COT-SEM-NUMERO',
+              clientName: q.cliente_nome || 'Cliente Balcão',
+              contactPerson: q.contato || '',
+              clientPhone: q.telefone || '',
+              clientEmail: q.email || '',
+              date: safeDateIso,
+              validityDays: 10,
+              paymentTerms: 'À Vista',
+              status: mapSupabaseStatusToQuote(q.status),
+              observations: q.observacoes || '',
+              discount: 0,
+              shipping: 0,
+              subtotalTotal: Number(q.valor_total) || 0,
+              grandTotal: Number(q.valor_total) || 0,
+              createdAt: safeCreatedAt,
+              updatedAt: safeUpdatedAt,
+              items: (q.cotacao_itens || []).map((it, idx) => ({
+                id: String(it.id || idx),
+                date: safeDateIso,
+                companyName: q.cliente_nome || 'Cliente Balcão',
+                description: it.descricao || it.produto || 'Item',
+                constant: '0.00785',
+                constantName: it.produto || 'Material',
+                measure: it.medida || '',
+                diameter: '',
+                widthLength: '',
+                unitPrice: Number(it.valor_unitario) || 0,
+                quantity: Number(it.quantidade) || 1,
+                subtotal: Number(it.valor_total) || ((Number(it.valor_unitario) || 0) * (Number(it.quantidade) || 1)),
+                notes: it.observacao || '',
+                drawingImage: it.desenho_url || undefined
+              }))
+            };
+          });
+
+          // Deduplicação: Prioridade total aos dados do Supabase sobre o localStorage
+          const quotesMap = new Map<string, Quote>();
+          const seenKeys = new Set<string>();
+
+          const extractKeys = (q: Quote) => {
+            const keys: string[] = [];
+            if (q.id) keys.push(String(q.id).trim().toLowerCase());
+            if (q.quoteNumber) keys.push(String(q.quoteNumber).trim().toLowerCase());
+            return keys;
+          };
+
+          // 1. Insere todas as cotações do Supabase no mapa
+          mappedDbQuotes.forEach(q => {
+            const primaryKey = String(q.quoteNumber || q.id).trim().toLowerCase();
+            quotesMap.set(primaryKey, q);
+            extractKeys(q).forEach(k => seenKeys.add(k));
+          });
+
+          // 2. Insere cotações do LocalStorage apenas se não existirem no Supabase (por ID ou número)
           localQuotes.forEach(lq => {
-            if (!combined.some(c => c.quoteNumber === lq.quoteNumber)) {
-              combined.push(lq);
+            const keys = extractKeys(lq);
+            const existsInSupabase = keys.some(k => seenKeys.has(k));
+            if (!existsInSupabase) {
+              const primaryKey = String(lq.quoteNumber || lq.id).trim().toLowerCase();
+              const sanitizedLq: Quote = {
+                ...lq,
+                date: getSafeISODate(lq.date || lq.createdAt),
+                createdAt: lq.createdAt && !isNaN(new Date(lq.createdAt).getTime()) ? lq.createdAt : new Date().toISOString(),
+                updatedAt: lq.updatedAt && !isNaN(new Date(lq.updatedAt).getTime()) ? lq.updatedAt : new Date().toISOString()
+              };
+              quotesMap.set(primaryKey, sanitizedLq);
+              keys.forEach(k => seenKeys.add(k));
             }
           });
 
+          const combined = Array.from(quotesMap.values());
           setSavedQuotes(combined);
           localStorage.setItem('s_orcamentos', JSON.stringify(combined));
         }
@@ -979,8 +1037,8 @@ const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNu
 
   const resetItemForm = () => {
     setEditingItemId(null);
-    setItemConstantSelect('chapa');
-    setItemConstantName('CHAPA');
+    setItemConstantSelect('laser_a36');
+    setItemConstantName('LASER A36');
     setItemDescription('');
     setItemConstant('0.00785');
     setItemPricePerKg('22,00');
@@ -1162,7 +1220,7 @@ const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNu
     setClientEmail(quote.clientEmail || '');
     setClientCity(quote.clientCity || '');
     setClientState(quote.clientState || '');
-    setQuoteDate(quote.date);
+    setQuoteDate(getSafeISODate(quote.date || quote.createdAt));
     setValidityDays(quote.validityDays || 10);
     setPaymentTerms(quote.paymentTerms || 'À Vista');
     setQuoteStatus(quote.status || 'Rascunho');

@@ -19,7 +19,7 @@ import {
 import { clientes as mockClientes, pedidosPorCliente as mockPedidos, itensPorPedido as mockItens } from "@/lib/mockData";
 import type { ViewType, ItemPedido, Cliente as LocalCliente, Pedido } from "@/lib/types";
 import { useLocalStorage } from "@/lib/useLocalStorage";
-import { db, type SupabaseCotacao, type SupabaseCliente, type SupabaseCotacaoItem, type StatusCotacao, uploadDesenhoStorage } from "@/lib/db";
+import { db, fetchCotacaoById, type SupabaseCotacao, type SupabaseCliente, type SupabaseCotacaoItem, type StatusCotacao, uploadDesenhoStorage } from "@/lib/db";
 import LabelPreview from "@/components/LabelPreview";
 import A4Preview from "@/components/A4Preview";
 
@@ -29,6 +29,12 @@ const viewOptions: { value: ViewType; label: string }[] = [
   { value: "a4-2vias", label: "A4 2 Vias" },
   { value: "etiqueta-80x80", label: "Etiqueta 80×80" },
 ];
+
+function getUrlQuoteId(): string | null {
+  if (typeof window === "undefined") return null;
+  const searchParams = new URLSearchParams(window.location.search);
+  return searchParams.get("id") || searchParams.get("cotacaoId") || searchParams.get("pedidoId") || searchParams.get("numero") || null;
+}
 
 export default function Proposals() {
   // Lista de clientes e pedidos carregados do banco / mock
@@ -47,7 +53,120 @@ export default function Proposals() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Carregar clientes e cotações reais do Supabase
+  // Busca uma cotação específica pelo ID diretamente no banco com .eq('id', id) ou .eq('numero', id)
+  const loadSpecificQuoteFromDb = useCallback(async (targetId: string) => {
+    if (!targetId) return null;
+    setIsLoadingDb(true);
+    try {
+      // 1. Busca filtrada especificamente por ID no banco Supabase
+      let { data: cot, error } = await db
+        .from("cotacoes")
+        .select("*, cotacao_itens(*)")
+        .eq("id", targetId)
+        .maybeSingle();
+
+      // Fallback para busca por número da cotação
+      if (!cot || error) {
+        const res = await db
+          .from("cotacoes")
+          .select("*, cotacao_itens(*)")
+          .eq("numero", targetId)
+          .maybeSingle();
+        cot = res.data;
+      }
+
+      if (cot) {
+        const numId = cot.numero || `COT-${cot.id ? String(cot.id).slice(0, 5) : targetId}`;
+        const cotClienteNome = cot.cliente_nome || "Cliente Selecionado";
+
+        // Cria ou localiza o cliente no estado
+        const existingClient = dbClientes.find(
+          (c) => c.nome.toLowerCase() === cotClienteNome.toLowerCase()
+        );
+        const activeCId = existingClient ? existingClient.id : 999;
+
+        if (!existingClient) {
+          const newClient: LocalCliente = {
+            id: activeCId,
+            nome: cotClienteNome,
+            cnpj: cot.documento || "",
+            telefone: cot.telefone || "",
+            cidade: cot.endereco || "",
+            email: cot.email || "",
+            contato: cot.contato || "",
+          };
+          setDbClientes((prev) => [newClient, ...prev]);
+        }
+
+        setClienteId(activeCId);
+        setPedidoId(numId);
+
+        // Mapeia os itens da cotação obtidos do banco
+        const mappedItens: ItemPedido[] = (cot.cotacao_itens && cot.cotacao_itens.length > 0)
+          ? cot.cotacao_itens.map((it: any, itemIdx: number) => ({
+              id: it.ordem !== undefined ? it.ordem + 1 : itemIdx + 1,
+              descricao: it.descricao || it.produto || `Peça #${itemIdx + 1}`,
+              material: it.material || it.produto || "Aço Carbono",
+              medida: it.medida || "Conforme desenho",
+              quantidade: Number(it.quantidade) || 1,
+              valorUnit: Number(it.valor_unitario) || 0,
+              observacoes: it.observacao || "",
+              foto: it.desenho_url || undefined,
+            }))
+          : [
+              {
+                id: 1,
+                descricao: cot.observacoes || "Item da cotação",
+                material: "Aço Carbono",
+                medida: "Conforme projeto",
+                quantidade: 1,
+                valorUnit: Number(cot.valor_total) || 0,
+                observacoes: cot.observacoes || "",
+              },
+            ];
+
+        // Atualiza pedidos e itens com a cotação carregada por ID
+        const novoPedidoObj: Pedido = {
+          id: numId,
+          data: cot.data || new Date().toISOString().slice(0, 10),
+          status: cot.status === 'aprovado' ? 'Aprovado' : cot.status === 'rejeitado' ? 'Cancelado' : cot.status === 'pendente' ? 'Pendente' : 'Rascunho',
+          clienteNome: cotClienteNome,
+          total: Number(cot.valor_total) || 0,
+        };
+
+        setDbPedidosPorCliente((prev) => ({
+          ...prev,
+          [activeCId]: [novoPedidoObj, ...(prev[activeCId] || []).filter((p) => p.id !== numId)],
+        }));
+
+        setDbItensPorPedido((prev) => ({
+          ...prev,
+          [numId]: mappedItens,
+        }));
+
+        // Mapeia fotos/desenhos dos itens
+        const initialFotos: Record<number, string> = {};
+        mappedItens.forEach((it) => {
+          if (it.foto) {
+            initialFotos[it.id] = it.foto;
+          }
+        });
+        if (Object.keys(initialFotos).length > 0) {
+          setFotosPorPeca(initialFotos);
+        }
+
+        setPecaAtiva(mappedItens[0]?.id || 1);
+        return cot;
+      }
+    } catch (err) {
+      console.error("Erro ao carregar cotação filtrada por ID:", err);
+    } finally {
+      setIsLoadingDb(false);
+    }
+    return null;
+  }, [dbClientes, setClienteId, setPedidoId, setFotosPorPeca, setPecaAtiva]);
+
+  // Carregar lista geral de clientes e cotações do Supabase
   const loadDatabaseData = useCallback(async () => {
     setIsLoadingDb(true);
     try {
@@ -63,6 +182,7 @@ export default function Proposals() {
         .select("*, cotacao_itens(*)")
         .order("created_at", { ascending: false });
 
+      let currentClientsList = [...mockClientes];
       if (!errClientes && supaClientes && supaClientes.length > 0) {
         const mappedClients: LocalCliente[] = supaClientes.map((c: any, index: number) => ({
           id: typeof c.id === "number" ? c.id : (index + 100),
@@ -74,13 +194,13 @@ export default function Proposals() {
           contato: c.contato || "",
         }));
 
-        // Unifica com os mocks para não perder referências pré-existentes
         const combinedClients = [...mappedClients];
         mockClientes.forEach((mc) => {
           if (!combinedClients.some((c) => c.nome.toLowerCase() === mc.nome.toLowerCase())) {
             combinedClients.push(mc);
           }
         });
+        currentClientsList = combinedClients;
         setDbClientes(combinedClients);
       }
 
@@ -90,9 +210,9 @@ export default function Proposals() {
 
         supaCotacoes.forEach((cot: any, idx: number) => {
           const numId = cot.numero || `COT-DB-${cot.id ? String(cot.id).slice(0, 5) : idx + 1}`;
-          const clientMatch = dbClientes.find(
+          const clientMatch = currentClientsList.find(
             (c) => c.nome.toLowerCase() === (cot.cliente_nome || "").toLowerCase()
-          ) || dbClientes[0];
+          ) || currentClientsList[0];
 
           const cId = clientMatch ? clientMatch.id : 1;
           if (!newPedidosPorCliente[cId]) {
@@ -125,16 +245,27 @@ export default function Proposals() {
 
         setDbPedidosPorCliente(newPedidosPorCliente);
         setDbItensPorPedido(newItensPorPedido);
+
+        // Se houver um ID passado via URL, prioriza carregar essa cotação específica
+        const urlId = getUrlQuoteId();
+        if (urlId) {
+          loadSpecificQuoteFromDb(urlId);
+        }
       }
     } catch (error) {
       console.warn("Conexão ao Supabase em modo local:", error);
     } finally {
       setIsLoadingDb(false);
     }
-  }, [dbClientes]);
+  }, [loadSpecificQuoteFromDb]);
 
   useEffect(() => {
-    loadDatabaseData();
+    const urlId = getUrlQuoteId();
+    if (urlId) {
+      loadSpecificQuoteFromDb(urlId);
+    } else {
+      loadDatabaseData();
+    }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const pedidos = dbPedidosPorCliente[clienteId] ?? [];
@@ -142,16 +273,29 @@ export default function Proposals() {
   const cliente = dbClientes.find((c) => c.id === clienteId) ?? null;
   const pedido = pedidos.find((p) => p.id === pedidoId) ?? null;
 
+  // Atualiza o ID na URL quando o usuário troca o pedido no select
+  const handleSelectPedido = (newPedidoId: string) => {
+    setPedidoId(newPedidoId);
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.searchParams.set("id", newPedidoId);
+      window.history.pushState({}, "", url.toString());
+    }
+  };
+
   useEffect(() => {
     const pedidosDoCliente = dbPedidosPorCliente[clienteId] ?? [];
     const pedidoValido = pedidosDoCliente.some((p) => p.id === pedidoId);
-    if (!pedidoValido && pedidosDoCliente.length > 0) {
+    // Só inicializa o primeiro se não houver pedidoId selecionado e não houver ID na URL
+    if (!pedidoId && pedidosDoCliente.length > 0 && !getUrlQuoteId()) {
       setPedidoId(pedidosDoCliente[0]?.id ?? "");
     }
   }, [clienteId, pedidoId, dbPedidosPorCliente, setPedidoId]);
 
   useEffect(() => {
-    setPecaAtiva(itens[0]?.id ?? 1);
+    if (itens && itens.length > 0) {
+      setPecaAtiva(itens[0]?.id ?? 1);
+    }
   }, [pedidoId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const saveImage = useCallback(
@@ -363,7 +507,7 @@ export default function Proposals() {
             <div className="relative">
               <select
                 value={pedidoId}
-                onChange={(e) => setPedidoId(e.target.value)}
+                onChange={(e) => handleSelectPedido(e.target.value)}
                 className="w-full bg-slate-700 border border-slate-600 text-white text-sm rounded-lg px-3 py-2 pr-8 appearance-none focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/40 cursor-pointer font-mono"
               >
                 {pedidos.map((p) => (
