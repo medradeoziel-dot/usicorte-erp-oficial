@@ -219,15 +219,28 @@ export default function RelatorioEtiquetaPrint({
         /* Página = 80mm (etiqueta) + 5mm (separação) = 85mm de altura */
         @media print {
           @page { size: 80mm 85mm; margin: 0; }
+          *, *::before, *::after {
+            box-shadow: none !important;
+            outline: none !important;
+          }
           html, body {
+            width: 80mm; min-width: 80mm; max-width: 80mm;
             margin: 0; padding: 0; background: #fff;
+            border: 0 !important; outline: 0 !important; box-shadow: none !important;
             -webkit-print-color-adjust: exact; print-color-adjust: exact;
           }
-          .relatorio-etiqueta-root { padding: 0; }
+          .relatorio-etiqueta-root {
+            width: 80mm; margin: 0; padding: 0;
+            border: 0 !important; outline: 0 !important; box-shadow: none !important;
+          }
           .relatorio-acoes { display: none !important; }
-          .relatorio-grade { display: block; gap: 0; }
+          .relatorio-grade {
+            display: block; gap: 0; width: 80mm; margin: 0; padding: 0;
+            border: 0 !important; outline: 0 !important; box-shadow: none !important;
+          }
           .etiqueta-pagina {
-            width: 80mm; height: 80mm; margin: 0; border: 0;
+            width: 80mm; height: 80mm; margin: 0; border: 0 !important;
+            border-top: 0 !important; outline: 0 !important; box-shadow: none !important;
             page-break-after: always; break-after: page;
             break-inside: avoid; page-break-inside: avoid;
           }
