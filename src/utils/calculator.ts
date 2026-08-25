@@ -457,79 +457,105 @@ export function calculateItemUnitPrice({
 }
 
 /**
- * Formata as medidas de um item de forma limpa, técnica e sem duplicar termos ou unidades.
+ * Normaliza uma string de medidas: quebra em tokens por "x"/"×", remove
+ * tokens repetidos (causa da duplicidade tipo 5" x 300 x 5" x 300) e rejunta.
  */
-export function formatarMedidasLimpa(item: any): string {
-  if (!item) return '-';
+export function normalizarMedida(valor: string | undefined | null): string {
+  if (!valor) return "";
 
-  // Se já veio com medidas formatadas previamente
-  if (item.medidasFormatadas && typeof item.medidasFormatadas === 'string' && item.medidasFormatadas.trim()) {
-    return item.medidasFormatadas.trim();
-  }
+  const partes = valor
+    .replace(/×/g, "x")
+    .split("x")
+    .map((p) => p.trim())
+    .filter(Boolean);
 
-  const geom = item.geometryType || item.profileType || 'chapa';
-  const diaStr = (item.diameter || item.diametro || '').toString().trim();
-  const thickStr = (item.thickness || item.espessura || item.measure || '').toString().trim();
-  const widthMm = Number(item.widthMm || item.largura || 0);
-  const lengthMm = Number(item.lengthMm || item.comprimento || 0);
+  const vistas = new Set<string>();
+  const unicas: string[] = [];
 
-  // Extrair números e textos limpos
-  const dVal = diaStr || (item.diameterMm ? `${item.diameterMm}` : '');
-  const tVal = thickStr || (item.thicknessMm ? `${item.thicknessMm}` : '');
-  const lVal = lengthMm > 0 ? `${lengthMm}` : (item.widthLength || '').toString().trim();
-  const wVal = widthMm > 0 ? `${widthMm}` : '';
-
-  if (geom === 'bucha' || geom === 'TUBO_BUCHA') {
-    // BUCHA / TUBO: ØExt x ØInt x Comp
-    const dExt = dVal ? (dVal.startsWith('Ø') ? dVal : `Ø ${dVal}`) : '';
-    const dInt = tVal ? (tVal.startsWith('Ø') ? tVal.replace('Ø', '').trim() : tVal) : '';
-    const parts = [dExt, dInt, lVal].filter(Boolean);
-    if (parts.length > 0) {
-      let res = parts.join(' x ');
-      if (lVal && !res.toLowerCase().includes('mm') && !res.includes('"')) {
-        res += ' mm';
-      }
-      return res.replace(/\s+/g, ' ').trim();
-    }
-  } else if (geom === 'macico' || geom === 'REDONDO_QUADRADO') {
-    // MACIÇO: Ø ou d x Comp
-    const d = dVal || tVal;
-    if (d && lVal) {
-      const prefix = d.includes('Ø') || d.includes('"') || d.includes('#') ? d : `Ø ${d}`;
-      let res = `${prefix} x ${lVal}`;
-      if (!res.toLowerCase().includes('mm') && !res.includes('"')) {
-        res += ' mm';
-      }
-      return res.replace(/\s+/g, ' ').trim();
-    } else if (d) {
-      return d.includes('Ø') ? d : `Ø ${d}`;
-    }
-  } else {
-    // CHAPA: Espessura x Largura x Comprimento
-    const esp = tVal || dVal;
-    const parts = [esp, wVal, lVal].filter(Boolean);
-    if (parts.length > 0) {
-      let res = parts.join(' x ');
-      if (!res.toLowerCase().includes('mm') && !res.includes('"')) {
-        res += ' mm';
-      }
-      return res.replace(/\s+/g, ' ').trim();
+  for (const parte of partes) {
+    const chave = parte.toLowerCase().replace(/\s+/g, "");
+    if (!vistas.has(chave)) {
+      vistas.add(chave);
+      unicas.push(parte);
     }
   }
 
-  // Fallback para campos legados
-  const fallback = [item.measure, item.diameter, item.widthLength].filter(Boolean);
-  if (fallback.length > 0) {
-    const unique = fallback.filter((v, i, a) => a.indexOf(v) === i);
-    return unique.join(' x ').replace(/\s+/g, ' ').trim();
-  }
-
-  return '-';
+  return unicas.join(" x ");
 }
 
-/**
- * Função solicitada para renderizar o tbody do relatório / cotação
- */
+export function formatarMedidasLimpa(item: Record<string, any>): string {
+  const {
+    geometry,
+    diameter,
+    measure,
+    widthLength,
+    width,
+    length,
+    unit = "mm",
+  } = item || {};
+
+  let resultado = "";
+
+  // BUCHA / TUBO: medida composta por diâmetro externo x diâmetro interno x comprimento
+  if (geometry === "bucha" || geometry === "tubo") {
+    const externo = diameter || measure;
+    const interno = widthLength || width;
+    const comp = length;
+    resultado = normalizarMedida(
+      [externo, interno, comp].filter(Boolean).join(" x ")
+    );
+  }
+  // MACIÇO / REDONDO: medida composta por diâmetro x comprimento
+  else if (geometry === "macico" || geometry === "redondo") {
+    const diam = diameter || measure;
+    const comp = widthLength || length;
+    resultado = normalizarMedida([diam, comp].filter(Boolean).join(" x "));
+  }
+  // CHAPA / PLACA / RETANGULAR: medida composta por espessura x largura x comprimento
+  else if (
+    geometry === "chapa" ||
+    geometry === "placa" ||
+    geometry === "retangular"
+  ) {
+    const espessura = diameter || measure;
+    const dimensoes = widthLength || [width, length].filter(Boolean).join(" x ");
+    resultado = normalizarMedida(
+      [espessura, dimensoes].filter(Boolean).join(" x ")
+    );
+  }
+  // Fallback genérico
+  else {
+    resultado = normalizarMedida(
+      [diameter || measure, widthLength || [width, length].filter(Boolean).join(" x ")]
+        .filter(Boolean)
+        .join(" x ")
+    );
+  }
+
+  if (!resultado) return "";
+
+  // Adiciona o prefixo Ø quando o resultado começa com diâmetro (geometria redonda)
+  if (
+    (geometry === "macico" ||
+      geometry === "redondo" ||
+      geometry === "bucha" ||
+      geometry === "tubo") &&
+    !resultado.startsWith("Ø")
+  ) {
+    resultado = `Ø ${resultado}`;
+  }
+
+  // Adiciona a unidade apenas se ainda não estiver presente
+  if (!resultado.toLowerCase().includes(unit.toLowerCase())) {
+    resultado = `${resultado} ${unit}`;
+  }
+
+  return resultado.trim();
+}
+
+// Alias para compatibilidade, se necessário
+export const formatarMedida = formatarMedidasLimpa;
+
 export function renderizarTabelaRelatorio(listaItens: any[]): void {
   if (typeof document === 'undefined') return;
   const tbody = document.getElementById('tbody-relatorio');
