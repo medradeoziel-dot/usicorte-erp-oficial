@@ -1,4 +1,5 @@
 import React from "react";
+import EtiquetaDesenho, { detectarTipoDesenho } from "./EtiquetaDesenho";
 
 export interface ItemRelatorio {
   idVer?: string | number;
@@ -6,6 +7,8 @@ export interface ItemRelatorio {
   medida: string;
   qtd: number;
   observacao?: string;
+  /** Desenho colado/enviado manualmente (dataURL ou URL). Se vazio, o desenho é automático. */
+  desenho?: string;
 }
 
 interface Props {
@@ -17,292 +20,218 @@ interface Props {
 /**
  * Etiqueta de impressão 80 x 80 mm.
  *
- * - Cada etiqueta ocupa UMA página de exatamente 80 x 80 mm (margem 0),
- *   ideal para impressora térmica de etiquetas.
- * - Sem a linha/borda superior que existia no cabeçalho da versão anterior.
- * - Todo o conteúdo é dimensionado em mm e usa box-sizing: border-box para
- *   nunca estourar os limites da etiqueta.
+ * - Cada etiqueta ocupa UMA página de exatamente 80 x 80 mm (margem 0).
+ * - Desenho automático: RETANGULO -> retângulo, DISCO -> redondo sem furo,
+ *   FLANGE -> redondo com furo, CONF. DESENHO -> campo em branco para colar.
+ * - Imagem colada (Ctrl+V) no campo do desenho é ampliada para 70 mm e tem
+ *   os traços reforçados automaticamente.
  */
 export default function RelatorioEtiquetaPrint({
   cliente,
   numeroPedido,
   itens,
 }: Props) {
+  const [desenhos, setDesenhos] = React.useState<Record<string, string>>({});
+
+  const chave = (item: ItemRelatorio, index: number) => String(item.idVer ?? index);
+
+  const lerArquivo = (file: File, key: string) => {
+    const reader = new FileReader();
+    reader.onload = () => setDesenhos((d) => ({ ...d, [key]: String(reader.result) }));
+    reader.readAsDataURL(file);
+  };
+
+  const handlePaste = (e: React.ClipboardEvent, key: string) => {
+    const file = Array.from(e.clipboardData?.items ?? [])
+      .find((i) => i.type.startsWith("image/"))
+      ?.getAsFile();
+    if (file) {
+      e.preventDefault();
+      lerArquivo(file, key);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent, key: string) => {
+    const file = Array.from(e.dataTransfer?.files ?? []).find((f) => f.type.startsWith("image/"));
+    if (file) {
+      e.preventDefault();
+      lerArquivo(file, key);
+    }
+  };
+
   return (
     <div className="relatorio-etiqueta-root">
-      {/* Botão de Impressão (oculto na impressão) */}
+      {/* Ações (ocultas na impressão) */}
       <div className="relatorio-acoes">
         <span className="relatorio-contagem">
-          {itens.length} {itens.length === 1 ? "etiqueta" : "etiquetas"}
+          {itens.length} {itens.length === 1 ? "etiqueta" : "etiquetas"} · clique no desenho e pressione Ctrl+V para colar uma imagem
         </span>
-        <button
-          type="button"
-          onClick={() => window.print()}
-          className="relatorio-botao"
-        >
+        <button type="button" onClick={() => window.print()} className="relatorio-botao">
           🏷️ Imprimir Etiquetas
         </button>
       </div>
 
-      {/* Grade de etiquetas (apenas para visualização; na impressão cada uma vira uma página) */}
       <div className="relatorio-grade">
-        {itens.map((item, index) => (
-          <section
-            key={item.idVer ?? index}
-            className="etiqueta-pagina"
-            aria-label={`Etiqueta ${index + 1}`}
-          >
-            {/* Topo da etiqueta — sem borda/linha superior */}
-            <header className="etiqueta-topo">
-              <span className="etiqueta-marca">Usicorte Metais</span>
-              <span className="etiqueta-pedido">
-                Pedido Nº: <strong>{numeroPedido}</strong>
-              </span>
-            </header>
+        {itens.map((item, index) => {
+          const key = chave(item, index);
+          const imagem = item.desenho ?? desenhos[key];
+          const tipo = detectarTipoDesenho(item.produto, item.medida, item.observacao);
 
-            {/* Conteúdo: dados à esquerda, esquema técnico à direita */}
-            <div className="etiqueta-corpo">
-              {/* Informações da peça */}
+          return (
+            <section key={key} className="etiqueta-pagina" aria-label={`Etiqueta ${index + 1}`}>
+              <header className="etiqueta-topo">
+                <span className="etiqueta-marca">Usicorte Metais</span>
+                <span className="etiqueta-pedido">
+                  Pedido Nº: <strong>{numeroPedido}</strong>
+                </span>
+              </header>
+
               <dl className="etiqueta-dados">
                 <div className="etiqueta-linha">
-                  <dt>Empresa / Cliente:</dt>
+                  <dt>Cliente</dt>
                   <dd>{cliente}</dd>
                 </div>
                 <div className="etiqueta-linha">
-                  <dt>Material:</dt>
+                  <dt>Material</dt>
                   <dd>{item.produto}</dd>
                 </div>
-                <div className="etiqueta-linha">
-                  <dt>Medida:</dt>
-                  <dd>{item.medida}</dd>
-                </div>
-                <div className="etiqueta-linha">
-                  <dt>Qtd:</dt>
-                  <dd>{item.qtd} PC</dd>
+                <div className="etiqueta-linha etiqueta-linha--dupla">
+                  <div>
+                    <dt>Medida</dt>
+                    <dd>{item.medida}</dd>
+                  </div>
+                  <div>
+                    <dt>Qtd</dt>
+                    <dd>{item.qtd} PC</dd>
+                  </div>
                 </div>
                 {item.observacao && (
                   <div className="etiqueta-linha">
-                    <dt>Observação:</dt>
+                    <dt>Observação</dt>
                     <dd>{item.observacao}</dd>
                   </div>
                 )}
               </dl>
 
-              {/* Esquema técnico / gabarito de usinagem */}
-              <div className="etiqueta-esquema">
-                <div className="esquema-circulo">
-                  <span className="esquema-diametro">Ø {item.medida}</span>
-                </div>
-                <span className="esquema-legenda">Corte / Usinagem CNC</span>
+              {/* Campo do desenho — 70 mm de largura */}
+              <div
+                className="etiqueta-desenho"
+                tabIndex={0}
+                onPaste={(e) => handlePaste(e, key)}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => handleDrop(e, key)}
+                title="Clique aqui e pressione Ctrl+V para colar o desenho"
+              >
+                <EtiquetaDesenho tipo={tipo} medida={item.medida} imagem={imagem} />
               </div>
-            </div>
-
-            {/* Rodapé da etiqueta */}
-            <footer className="etiqueta-rodape">
-              Identificação de Peça / Usicorte Metais
-            </footer>
-          </section>
-        ))}
+            </section>
+          );
+        })}
       </div>
 
       <style>{`
-        /* ===== Visualização na tela ===== */
         .relatorio-etiqueta-root {
           font-family: Arial, Helvetica, sans-serif;
           color: #000;
           padding: 12px;
         }
         .relatorio-acoes {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 12px;
-          margin-bottom: 12px;
-          flex-wrap: wrap;
+          display: flex; align-items: center; justify-content: space-between;
+          gap: 12px; margin-bottom: 12px; flex-wrap: wrap;
         }
-        .relatorio-contagem {
-          font-size: 13px;
-          font-weight: 600;
-          color: #333;
-        }
+        .relatorio-contagem { font-size: 13px; font-weight: 600; color: #333; }
         .relatorio-botao {
-          background: #059669;
-          color: #fff;
-          border: none;
-          padding: 8px 16px;
-          border-radius: 6px;
-          font-weight: 700;
-          font-size: 13px;
-          cursor: pointer;
-          box-shadow: 0 1px 2px rgba(0,0,0,.15);
-          transition: background .15s ease;
+          background: #059669; color: #fff; border: none; padding: 8px 16px;
+          border-radius: 6px; font-weight: 700; font-size: 13px; cursor: pointer;
         }
         .relatorio-botao:hover { background: #047857; }
 
         .relatorio-grade {
           display: grid;
           grid-template-columns: repeat(auto-fill, 80mm);
-          gap: 10px;
+          gap: 5mm;
           justify-content: start;
         }
 
-        /* ===== A etiqueta em si (80 x 80 mm) ===== */
+        /* ===== Etiqueta 80 x 80 mm ===== */
         .etiqueta-pagina {
           box-sizing: border-box;
-          width: 80mm;
-          height: 80mm;
-          padding: 2.5mm 3mm;
-          border: 0.4mm solid #000;
-          border-radius: 1.5mm;
-          display: flex;
-          flex-direction: column;
+          width: 80mm; height: 80mm;
+          padding: 2.5mm 5mm;
+          display: flex; flex-direction: column; gap: 1.5mm;
           overflow: hidden;
-          background: #fff;
-          color: #000;
+          background: #fff; color: #000;
         }
-
-        /* Topo — SEM linha/borda inferior (era a "linha de cima" indesejada) */
         .etiqueta-topo {
-          display: flex;
-          align-items: baseline;
-          justify-content: space-between;
-          gap: 2mm;
-          padding-bottom: 1.5mm;
+          display: flex; align-items: baseline; justify-content: space-between; gap: 2mm;
         }
         .etiqueta-marca {
-          font-size: 10pt;
-          font-weight: 800;
-          letter-spacing: .2mm;
-          text-transform: uppercase;
+          font-size: 9.5pt; font-weight: 800; text-transform: uppercase; letter-spacing: .2mm;
         }
-        .etiqueta-pedido {
-          font-size: 8.5pt;
-          color: #333;
-        }
-        .etiqueta-pedido strong { color: #000; }
+        .etiqueta-pedido { font-size: 7.5pt; color: #333; }
 
-        /* Corpo: dados + esquema */
-        .etiqueta-corpo {
-          flex: 1;
-          display: flex;
-          gap: 3mm;
-          min-height: 0;
+        .etiqueta-dados { margin: 0; display: flex; flex-direction: column; gap: 1mm; }
+        .etiqueta-linha { display: flex; flex-direction: column; }
+        .etiqueta-linha--dupla { flex-direction: row; gap: 4mm; }
+        .etiqueta-dados dt {
+          font-size: 6pt; font-weight: 700; color: #555;
+          text-transform: uppercase; letter-spacing: .1mm;
         }
-        .etiqueta-dados {
-          flex: 1;
-          min-width: 0;
-          display: flex;
-          flex-direction: column;
-          gap: 1.6mm;
-          margin: 0;
-        }
-        .etiqueta-linha {
-          display: flex;
-          flex-direction: column;
-          gap: .3mm;
-        }
-        .etiqueta-linha dt {
-          font-size: 6.8pt;
-          font-weight: 700;
-          color: #555;
-          text-transform: uppercase;
-          letter-spacing: .1mm;
-        }
-        .etiqueta-linha dd {
-          margin: 0;
-          font-size: 9pt;
-          font-weight: 600;
-          color: #000;
-          line-height: 1.15;
+        .etiqueta-dados dd {
+          margin: 0; font-size: 8.5pt; font-weight: 700; line-height: 1.1;
           word-break: break-word;
         }
 
-        .etiqueta-esquema {
-          flex: 0 0 26mm;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          gap: 1.5mm;
+        /* ===== Campo do desenho (70 mm) ===== */
+        .etiqueta-desenho {
+          width: 70mm;
+          flex: 1;
+          min-height: 0;
+          margin: 0 auto;
+          outline: none;
         }
-        .esquema-circulo {
-          width: 24mm;
-          height: 24mm;
-          border: 0.4mm dashed #888;
-          border-radius: 50%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          position: relative;
+        .etiqueta-desenho:focus-visible { box-shadow: 0 0 0 1px #059669; }
+        .desenho-box {
+          width: 100%; height: 100%;
+          display: flex; flex-direction: column;
+          align-items: center; justify-content: center;
+          gap: .5mm;
+          overflow: hidden;
         }
-        .esquema-circulo::before {
-          content: "";
-          position: absolute;
-          inset: 4mm;
-          border: 0.3mm solid #000;
-          border-radius: 50%;
+        .desenho-svg { width: auto; height: 100%; max-width: 100%; display: block; }
+        .desenho-medida { font-size: 6.5pt; font-weight: 700; }
+        .desenho-img {
+          max-width: 70mm; max-height: 100%;
+          width: auto; height: auto;
+          object-fit: contain;
         }
-        .esquema-diametro {
-          font-size: 7pt;
-          font-weight: 700;
-          background: #fff;
-          padding: 0 .5mm;
-          z-index: 1;
+        /* Reforço automático de traços finos/claros */
+        .desenho-img--traco {
+          filter: grayscale(1) brightness(1.05) contrast(2600%);
+          image-rendering: crisp-edges;
         }
-        .esquema-legenda {
-          font-size: 6.5pt;
-          color: #555;
-          text-align: center;
-          text-transform: uppercase;
-          letter-spacing: .1mm;
+        .desenho-box--vazio { border: 0.3mm dashed #999; }
+        .desenho-vazio-texto {
+          font-size: 6.5pt; color: #999; text-transform: uppercase; letter-spacing: .3mm;
         }
 
-        .etiqueta-rodape {
-          font-size: 6.5pt;
-          color: #555;
-          text-align: center;
-          padding-top: 1.5mm;
-          text-transform: uppercase;
-          letter-spacing: .2mm;
-        }
-
-        /* ===== Impressão ===== */
+        /* ===== Impressão — rolo contínuo 80mm ===== */
+        /* Página = 80mm (etiqueta) + 5mm (separação) = 85mm de altura */
         @media print {
-          @page {
-            size: 80mm 80mm;
-            margin: 0;
-          }
+          @page { size: 80mm 85mm; margin: 0; }
           html, body {
-            margin: 0;
-            padding: 0;
-            background: #fff;
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
+            margin: 0; padding: 0; background: #fff;
+            -webkit-print-color-adjust: exact; print-color-adjust: exact;
           }
           .relatorio-etiqueta-root { padding: 0; }
-          /* Esconde tudo que não é a etiqueta */
           .relatorio-acoes { display: none !important; }
-          .relatorio-grade {
-            display: block;
-            gap: 0;
-          }
-          /* Cada etiqueta = 1 página, exatamente 80x80mm, sem margem extra */
+          .relatorio-grade { display: block; gap: 0; }
           .etiqueta-pagina {
-            width: 80mm;
-            height: 80mm;
-            margin: 0;
-            border-radius: 0;
-            border: 0.4mm solid #000;
-            page-break-after: always;
-            break-after: page;
-            break-inside: avoid;
-            page-break-inside: avoid;
+            width: 80mm; height: 80mm; margin: 0; border: 0;
+            page-break-after: always; break-after: page;
+            break-inside: avoid; page-break-inside: avoid;
           }
-          /* A última etiqueta não força página em branco extra */
-          .etiqueta-pagina:last-child {
-            page-break-after: auto;
-            break-after: auto;
-          }
+          .etiqueta-pagina:last-child { page-break-after: auto; break-after: auto; }
         }
       `}</style>
     </div>
