@@ -7,6 +7,7 @@ import {
   X, 
   Trash2, 
   Edit3, 
+  Pencil,
   FileText, 
   CheckCircle2, 
   Clock, 
@@ -227,10 +228,10 @@ export default function QuoteHistoryModal({
                         onClose();
                       }}
                       className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
-                      title="Carregar orçamento para edição ou visualização"
+                      title="Editar / Carregar este orçamento no formulário"
                     >
-                      <Edit3 className="w-3.5 h-3.5" />
-                      Carregar
+                      <Pencil className="w-3.5 h-3.5" />
+                      Editar
                     </button>
                     
                     <button

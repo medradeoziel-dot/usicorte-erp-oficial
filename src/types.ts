@@ -46,6 +46,8 @@ export interface QuoteItem {
   notes?: string;
   // Campos auxiliares em português para compatibilidade direta com relatórios
   descricao?: string;
+  produto?: string;
+  medida?: string;
   observacao?: string;
   info?: string;
   valorUnitario?: number;

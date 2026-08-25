@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import EtiquetaDesenho from '../../../../src/components/EtiquetaDesenho';
 
 // ============================================================================
 // 1. INTERFACE DE DADOS
@@ -454,16 +455,31 @@ export default function GestaoPedidosRelatorios() {
                 <div className="grid grid-cols-2 gap-6">
                   {itensParaImprimir.map((item) => (
                     <div key={item.idVer} className="border-2 border-black p-4 rounded-xl flex flex-col justify-between aspect-square">
-                      <div className="text-center border-b border-slate-300 pb-2">
+                      <div className="text-center pb-2">
                         <h3 className="font-black text-lg uppercase tracking-wide">Usicorte Metais</h3>
                         <p className="text-xs font-bold text-slate-600">PEDIDO: COT-2026-8166</p>
                       </div>
 
-                      <div className="space-y-2 text-xs my-2">
-                        <p><span className="text-slate-500 font-bold uppercase">Cliente:</span> <br/><strong className="text-sm">{item.cliente}</strong></p>
-                        <p><span className="text-slate-500 font-bold uppercase">Material:</span> <br/><strong className="text-base text-blue-900">{item.produto}</strong></p>
-                        <p><span className="text-slate-500 font-bold uppercase">Medida:</span> <br/><strong className="font-mono">{item.medida}</strong></p>
-                        <p><span className="text-slate-500 font-bold uppercase">Qtd:</span> <strong className="text-base font-black">{item.qtd} PÇ</strong></p>
+                      <div className="flex gap-3 my-2 flex-1 items-center">
+                        <div className="w-1/2 space-y-1.5 text-xs text-left">
+                          <p><span className="text-slate-500 font-bold uppercase text-[10px]">Cliente:</span> <br/><strong className="text-xs truncate block">{item.cliente}</strong></p>
+                          <p><span className="text-slate-500 font-bold uppercase text-[10px]">Material:</span> <br/><strong className="text-sm text-blue-900 block truncate">{item.produto}</strong></p>
+                          <p><span className="text-slate-500 font-bold uppercase text-[10px]">Medida:</span> <br/><strong className="font-mono text-xs block">{item.medida}</strong></p>
+                          <p><span className="text-slate-500 font-bold uppercase text-[10px]">Qtd:</span> <strong className="text-sm font-black">{item.qtd} PÇ</strong></p>
+                          {item.observacao && (
+                            <p><span className="text-slate-500 font-bold uppercase text-[10px]">Obs:</span> <span className="text-[11px] font-semibold italic text-slate-700 block truncate">{item.observacao}</span></p>
+                          )}
+                        </div>
+
+                        <div className="w-1/2 h-full min-h-[110px] border-2 border-dashed border-slate-300 rounded-lg p-1 bg-slate-50 flex items-center justify-center overflow-hidden">
+                          <EtiquetaDesenho
+                            material={item.produto}
+                            medida={item.medida}
+                            observacao={item.observacao}
+                            descricao={item.descricao || item.produto}
+                            engrossarTracos={true}
+                          />
+                        </div>
                       </div>
 
                       <div className="border-t border-black pt-1 text-center text-[10px] font-bold text-slate-600 uppercase">

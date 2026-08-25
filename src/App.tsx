@@ -29,6 +29,7 @@ export default function App() {
   const [currentScreen, setCurrentScreen] = useState<ScreenType>('home');
   const [selectedMaterialForQuote, setSelectedMaterialForQuote] = useState<MaterialProfile | null>(null);
   const [currentQuote, setCurrentQuote] = useState<Quote>(INITIAL_QUOTE);
+  const [quoteToEdit, setQuoteToEdit] = useState<Quote | null>(null);
 
   // Autenticação & Modais
   const [currentUser, setCurrentUser] = useState<string | null>(() => sessionStorage.getItem('usuario_logado'));
@@ -38,6 +39,13 @@ export default function App() {
 
   const trocarTela = (nomeTela: ScreenType) => {
     setCurrentScreen(nomeTela);
+    setIsMobileSidebarOpen(false);
+  };
+
+  const handleEditQuote = (quote: Quote) => {
+    setQuoteToEdit(quote);
+    setCurrentQuote(quote);
+    setCurrentScreen('orcamento');
     setIsMobileSidebarOpen(false);
   };
 
@@ -130,12 +138,21 @@ export default function App() {
               onQuoteChange={setCurrentQuote} 
               onNavigateToClients={() => trocarTela('clientes')} 
               onNavigateToReports={() => trocarTela('relatorios')} 
+              quoteToEdit={quoteToEdit}
+              onClearQuoteToEdit={() => setQuoteToEdit(null)}
             />
           )}
 
           {currentScreen === 'ordem_servico' && <DailyOSModule clients={clients} onNavigateToClients={() => trocarTela('clientes')} />}
           
-          {currentScreen === 'relatorios' && <ReportsModule currentQuote={currentQuote} clients={clients} onNavigateToQuote={() => trocarTela('orcamento')} />}
+          {currentScreen === 'relatorios' && (
+            <ReportsModule 
+              currentQuote={currentQuote} 
+              clients={clients} 
+              onNavigateToQuote={() => trocarTela('orcamento')} 
+              onEditQuote={handleEditQuote}
+            />
+          )}
 
           {currentScreen === 'php' && (
             <div id="screen-php" className="space-y-6">

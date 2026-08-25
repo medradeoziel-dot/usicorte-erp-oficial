@@ -1,4 +1,5 @@
 import type { ItemPedido, Cliente } from "../lib/types";
+import EtiquetaDesenho from "./EtiquetaDesenho";
 
 interface LabelPreviewProps {
   pedidoId: string;
@@ -67,21 +68,15 @@ export default function LabelPreview({
             <div className="label-key label-key--block">OBSERVAÇÕES:</div>
             <div className="label-obs-text">{peca?.observacoes ?? "—"}</div>
           </div>
-          <div className="label-drawing">
-            {foto ? (
-              <img
-                key={pecaAtiva}
-                src={foto}
-                alt={`Desenho peça #${pecaAtiva}`}
-                className="label-img"
-              />
-            ) : (
-              <div className="label-no-drawing">
-                <div className="label-no-drawing-icon">⊘</div>
-                <div className="label-no-drawing-text">SEM DESENHO</div>
-                <div className="label-no-drawing-sub">PEÇA #{pecaAtiva}</div>
-              </div>
-            )}
+          <div className="label-drawing flex items-center justify-center p-1">
+            <EtiquetaDesenho
+              material={peca?.material}
+              medida={peca?.medida}
+              observacao={peca?.observacoes}
+              descricao={peca?.descricao}
+              imagem={foto}
+              engrossarTracos={true}
+            />
           </div>
         </div>
 

@@ -38,6 +38,7 @@ import {
   LISTA_MATERIAIS_INLINE,
   DADOS_MATERIAIS_MAP
 } from '../utils/calculator';
+import { fileToDxfImage, isDxfFile } from '../utils/dxfRenderer';
 import QuotePrintModal from './QuotePrintModal';
 import QuoteHistoryModal from './QuoteHistoryModal';
 import {
@@ -77,7 +78,9 @@ import {
   Search,
   Check,
   X,
-  Ruler
+  Ruler,
+  Upload,
+  Image as ImageIcon
 } from 'lucide-react';
 
 interface SalesModuleProps {
@@ -86,6 +89,8 @@ interface SalesModuleProps {
   selectedMaterial?: MaterialProfile | null;
   onQuoteChange?: (quote: Quote) => void;
   onNavigateToReports?: () => void;
+  quoteToEdit?: Quote | null;
+  onClearQuoteToEdit?: () => void;
 }
 
 export default function SalesModule({ 
@@ -93,7 +98,9 @@ export default function SalesModule({
   onNavigateToClients,
   selectedMaterial,
   onQuoteChange,
-  onNavigateToReports
+  onNavigateToReports,
+  quoteToEdit,
+  onClearQuoteToEdit
 }: SalesModuleProps) {
   // Quote header state
   const generateNextQuoteNumber = () => {
@@ -151,7 +158,9 @@ const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNu
   const [itemUnitPrice, setItemUnitPrice] = useState<string>('');
   const [itemQuantity, setItemQuantity] = useState<string>('1');
   const [itemNotes, setItemNotes] = useState<string>('');
+  const [itemDrawingImage, setItemDrawingImage] = useState<string | null>(null);
   const [isManualUnitPrice, setIsManualUnitPrice] = useState<boolean>(false);
+  const itemFileInputRef = useRef<HTMLInputElement>(null);
 
   // Constante Combobox & Autocomplete state
   const [isConstantOpen, setIsConstantOpen] = useState<boolean>(false);
@@ -332,6 +341,16 @@ const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNu
 
     loadQuotes();
   }, []);
+
+  // Carrega cotação para edição caso passada via prop quoteToEdit
+  useEffect(() => {
+    if (quoteToEdit) {
+      handleLoadQuoteFromHistory(quoteToEdit);
+      if (onClearQuoteToEdit) {
+        onClearQuoteToEdit();
+      }
+    }
+  }, [quoteToEdit]);
 
   // When selectedMaterial is passed from Products screen, apply it immediately
   useEffect(() => {
@@ -985,7 +1004,9 @@ const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNu
         notes: itemNotes.trim(),
         observacao: itemNotes.trim(),
         info: itemNotes.trim(),
-        medidasFormatadas: medidasFormatadas
+        medidasFormatadas: medidasFormatadas,
+        drawingImage: itemDrawingImage || undefined,
+        fotoDesenho: itemDrawingImage || undefined
       } : item));
 
       setSuccessMessage('Item atualizado com sucesso!');
@@ -1023,7 +1044,9 @@ const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNu
         notes: itemNotes.trim(),
         observacao: itemNotes.trim(),
         info: itemNotes.trim(),
-        medidasFormatadas: medidasFormatadas
+        medidasFormatadas: medidasFormatadas,
+        drawingImage: itemDrawingImage || undefined,
+        fotoDesenho: itemDrawingImage || undefined
       };
 
       setItems([...items, newItem]);
@@ -1050,6 +1073,7 @@ const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNu
     setItemUnitPrice('');
     setItemQuantity('1');
     setItemNotes('');
+    setItemDrawingImage(null);
     setIsManualUnitPrice(false);
     setShowAutoCalcHelp(false);
     setAutoCalcWeight(null);
@@ -1089,6 +1113,7 @@ const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNu
     setItemUnitPrice((item.unitPrice || item.valorUnitario || 0).toFixed(2).replace('.', ','));
     setItemQuantity((item.quantity || item.qtd || 1).toString());
     setItemNotes(item.notes || item.observacao || '');
+    setItemDrawingImage(item.drawingImage || item.fotoDesenho || null);
     setIsManualUnitPrice(false);
 
     // Scroll smoothly to item form
@@ -1157,7 +1182,10 @@ const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNu
       updatedAt: new Date().toISOString()
     };
 
-    const existsIndex = savedQuotes.findIndex(q => q.quoteNumber === quoteNumber);
+    const existsIndex = savedQuotes.findIndex(
+      q => (q.quoteNumber && q.quoteNumber.trim().toLowerCase() === quoteNumber.trim().toLowerCase()) ||
+           (q.id && (q.id === quoteNumber || (currentQuoteObject.id && q.id === currentQuoteObject.id)))
+    );
     let updatedQuotes: Quote[];
 
     if (existsIndex >= 0) {
@@ -1170,16 +1198,16 @@ const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNu
     setSavedQuotes(updatedQuotes);
     localStorage.setItem('s_orcamentos', JSON.stringify(updatedQuotes));
 
-    // Persiste no Supabase
+    // Persiste e atualiza no Supabase
     saveCotacaoDb(currentQuoteObject).then(res => {
       if (res.error) {
         console.warn('Cotação salva localmente; aviso no Supabase:', res.error);
-        setSuccessMessage(`Orçamento ${quoteNumber} salvo no histórico (local)!`);
+        setSuccessMessage(existsIndex >= 0 ? `Orçamento ${quoteNumber} atualizado no histórico (local)!` : `Orçamento ${quoteNumber} salvo no histórico (local)!`);
       } else {
-        setSuccessMessage(`Orçamento ${quoteNumber} salvo e sincronizado no Supabase! ⚡`);
+        setSuccessMessage(existsIndex >= 0 ? `Orçamento ${quoteNumber} atualizado com sucesso e sincronizado! ⚡` : `Orçamento ${quoteNumber} salvo com sucesso e sincronizado! ⚡`);
       }
     }).catch(() => {
-      setSuccessMessage(`Orçamento ${quoteNumber} salvo com sucesso no histórico!`);
+      setSuccessMessage(existsIndex >= 0 ? `Orçamento ${quoteNumber} atualizado com sucesso!` : `Orçamento ${quoteNumber} salvo com sucesso!`);
     });
 
     setTimeout(() => setSuccessMessage(null), 3500);
@@ -1209,11 +1237,12 @@ const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNu
     setTimeout(() => setSuccessMessage(null), 2500);
   };
 
-  // Load a quote from history modal
+  // Load a quote from history modal / edit action
   const handleLoadQuoteFromHistory = (quote: Quote) => {
-    setQuoteNumber(quote.quoteNumber);
+    const targetNum = quote.quoteNumber || quote.id || generateNextQuoteNumber();
+    setQuoteNumber(targetNum);
     setSelectedClientId(quote.clientId || '');
-    setClientName(quote.clientName);
+    setClientName(quote.clientName || 'Cliente Balcão (UsiCorte)');
     setClientDocument(quote.clientDocument || '');
     setContactPerson(quote.contactPerson || '');
     setClientPhone(quote.clientPhone || '');
@@ -1222,15 +1251,15 @@ const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNu
     setClientState(quote.clientState || '');
     setQuoteDate(getSafeISODate(quote.date || quote.createdAt));
     setValidityDays(quote.validityDays || 10);
-    setPaymentTerms(quote.paymentTerms || 'À Vista');
+    setPaymentTerms(quote.paymentTerms || 'À Vista / Pix (3% Desc.)');
     setQuoteStatus(quote.status || 'Rascunho');
     setItems(quote.items || []);
     setDiscountAmount(quote.discount || 0);
     setShippingAmount(quote.shipping || 0);
-    setObservations(quote.observations || '');
+    setObservations(quote.observations || 'Preços com impostos inclusos. Material sujeito a conferência no ato do recebimento.');
     resetItemForm();
 
-    setSuccessMessage(`Orçamento ${quote.quoteNumber} carregado com sucesso!`);
+    setSuccessMessage(`Orçamento ${targetNum} carregado para edição com sucesso!`);
     setTimeout(() => setSuccessMessage(null), 3000);
   };
 
@@ -2319,9 +2348,9 @@ const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNu
 
           </div>
 
-          {/* Linha 2 */}
-          <div className="form-row w-full">
-            <div className="field full-width w-full space-y-1">
+          {/* Linha 2 - Observação e Anexo de Desenho/DXF */}
+          <div className="form-row grid grid-cols-1 md:grid-cols-12 gap-3.5 items-end">
+            <div className="field md:col-span-8 space-y-1">
               <label htmlFor="observacao" className="block text-xs font-bold text-slate-700">
                 Observação
               </label>
@@ -2340,6 +2369,68 @@ const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNu
                 }}
                 className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-xs text-slate-700 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-hidden transition-all shadow-2xs"
               />
+            </div>
+
+            {/* Anexo de Imagem / Arquivo CAD .DXF */}
+            <div className="field md:col-span-4 space-y-1">
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-bold text-slate-700">
+                  Desenho / Arquivo .DXF
+                </label>
+                {itemDrawingImage && (
+                  <button
+                    type="button"
+                    onClick={() => setItemDrawingImage(null)}
+                    className="text-[10px] text-rose-600 hover:text-rose-800 font-bold cursor-pointer"
+                  >
+                    Remover
+                  </button>
+                )}
+              </div>
+
+              <input
+                type="file"
+                ref={itemFileInputRef}
+                accept="image/*,.dxf"
+                className="hidden"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  try {
+                    const base64 = await fileToDxfImage(file);
+                    setItemDrawingImage(base64);
+                    setSuccessMessage(isDxfFile(file) ? 'Arquivo DXF convertido em vetor com sucesso!' : 'Imagem carregada com sucesso!');
+                    setTimeout(() => setSuccessMessage(null), 3000);
+                  } catch (err) {
+                    console.error('Erro ao processar imagem ou DXF:', err);
+                    setErrorMessage('Falha ao processar arquivo. Verifique o formato.');
+                    setTimeout(() => setErrorMessage(null), 3500);
+                  }
+                  e.target.value = '';
+                }}
+              />
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => itemFileInputRef.current?.click()}
+                  className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 border rounded-xl text-xs font-semibold transition-all cursor-pointer shadow-2xs ${
+                    itemDrawingImage
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100'
+                      : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-300'
+                  }`}
+                  title="Aceita fotos (PNG, JPG) e arquivos CAD (.dxf) com conversão vetorial automática"
+                >
+                  <Upload className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>{itemDrawingImage ? 'Alterar .DXF / Imagem' : 'Anexar .DXF / Imagem'}</span>
+                </button>
+
+                {itemDrawingImage && (
+                  <div className="w-9 h-9 rounded-lg border border-slate-300 bg-slate-100 p-0.5 overflow-hidden flex items-center justify-center shrink-0" title="Miniatura do desenho técnico / DXF">
+                    <img src={itemDrawingImage} alt="Preview" className="max-w-full max-h-full object-contain" />
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
@@ -2700,12 +2791,21 @@ const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNu
                         </span>
                       </td>
                       <td className="py-3 px-3 font-medium text-slate-900">
-                        {item.description || item.descricao || '-'}
-                        {(item.notes || item.observacao) && (
-                          <span className="block text-[10px] text-slate-400 font-normal">
-                            Obs: {item.notes || item.observacao}
-                          </span>
-                        )}
+                        <div className="flex items-center gap-2">
+                          {(item.drawingImage || item.fotoDesenho) && (
+                            <div className="w-6 h-6 rounded border border-indigo-200 bg-indigo-50/50 p-0.5 overflow-hidden flex items-center justify-center shrink-0" title="Desenho técnico / CAD anexado">
+                              <img src={item.drawingImage || item.fotoDesenho} alt="CAD" className="max-w-full max-h-full object-contain" />
+                            </div>
+                          )}
+                          <div>
+                            <span>{item.description || item.descricao || '-'}</span>
+                            {(item.notes || item.observacao) && (
+                              <span className="block text-[10px] text-slate-400 font-normal">
+                                Obs: {item.notes || item.observacao}
+                              </span>
+                            )}
+                          </div>
+                        </div>
                       </td>
                       <td className="py-3 px-3 text-center font-mono text-slate-600 font-bold">
                         {item.constant || '7.85'}

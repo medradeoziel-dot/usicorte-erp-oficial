@@ -1,10 +1,14 @@
 import React from 'react';
+import EtiquetaDesenho from '../../../../src/components/EtiquetaDesenho';
 
 export interface ItemRelatorio {
   idVer?: string | number;
   produto: string;
   medida: string;
   qtd: number;
+  observacao?: string;
+  descricao?: string;
+  imagem?: string;
 }
 
 interface Props {
@@ -38,7 +42,7 @@ export default function RelatorioEtiquetaPrint({ cliente, numeroPedido, itens }:
             style={{ width: '100%', minHeight: '360px' }}
           >
             {/* Topo da Etiqueta */}
-            <div className="text-center mb-3 sm:mb-4 border-b border-slate-200 pb-2">
+            <div className="text-center mb-3 sm:mb-4 pb-2">
               <h1 className="text-xl sm:text-2xl font-black uppercase tracking-wide text-slate-900">
                 Usicorte Metais
               </h1>
@@ -75,22 +79,26 @@ export default function RelatorioEtiquetaPrint({ cliente, numeroPedido, itens }:
                     {item.qtd} PÇ
                   </p>
                 </div>
+                {item.observacao && (
+                  <div>
+                    <p className="text-[10px] sm:text-xs font-bold text-slate-500 uppercase">Obs:</p>
+                    <p className="text-xs font-semibold text-slate-700 italic">
+                      {item.observacao}
+                    </p>
+                  </div>
+                )}
               </div>
 
-              {/* Esquema Técnico / Gabarito de Usinagem */}
-              <div className="w-1/2 border-2 border-dashed border-slate-400 rounded-lg flex items-center justify-center relative bg-slate-50 p-2 min-h-[140px]">
-                <div className="w-full h-full border border-slate-200 bg-white flex flex-col items-center justify-center relative shadow-xs p-2">
-                  <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full border border-slate-400 flex items-center justify-center bg-slate-100 z-10">
-                    <span className="text-[9px] sm:text-[10px] text-slate-600 font-bold whitespace-nowrap">
-                      Ø 70 mm
-                    </span>
-                  </div>
-                  <div className="absolute border-t border-dashed border-slate-300 w-full top-1/2 -translate-y-1/2"></div>
-                  <div className="absolute border-l border-dashed border-slate-300 h-full left-1/2 -translate-x-1/2"></div>
-                  <span className="absolute bottom-1.5 text-[7px] sm:text-[8px] font-bold text-slate-400 uppercase tracking-wider text-center">
-                    Corte / Usinagem CNC
-                  </span>
-                </div>
+              {/* Esquema Técnico / Gabarito de Usinagem Nítido */}
+              <div className="w-1/2 border-2 border-dashed border-slate-400 rounded-lg flex items-center justify-center relative bg-slate-50 p-2 min-h-[140px] overflow-hidden">
+                <EtiquetaDesenho
+                  material={item.produto}
+                  medida={item.medida}
+                  observacao={item.observacao}
+                  descricao={item.descricao || item.produto}
+                  imagem={item.imagem}
+                  engrossarTracos={true}
+                />
               </div>
             </div>
 

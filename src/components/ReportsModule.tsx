@@ -2,6 +2,8 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Quote, QuoteItem, Client } from '../types';
 import Logo from './Logo';
 import { QuotePrintView } from './QuotePrintView';
+import EtiquetaDesenho from './EtiquetaDesenho';
+import { fileToDxfImage, isDxfFile, renderDxfToDataUrl } from '../utils/dxfRenderer';
 import { 
   formatCurrency, 
   formatWeightKg, 
@@ -35,6 +37,7 @@ import {
   Upload,
   Trash2,
   Eye,
+  Pencil,
   CheckCircle2,
   Search,
   Filter,
@@ -50,6 +53,7 @@ interface ReportsModuleProps {
   currentQuote: Quote;
   clients?: Client[];
   onNavigateToQuote?: () => void;
+  onEditQuote?: (quote: Quote) => void;
 }
 
 export type StatusProposta = 'rascunho' | 'pendente' | 'aprovado' | 'rejeitado';
@@ -89,7 +93,7 @@ const STATUS_STYLES: Record<StatusProposta, string> = {
 // Sample technical blueprint drawing in base64 SVG
 const SAMPLE_DRAWING_BASE64 = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="100%" height="100%"><rect width="200" height="200" fill="%23f8fafc" stroke="%23cbd5e1" stroke-width="2"/><circle cx="100" cy="100" r="60" fill="none" stroke="%232563eb" stroke-width="2" stroke-dasharray="4,2"/><circle cx="100" cy="100" r="35" fill="%23dbeafe" stroke="%231e40af" stroke-width="2.5"/><line x1="20" y1="100" x2="180" y2="100" stroke="%23ef4444" stroke-width="1" stroke-dasharray="3,3"/><line x1="100" y1="20" x2="100" y2="180" stroke="%23ef4444" stroke-width="1" stroke-dasharray="3,3"/><circle cx="100" cy="100" r="3" fill="%23ef4444"/><text x="100" y="32" font-family="monospace" font-size="10" text-anchor="middle" font-weight="bold" fill="%231e293b">Ø 120 ±0.05</text><text x="100" y="104" font-family="monospace" font-size="9" text-anchor="middle" font-weight="bold" fill="%231e40af">Ø 70 mm</text><text x="100" y="188" font-family="sans-serif" font-size="8" text-anchor="middle" fill="%2364748b">CORTE / USINAGEM CNC</text></svg>`;
 
-export default function ReportsModule({ currentQuote, clients = [], onNavigateToQuote }: ReportsModuleProps) {
+export default function ReportsModule({ currentQuote, clients = [], onNavigateToQuote, onEditQuote }: ReportsModuleProps) {
   // Navigation tab: 'propostas' | 'consulta'
   const [activeTab, setActiveTab] = useState<'propostas' | 'consulta'>('propostas');
 
@@ -100,6 +104,86 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
   // Active document preview / print mode
   const [activeModel, setActiveModel] = useState<PrintModelType>('A4-inteiro');
   const [printMode, setPrintMode] = useState<'pedido' | 'etiqueta' | 'proposta' | 'corte'>('pedido');
+
+  // Helper para carregar e editar uma cotação completa no formulário de vendas/orçamento
+  const handleEditCotacaoFromConsulta = async (item: ConsultaItem) => {
+    const targetId = item.cotacaoId || item.cotacao;
+    let quoteObj: Quote | null = null;
+
+    if (targetId) {
+      quoteObj = await carregarCotacaoPorId(targetId);
+    }
+
+    if (!quoteObj) {
+      // Tenta buscar no localStorage
+      try {
+        const saved = localStorage.getItem('s_orcamentos');
+        if (saved) {
+          const parsed: Quote[] = JSON.parse(saved);
+          const found = parsed.find(
+            q => (q.quoteNumber && q.quoteNumber.trim().toLowerCase() === String(item.cotacao).trim().toLowerCase()) ||
+                 (q.id && q.id === item.cotacaoId) ||
+                 (q.id && q.id === item.cotacao)
+          );
+          if (found) {
+            quoteObj = found;
+          }
+        }
+      } catch (e) {
+        console.warn('Erro ao carregar do localStorage:', e);
+      }
+    }
+
+    // Se ainda não encontrou no Supabase/localStorage, reconstrói a partir dos itens da consulta
+    if (!quoteObj) {
+      const sameQuoteItems = dbQuotesItems.filter(
+        i => (i.cotacao && i.cotacao === item.cotacao) || (i.cotacaoId && i.cotacaoId === item.cotacaoId)
+      );
+
+      const itemsToUse = sameQuoteItems.length > 0 ? sameQuoteItems : [item];
+      const sumTotal = itemsToUse.reduce((acc, curr) => acc + (curr.valorGeral || (curr.unitario * curr.qtd)), 0);
+
+      quoteObj = {
+        id: item.cotacaoId || item.cotacao || 'COT-TEMP',
+        quoteNumber: item.cotacao || 'COT-TEMP',
+        date: item.data || new Date().toISOString().slice(0, 10),
+        clientName: item.empresa || 'Cliente Balcão',
+        contactPerson: item.contato !== '-' ? item.contato : '',
+        status: (item.status === 'aprovado' ? 'Aprovado' : item.status === 'pendente' ? 'Enviado' : item.status === 'rejeitado' ? 'Cancelado' : 'Rascunho'),
+        validityDays: 10,
+        paymentTerms: 'À Vista / Pix (3% Desc.)',
+        observations: item.observacao || '',
+        items: itemsToUse.map((it, idx) => ({
+          id: String(it.itemId || it.idVer || idx + 1),
+          date: it.data || new Date().toISOString().slice(0, 10),
+          companyName: it.empresa,
+          description: it.descricao,
+          descricao: it.descricao,
+          constantName: it.produto,
+          constant: '0.00785',
+          measure: it.medida,
+          quantity: it.qtd,
+          qtd: it.qtd,
+          unitPrice: it.unitario,
+          valorUnitario: it.unitario,
+          subtotal: it.valorGeral,
+          notes: it.observacao || ''
+        })),
+        subtotalTotal: sumTotal,
+        grandTotal: sumTotal,
+        discount: 0,
+        shipping: 0,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+    }
+
+    if (onEditQuote) {
+      onEditQuote(quoteObj);
+    } else if (onNavigateToQuote) {
+      onNavigateToQuote();
+    }
+  };
   
   // Limpeza de classes de impressão ao desmontar ou após fechar caixa de impressão
   useEffect(() => {
@@ -721,26 +805,40 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
   // Mensagem de resultado do casamento nome-do-arquivo x observação
   const [matchInfo, setMatchInfo] = useState<string>('');
 
-  // Handle clipboard paste (Ctrl + V / PrintScreen / Win+Shift+S)
-  const processClipboardItems = (clipboardData: DataTransfer | null) => {
+  // Handle clipboard paste (Ctrl + V / PrintScreen / Win+Shift+S ou arquivo DXF)
+  const processClipboardItems = async (clipboardData: DataTransfer | null) => {
     if (!clipboardData) return;
     const items = clipboardData.items;
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
-      if (item.type.indexOf('image') !== -1) {
+      if (item.type.indexOf('image') !== -1 || item.kind === 'file') {
         const blob = item.getAsFile();
         if (blob) {
-          const reader = new FileReader();
-          reader.onload = (e) => {
-            const base64 = e.target?.result as string;
-            // aplica a imagem colada APENAS ao item selecionado
+          try {
+            const base64 = await fileToDxfImage(blob);
             setDrawingPhotos(prev => ({ ...prev, [selectedItemIndex]: base64 }));
             setPasteSuccess(true);
             setTimeout(() => setPasteSuccess(false), 4000);
-          };
-          reader.readAsDataURL(blob);
+          } catch (err) {
+            console.warn('Erro ao processar imagem ou DXF colado:', err);
+          }
         }
         break;
+      }
+    }
+
+    // Se o clipboard contém texto com dados de arquivo DXF
+    const text = clipboardData.getData('text');
+    if (text && (text.includes('ENTITIES') || text.includes('SECTION'))) {
+      try {
+        const dataUrl = renderDxfToDataUrl(text);
+        if (dataUrl) {
+          setDrawingPhotos(prev => ({ ...prev, [selectedItemIndex]: dataUrl }));
+          setPasteSuccess(true);
+          setTimeout(() => setPasteSuccess(false), 4000);
+        }
+      } catch (err) {
+        console.warn('Erro ao interpretar texto DXF colado:', err);
       }
     }
   };
@@ -763,8 +861,8 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
   };
 
 
-  // Handle drawing photo upload (SELEÇÃO MÚLTIPLA + casamento pelo nome do arquivo)
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Handle drawing photo upload (SELEÇÃO MÚLTIPLA + casamento pelo nome do arquivo, aceita PNG/JPG e .DXF)
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []) as File[];
     if (!files.length) return;
 
@@ -777,10 +875,9 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
 
     const matched: string[] = [];
     const unmatched: string[] = [];
-    let pending = files.length;
 
-    files.forEach((file) => {
-      const fileKey = normalizeKey(file.name);
+    for (const file of files) {
+      const fileKey = normalizeKey(file.name.replace(/\.dxf$/i, ''));
 
       // 1) match exato  2) match parcial (arquivo contém a observação ou vice-versa)
       let targetIdx = labelMap.get(fileKey);
@@ -797,23 +894,18 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
 
       if (targetIdx === undefined) {
         unmatched.push(file.name);
-        if (--pending === 0) finish();
-        return;
+        continue;
       }
 
       const idx = targetIdx;
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const base64 = event.target?.result as string;
+      try {
+        const base64 = await fileToDxfImage(file);
         setDrawingPhotos(prev => ({ ...prev, [idx]: base64 }));
         matched.push(`${file.name} → item ${idx + 1}`);
-        if (--pending === 0) finish();
-      };
-      reader.onerror = () => {
+      } catch (err) {
+        console.error('Erro ao converter arquivo para imagem:', err);
         unmatched.push(file.name);
-        if (--pending === 0) finish();
-      };
-      reader.readAsDataURL(file);
+      }
 
       // Sincroniza com Supabase Storage bucket 'desenhos'
       if (displayQuote?.quoteNumber) {
@@ -821,16 +913,14 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
           console.warn('Upload bucket desenhos aviso:', e);
         });
       }
-    });
-
-    function finish() {
-      setPasteSuccess(matched.length > 0);
-      setMatchInfo(
-        `${matched.length} imagem(ns) vinculada(s)` +
-        (unmatched.length ? ` • sem correspondência: ${unmatched.join(', ')}` : '')
-      );
-      setTimeout(() => { setPasteSuccess(false); setMatchInfo(''); }, 6000);
     }
+
+    setPasteSuccess(matched.length > 0);
+    setMatchInfo(
+      `${matched.length} desenho(s)/imagem(ns) vinculado(s)` +
+      (unmatched.length ? ` • sem correspondência: ${unmatched.join(', ')}` : '')
+    );
+    setTimeout(() => { setPasteSuccess(false); setMatchInfo(''); }, 6000);
 
     // permite reenviar os mesmos arquivos
     e.target.value = '';
@@ -1350,7 +1440,7 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
             }`}
           >
             {/* Cabeçalho Original */}
-            <div className="etiqueta-header text-center pb-2 border-b-2 border-black mb-3">
+            <div className="etiqueta-header text-center pb-2 mb-3">
               <h2 className="font-extrabold text-xl tracking-wider uppercase leading-tight">USICORTE METAIS</h2>
               <p className="text-xs font-bold text-gray-800 mt-0.5">
                 PEDIDO Nº: <span className="font-mono font-black text-blue-900 rel-numero">{displayQuote.quoteNumber || displayQuote.id || 'COT-2026-9663'}</span>
@@ -1403,19 +1493,14 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
                 id="box-foto-etiqueta"
                 className="etiqueta-foto-box col-span-5 border-2 border-dashed border-gray-400 p-1 rounded flex items-center justify-center min-h-[110px] bg-slate-50 overflow-hidden"
               >
-                {img ? (
-                  <img 
-                    id="img-desenho-etiqueta"
-                    src={img} 
-                    alt="Desenho Peça" 
-                    className="desenho-tecnico-img max-h-[100px] w-auto object-contain print:contrast-[250%] print:brightness-90"
-                    style={{ filter: 'contrast(200%) brightness(85%)' }}
-                  />
-                ) : (
-                  <span id="sem-foto-msg" className="text-[9px] font-bold text-gray-400 text-center uppercase tracking-wide">
-                    CORTE / USINAGEM CNC
-                  </span>
-                )}
+                <EtiquetaDesenho
+                  material={item.constanteNome || item.material || (item as any).produto || item.descricao}
+                  medida={formatarMedidasLimpa(item) || item.medida || (item as any).measure}
+                  observacao={item.observacao || item.notes || item.info || item.descricao || displayQuote.observations}
+                  descricao={item.descricao || (item as any).description || item.material}
+                  imagem={img}
+                  engrossarTracos={true}
+                />
               </div>
             </div>
 
@@ -1807,7 +1892,7 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
                       onChange={(e) => handleSelectAll(e.target.checked)} 
                     />
                   </th>
-                  <th style={{ width: '95px', textAlign: 'center' }}>Ações</th>
+                  <th style={{ width: '160px', textAlign: 'center' }}>Ações</th>
                   <th>Cotação</th>
                   <th>Situação</th>
                   <th>Data</th>
@@ -1854,6 +1939,18 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
                         </td>
                         <td style={{ textAlign: 'center' }}>
                           <div className="flex items-center justify-center gap-1">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleEditCotacaoFromConsulta(item);
+                              }}
+                              className="px-2 py-1 bg-amber-500/20 hover:bg-amber-500 text-amber-300 hover:text-white border border-amber-500/40 rounded text-[11px] font-semibold flex items-center gap-1 transition-all cursor-pointer shadow-xs"
+                              title="Editar esta cotação completa no formulário"
+                            >
+                              <Pencil className="w-3 h-3" />
+                              <span>Editar</span>
+                            </button>
                             <button
                               type="button"
                               onClick={async (e) => {
@@ -2296,8 +2393,7 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
                   )}
                 </span>
                 <span className="text-[11px] text-slate-400">
-                  Ou clique em "Carregar Arquivos" e selecione VÁRIAS imagens de uma vez — cada arquivo vai
-                  para a etiqueta cujo campo <strong>Observação</strong> tenha o mesmo nome do arquivo.
+                  Ou clique em "Carregar Arquivos" e selecione fotos ou <strong>arquivos CAD (.dxf)</strong> — conversão vetorial automática para a etiqueta por observação ou item ativo.
                 </span>
                 {matchInfo && (
                   <span className="block text-[11px] text-amber-300 mt-1">{matchInfo}</span>
@@ -2319,7 +2415,7 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
                 type="file" 
                 ref={fileInputRef} 
                 onChange={handleImageUpload} 
-                accept="image/*" 
+                accept="image/*,.dxf" 
                 multiple 
                 className="hidden" 
               />
@@ -2332,7 +2428,7 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
                 className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
               >
                 <Upload className="w-3.5 h-3.5 text-blue-400" />
-                <span>{currentDrawing ? 'Alterar / Adicionar Arquivos' : 'Carregar Arquivos'}</span>
+                <span>{currentDrawing ? 'Alterar / Adicionar Arquivos (.dxf/fotos)' : 'Carregar Imagens / .DXF'}</span>
               </button>
             </div>
           </div>

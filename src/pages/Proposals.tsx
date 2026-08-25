@@ -22,6 +22,7 @@ import { useLocalStorage } from "@/lib/useLocalStorage";
 import { db, fetchCotacaoById, type SupabaseCotacao, type SupabaseCliente, type SupabaseCotacaoItem, type StatusCotacao, uploadDesenhoStorage } from "@/lib/db";
 import LabelPreview from "@/components/LabelPreview";
 import A4Preview from "@/components/A4Preview";
+import { fileToDxfImage, isDxfFile, renderDxfToDataUrl } from "@/utils/dxfRenderer";
 
 const viewOptions: { value: ViewType; label: string }[] = [
   { value: "a4-inteiro", label: "A4 Inteiro" },
@@ -305,24 +306,37 @@ export default function Proposals() {
     [pecaAtiva, setFotosPorPeca]
   );
 
-  const readFileAsBase64 = (file: File) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const result = e.target?.result;
-      if (typeof result === "string") saveImage(result);
-    };
-    reader.readAsDataURL(file);
+  const processFile = async (file: File) => {
+    try {
+      const result = await fileToDxfImage(file);
+      if (result) saveImage(result);
+    } catch (err) {
+      console.error("Erro ao processar imagem ou DXF:", err);
+    }
   };
 
   useEffect(() => {
-    const handlePaste = (e: ClipboardEvent) => {
+    const handlePaste = async (e: ClipboardEvent) => {
       const pasteItems = e.clipboardData?.items;
       if (!pasteItems) return;
       for (const item of pasteItems) {
-        if (item.type.startsWith("image/")) {
+        if (item.type.startsWith("image/") || item.kind === "file") {
           const file = item.getAsFile();
-          if (file) readFileAsBase64(file);
-          break;
+          if (file) {
+            await processFile(file);
+            break;
+          }
+        }
+      }
+
+      // Se colou texto com conteúdo DXF puro (ex: HEADER, ENTITIES, 0 LINE...)
+      const text = e.clipboardData?.getData("text");
+      if (text && (text.includes("ENTITIES") || text.includes("SECTION"))) {
+        try {
+          const dataUrl = renderDxfToDataUrl(text);
+          if (dataUrl) saveImage(dataUrl);
+        } catch (e) {
+          console.warn("Falha ao interpretar texto colado como DXF:", e);
         }
       }
     };
@@ -330,9 +344,9 @@ export default function Proposals() {
     return () => window.removeEventListener("paste", handlePaste);
   }, [saveImage]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) readFileAsBase64(file);
+    if (file) await processFile(file);
     e.target.value = "";
   };
 
@@ -667,7 +681,7 @@ export default function Proposals() {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/*"
+                accept="image/*,.dxf"
                 className="hidden"
                 onChange={handleFileChange}
               />
@@ -676,7 +690,7 @@ export default function Proposals() {
                 className="w-full flex items-center justify-center gap-2 bg-slate-700 hover:bg-slate-600 border border-slate-600 hover:border-amber-500/50 text-slate-300 hover:text-white text-xs font-medium py-2.5 rounded-lg transition-all cursor-pointer"
               >
                 <Upload size={13} />
-                {hasFotoAtiva ? "Alterar Arquivo" : "Carregar Arquivo"}
+                {hasFotoAtiva ? "Alterar Arquivo (Imagem ou .DXF)" : "Carregar Foto / Arquivo .DXF"}
               </button>
 
               {hasFotoAtiva && (
