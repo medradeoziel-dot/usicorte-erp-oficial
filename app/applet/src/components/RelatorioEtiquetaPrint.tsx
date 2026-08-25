@@ -14,147 +14,294 @@ interface Props {
   itens: ItemRelatorio[];
 }
 
+/**
+ * Etiqueta de impressão 80 x 80 mm.
+ *
+ * - Cada etiqueta ocupa UMA página de exatamente 80 x 80 mm (margem 0),
+ *   ideal para impressora térmica de etiquetas.
+ * - Sem a linha/borda superior que existia no cabeçalho da versão anterior.
+ * - Todo o conteúdo é dimensionado em mm e usa box-sizing: border-box para
+ *   nunca estourar os limites da etiqueta.
+ */
 export default function RelatorioEtiquetaPrint({
   cliente,
   numeroPedido,
   itens,
 }: Props) {
   return (
-    <div className="w-full min-h-screen bg-background text-foreground font-sans print:bg-white print:p-0 p-4 sm:p-8 max-w-5xl mx-auto box-border overflow-x-hidden">
-      {/* Botão de Impressão (Oculto na impressão) */}
-      <div className="print:hidden mb-6 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 sm:flex sm:flex-wrap sm:justify-end">
-        <span className="text-xs text-muted-foreground font-semibold sm:hidden truncate">
+    <div className="relatorio-etiqueta-root">
+      {/* Botão de Impressão (oculto na impressão) */}
+      <div className="relatorio-acoes">
+        <span className="relatorio-contagem">
           {itens.length} {itens.length === 1 ? "etiqueta" : "etiquetas"}
         </span>
         <button
+          type="button"
           onClick={() => window.print()}
-          className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded shadow font-bold text-xs sm:text-sm cursor-pointer transition flex items-center gap-2 shrink-0"
+          className="relatorio-botao"
         >
-          <span>🏷️</span> Imprimir Etiquetas
+          🏷️ Imprimir Etiquetas
         </button>
       </div>
 
-      {/* Grade de Etiquetas (1 coluna no mobile, 2 colunas no desktop) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 print:grid-cols-2 print:gap-0">
+      {/* Grade de etiquetas (apenas para visualização; na impressão cada uma vira uma página) */}
+      <div className="relatorio-grade">
         {itens.map((item, index) => (
-          <div
-            key={item.idVer || index}
-            className="etiqueta-pagina border-2 border-foreground rounded-xl bg-card p-4 sm:p-5 relative flex flex-col justify-between shadow-sm print:shadow-none print:rounded-none print:border-0 print:w-[204mm] print:h-[291mm] print:overflow-hidden print:mx-auto print:my-0"
-            style={{ width: "100%", minHeight: "360px" }}
+          <section
+            key={item.idVer ?? index}
+            className="etiqueta-pagina"
+            aria-label={`Etiqueta ${index + 1}`}
           >
-            {/* Topo da Etiqueta */}
-            <div className="text-center mb-3 sm:mb-4 border-b border-border pb-2 print:mb-6">
-              <h1 className="text-xl sm:text-2xl font-black uppercase tracking-wide text-card-foreground print:text-3xl">
-                Usicorte Metais
-              </h1>
-              <h2 className="text-xs sm:text-sm font-bold text-muted-foreground mt-0.5 uppercase print:text-base">
-                Pedido Nº:{" "}
-                <span className="text-primary font-mono">{numeroPedido}</span>
-              </h2>
-            </div>
+            {/* Topo da etiqueta — sem borda/linha superior */}
+            <header className="etiqueta-topo">
+              <span className="etiqueta-marca">Usicorte Metais</span>
+              <span className="etiqueta-pedido">
+                Pedido Nº: <strong>{numeroPedido}</strong>
+              </span>
+            </header>
 
-            {/* Conteúdo: Dados à esquerda, Esquema Técnico à direita */}
-            <div className="flex-1 flex flex-row gap-3 sm:gap-4 my-2 print:gap-6 print:my-4">
-              {/* Informações da Peça */}
-              <div className="w-1/2 flex flex-col justify-start gap-2.5 text-left print:gap-4">
-                <div>
-                  <p className="text-[10px] sm:text-xs font-bold text-muted-foreground uppercase print:text-sm">
-                    Empresa / Cliente:
-                  </p>
-                  <p className="font-bold text-xs sm:text-sm leading-tight uppercase text-card-foreground break-words print:text-base">
-                    {cliente}
-                  </p>
+            {/* Conteúdo: dados à esquerda, esquema técnico à direita */}
+            <div className="etiqueta-corpo">
+              {/* Informações da peça */}
+              <dl className="etiqueta-dados">
+                <div className="etiqueta-linha">
+                  <dt>Empresa / Cliente:</dt>
+                  <dd>{cliente}</dd>
                 </div>
-
-                <div>
-                  <p className="text-[10px] sm:text-xs font-bold text-muted-foreground uppercase print:text-sm">
-                    Material:
-                  </p>
-                  <p className="text-base sm:text-lg font-black uppercase text-card-foreground print:text-xl">
-                    {item.produto}
-                  </p>
+                <div className="etiqueta-linha">
+                  <dt>Material:</dt>
+                  <dd>{item.produto}</dd>
                 </div>
-
-                <div>
-                  <p className="text-[10px] sm:text-xs font-bold text-muted-foreground uppercase print:text-sm">
-                    Medida:
-                  </p>
-                  <p className="text-sm sm:text-base font-bold leading-tight text-foreground font-mono print:text-lg">
-                    {item.medida}
-                  </p>
+                <div className="etiqueta-linha">
+                  <dt>Medida:</dt>
+                  <dd>{item.medida}</dd>
                 </div>
-
-                <div>
-                  <p className="text-[10px] sm:text-xs font-bold text-muted-foreground uppercase print:text-sm">
-                    Qtd:
-                  </p>
-                  <p className="text-base sm:text-xl font-black text-card-foreground print:text-2xl">
-                    {item.qtd} PC
-                  </p>
+                <div className="etiqueta-linha">
+                  <dt>Qtd:</dt>
+                  <dd>{item.qtd} PC</dd>
                 </div>
-
                 {item.observacao && (
-                  <div>
-                    <p className="text-[10px] sm:text-xs font-bold text-muted-foreground uppercase print:text-sm">
-                      Observação:
-                    </p>
-                    <p className="text-xs sm:text-sm font-bold italic text-foreground break-words print:text-base">
-                      {item.observacao}
-                    </p>
+                  <div className="etiqueta-linha">
+                    <dt>Observação:</dt>
+                    <dd>{item.observacao}</dd>
                   </div>
                 )}
-              </div>
+              </dl>
 
-              {/* Esquema Técnico / Gabarito de Usinagem */}
-              <div className="w-1/2 border-2 border-dashed border-muted-foreground rounded-lg flex items-center justify-center relative bg-muted p-2 min-h-[140px] print:min-h-[200px]">
-                <div className="w-full h-full border border-border bg-card flex flex-col items-center justify-center relative p-2">
-                  <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full border border-muted-foreground flex items-center justify-center bg-muted z-10 print:w-28 print:h-28">
-                    <span className="text-[9px] sm:text-[10px] text-muted-foreground font-bold whitespace-nowrap print:text-xs">
-                      Ø 70 mm
-                    </span>
-                  </div>
-                  <div className="absolute border-t border-dashed border-border w-full top-1/2 -translate-y-1/2"></div>
-                  <div className="absolute border-l border-dashed border-border h-full left-1/2 -translate-x-1/2"></div>
-                  <span className="absolute bottom-1.5 text-[7px] sm:text-[8px] font-bold text-muted-foreground uppercase tracking-wider text-center print:text-[10px]">
-                    Corte / Usinagem CNC
-                  </span>
+              {/* Esquema técnico / gabarito de usinagem */}
+              <div className="etiqueta-esquema">
+                <div className="esquema-circulo">
+                  <span className="esquema-diametro">Ø {item.medida}</span>
                 </div>
+                <span className="esquema-legenda">Corte / Usinagem CNC</span>
               </div>
             </div>
 
-            {/* Rodapé da Etiqueta */}
-            <div className="mt-3 sm:mt-4 border-t-2 border-foreground pt-1.5 text-center print:mt-6 print:pt-3">
-              <span className="text-[10px] sm:text-xs font-bold uppercase tracking-widest text-muted-foreground print:text-sm">
-                Identificação de Peça / Usicorte Metais
-              </span>
-            </div>
-          </div>
+            {/* Rodapé da etiqueta */}
+            <footer className="etiqueta-rodape">
+              Identificação de Peça / Usicorte Metais
+            </footer>
+          </section>
         ))}
       </div>
 
-      {/* Estilos de impressão */}
       <style>{`
+        /* ===== Visualização na tela ===== */
+        .relatorio-etiqueta-root {
+          font-family: Arial, Helvetica, sans-serif;
+          color: #000;
+          padding: 12px;
+        }
+        .relatorio-acoes {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          margin-bottom: 12px;
+          flex-wrap: wrap;
+        }
+        .relatorio-contagem {
+          font-size: 13px;
+          font-weight: 600;
+          color: #333;
+        }
+        .relatorio-botao {
+          background: #059669;
+          color: #fff;
+          border: none;
+          padding: 8px 16px;
+          border-radius: 6px;
+          font-weight: 700;
+          font-size: 13px;
+          cursor: pointer;
+          box-shadow: 0 1px 2px rgba(0,0,0,.15);
+          transition: background .15s ease;
+        }
+        .relatorio-botao:hover { background: #047857; }
+
+        .relatorio-grade {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, 80mm);
+          gap: 10px;
+          justify-content: start;
+        }
+
+        /* ===== A etiqueta em si (80 x 80 mm) ===== */
+        .etiqueta-pagina {
+          box-sizing: border-box;
+          width: 80mm;
+          height: 80mm;
+          padding: 2.5mm 3mm;
+          border: 0.4mm solid #000;
+          border-radius: 1.5mm;
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+          background: #fff;
+          color: #000;
+        }
+
+        /* Topo — SEM linha/borda inferior (era a "linha de cima" indesejada) */
+        .etiqueta-topo {
+          display: flex;
+          align-items: baseline;
+          justify-content: space-between;
+          gap: 2mm;
+          padding-bottom: 1.5mm;
+        }
+        .etiqueta-marca {
+          font-size: 10pt;
+          font-weight: 800;
+          letter-spacing: .2mm;
+          text-transform: uppercase;
+        }
+        .etiqueta-pedido {
+          font-size: 8.5pt;
+          color: #333;
+        }
+        .etiqueta-pedido strong { color: #000; }
+
+        /* Corpo: dados + esquema */
+        .etiqueta-corpo {
+          flex: 1;
+          display: flex;
+          gap: 3mm;
+          min-height: 0;
+        }
+        .etiqueta-dados {
+          flex: 1;
+          min-width: 0;
+          display: flex;
+          flex-direction: column;
+          gap: 1.6mm;
+          margin: 0;
+        }
+        .etiqueta-linha {
+          display: flex;
+          flex-direction: column;
+          gap: .3mm;
+        }
+        .etiqueta-linha dt {
+          font-size: 6.8pt;
+          font-weight: 700;
+          color: #555;
+          text-transform: uppercase;
+          letter-spacing: .1mm;
+        }
+        .etiqueta-linha dd {
+          margin: 0;
+          font-size: 9pt;
+          font-weight: 600;
+          color: #000;
+          line-height: 1.15;
+          word-break: break-word;
+        }
+
+        .etiqueta-esquema {
+          flex: 0 0 26mm;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 1.5mm;
+        }
+        .esquema-circulo {
+          width: 24mm;
+          height: 24mm;
+          border: 0.4mm dashed #888;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          position: relative;
+        }
+        .esquema-circulo::before {
+          content: "";
+          position: absolute;
+          inset: 4mm;
+          border: 0.3mm solid #000;
+          border-radius: 50%;
+        }
+        .esquema-diametro {
+          font-size: 7pt;
+          font-weight: 700;
+          background: #fff;
+          padding: 0 .5mm;
+          z-index: 1;
+        }
+        .esquema-legenda {
+          font-size: 6.5pt;
+          color: #555;
+          text-align: center;
+          text-transform: uppercase;
+          letter-spacing: .1mm;
+        }
+
+        .etiqueta-rodape {
+          font-size: 6.5pt;
+          color: #555;
+          text-align: center;
+          padding-top: 1.5mm;
+          text-transform: uppercase;
+          letter-spacing: .2mm;
+        }
+
+        /* ===== Impressão ===== */
         @media print {
           @page {
-            size: A4;
-            margin: 3mm;
+            size: 80mm 80mm;
+            margin: 0;
           }
-
-          html,
-          body {
+          html, body {
             margin: 0;
             padding: 0;
-            width: 210mm;
-            height: 297mm;
-            background: white;
+            background: #fff;
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
           }
-
+          .relatorio-etiqueta-root { padding: 0; }
+          /* Esconde tudo que não é a etiqueta */
+          .relatorio-acoes { display: none !important; }
+          .relatorio-grade {
+            display: block;
+            gap: 0;
+          }
+          /* Cada etiqueta = 1 página, exatamente 80x80mm, sem margem extra */
           .etiqueta-pagina {
-            box-sizing: border-box;
-            page-break-inside: avoid;
+            width: 80mm;
+            height: 80mm;
+            margin: 0;
+            border-radius: 0;
+            border: 0.4mm solid #000;
+            page-break-after: always;
+            break-after: page;
             break-inside: avoid;
+            page-break-inside: avoid;
+          }
+          /* A última etiqueta não força página em branco extra */
+          .etiqueta-pagina:last-child {
+            page-break-after: auto;
+            break-after: auto;
           }
         }
       `}</style>
