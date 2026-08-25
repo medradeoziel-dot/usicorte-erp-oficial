@@ -1,4 +1,5 @@
-import React from "react";
+import React, { useState } from "react";
+import { renderDxfToDataUrl } from "../utils/dxfRenderer";
 
 export type TipoDesenho = 
   | "retangulo" 
@@ -28,6 +29,7 @@ export function norm(texto: string | undefined | null): string {
  * - SEXTAVADO / HEXAGONAL                           -> sextavado simples (hexágono)
  * - TREFILADO SAE, LAMINADO SAE, FERRO FFNODULAR,
  *   LATÃO, BUCHA, AÇO VC                            -> eixo liso simples
+ * - Medidas como "1/4 x 200 x 140 mm" ou "200 x 140" -> retângulo
  */
 export function detectarTipoDesenho(...textos: (string | undefined | null)[]): TipoDesenho {
   const t = norm(textos.filter(Boolean).join(" "));
@@ -43,8 +45,12 @@ export function detectarTipoDesenho(...textos: (string | undefined | null)[]): T
     return "flange";
   }
 
-  // 3. Retângulo / Chapa / Quadrado / Bloco
-  if (/\bRETANGUL(O|AR|OS)\b|\bCHAPA(S)?\b|\bBARRA\s*CHATA\b|\bQUADRAD(O|A|OS|AS)\b|\bBLOCO(S)?\b/.test(t)) {
+  // 3. Retângulo / Chapa / Quadrado / Bloco / Placa / Dimensões com frações (ex: 1/4 x 200 x 140 mm)
+  if (
+    /\bRETANGUL(O|AR|OS)\b|\bCHAPA(S)?\b|\bBARRA\s*CHATA\b|\bQUADRAD(O|A|OS|AS)\b|\bBLOCO(S)?\b|\bPLACA\b/.test(t) ||
+    /(?:\d+(?:\/\d+)?|\d+(?:[.,]\d+)?)\s*(?:["'“”]|MM|POL)?\s*[xX×]\s*(?:\d+(?:\/\d+)?|\d+(?:[.,]\d+)?)\s*(?:["'“”]|MM|POL)?\s*[xX×]\s*(?:\d+(?:\/\d+)?|\d+(?:[.,]\d+)?)/.test(t) ||
+    (/(?:\d+(?:\/\d+)?|\d+(?:[.,]\d+)?)\s*[xX×]\s*(?:\d+(?:\/\d+)?|\d+(?:[.,]\d+)?)/.test(t) && !/\b(REDONDO|EIXO|TARUGO|Ø)\b/.test(t))
+  ) {
     return "retangulo";
   }
 
@@ -70,11 +76,6 @@ export function detectarTipoDesenho(...textos: (string | undefined | null)[]): T
     return "eixo-liso";
   }
 
-  // Fallback baseado em dimensões
-  if (/\d+\s*[xX]\s*\d+\s*[xX]\s*\d+/.test(t)) {
-    return "retangulo";
-  }
-
   return "eixo-liso";
 }
 
@@ -85,14 +86,14 @@ export interface EtiquetaDesenhoProps {
   observacao?: string;
   descricao?: string;
   textos?: (string | undefined | null)[];
-  /** Imagem colada/enviada pelo usuário (dataURL ou URL). Tem prioridade sobre o desenho automático. */
+  /** Imagem colada/enviada pelo usuário (dataURL, base64 ou URL). Tem prioridade sobre o desenho automático. */
   imagem?: string | undefined;
   /** Reforça (engrossa) os traços de imagens claras/finas. */
   engrossarTracos?: boolean | undefined;
   className?: string;
 }
 
-/** Desenho técnico automático da etiqueta (SVG vetorial = traço sempre nítido na impressão). */
+/** Desenho técnico automático da etiqueta (SVG vetorial = traço sempre nítido e preto na impressão). */
 export default function EtiquetaDesenho({
   tipo,
   material,
@@ -104,14 +105,29 @@ export default function EtiquetaDesenho({
   engrossarTracos = true,
   className = "",
 }: EtiquetaDesenhoProps) {
-  if (imagem) {
+  const [imgError, setImgError] = useState(false);
+
+  // Se imagem for DXF bruto em texto, converte em imagem na hora
+  let finalImgSrc = imagem;
+  if (imagem && typeof imagem === 'string' && (imagem.includes('ENTITIES') || imagem.includes('SECTION 2'))) {
+    try {
+      finalImgSrc = renderDxfToDataUrl(imagem, { medida, material, observacao, descricao });
+    } catch (e) {
+      console.warn('Erro ao converter texto DXF para imagem no EtiquetaDesenho:', e);
+    }
+  }
+
+  if (finalImgSrc && !imgError) {
     return (
-      <div className={`desenho-box desenho-box--imagem w-full h-full flex items-center justify-center ${className}`}>
+      <div className={`desenho-box desenho-box--imagem w-full h-full flex items-center justify-center bg-white overflow-hidden ${className}`}>
         <img
-          src={imagem}
+          src={finalImgSrc}
           alt="Desenho da peça"
-          className={engrossarTracos ? "desenho-img desenho-img--traco max-h-full max-w-full object-contain print:contrast-[250%]" : "desenho-img max-h-full max-w-full object-contain"}
-          style={{ filter: "contrast(200%) brightness(85%)" }}
+          onError={() => setImgError(true)}
+          className={`desenho-img max-h-full max-w-full object-contain ${
+            engrossarTracos ? 'desenho-img--traco' : ''
+          }`}
+          style={{ imageRendering: 'auto' }}
         />
       </div>
     );
@@ -141,70 +157,71 @@ export default function EtiquetaDesenho({
   }
 
   return (
-    <div className={`desenho-box w-full h-full flex flex-col items-center justify-center relative p-1 ${className}`}>
+    <div className={`desenho-box w-full h-full flex flex-col items-center justify-center relative p-1 bg-white ${className}`}>
       <svg
         viewBox="0 0 100 100"
         className="desenho-svg w-full h-full max-h-[90px] max-w-[90px] text-black"
         role="img"
         aria-label={`Desenho ${tipoFinal}`}
+        style={{ stroke: '#000000', color: '#000000' }}
       >
-        {/* RETÂNGULO */}
+        {/* RETÂNGULO / BLOC / CHAPA (ex: 1/4 x 200 x 140 mm) */}
         {tipoFinal === "retangulo" && (
           <>
-            <rect x="12" y="24" width="76" height="52" fill="none" stroke="#000" strokeWidth="2.8" />
-            <line x1="8" y1="50" x2="92" y2="50" stroke="#000" strokeWidth="0.9" strokeDasharray="4 3" />
-            <line x1="50" y1="20" x2="50" y2="80" stroke="#000" strokeWidth="0.9" strokeDasharray="4 3" />
+            <rect x="12" y="24" width="76" height="52" rx="2" fill="none" stroke="#000000" strokeWidth="2.8" />
+            <line x1="6" y1="50" x2="94" y2="50" stroke="#000000" strokeWidth="0.9" strokeDasharray="4 3" />
+            <line x1="50" y1="18" x2="50" y2="82" stroke="#000000" strokeWidth="0.9" strokeDasharray="4 3" />
           </>
         )}
 
         {/* FLANGE (Círculo com Furo central) */}
         {tipoFinal === "flange" && (
           <>
-            <circle cx="50" cy="50" r="38" fill="none" stroke="#000" strokeWidth="2.8" />
-            <circle cx="50" cy="50" r="14" fill="none" stroke="#000" strokeWidth="2.5" />
-            <line x1="6" y1="50" x2="94" y2="50" stroke="#000" strokeWidth="0.9" strokeDasharray="4 3" />
-            <line x1="50" y1="6" x2="50" y2="94" stroke="#000" strokeWidth="0.9" strokeDasharray="4 3" />
+            <circle cx="50" cy="50" r="38" fill="none" stroke="#000000" strokeWidth="2.8" />
+            <circle cx="50" cy="50" r="14" fill="none" stroke="#000000" strokeWidth="2.5" />
+            <line x1="6" y1="50" x2="94" y2="50" stroke="#000000" strokeWidth="0.9" strokeDasharray="4 3" />
+            <line x1="50" y1="6" x2="50" y2="94" stroke="#000000" strokeWidth="0.9" strokeDasharray="4 3" />
           </>
         )}
 
         {/* DISCO (Círculo Simples) */}
         {tipoFinal === "disco" && (
           <>
-            <circle cx="50" cy="50" r="38" fill="none" stroke="#000" strokeWidth="2.8" />
-            <line x1="6" y1="50" x2="94" y2="50" stroke="#000" strokeWidth="0.9" strokeDasharray="4 3" />
-            <line x1="50" y1="6" x2="50" y2="94" stroke="#000" strokeWidth="0.9" strokeDasharray="4 3" />
+            <circle cx="50" cy="50" r="38" fill="none" stroke="#000000" strokeWidth="2.8" />
+            <line x1="6" y1="50" x2="94" y2="50" stroke="#000000" strokeWidth="0.9" strokeDasharray="4 3" />
+            <line x1="50" y1="6" x2="50" y2="94" stroke="#000000" strokeWidth="0.9" strokeDasharray="4 3" />
           </>
         )}
 
         {/* BRONZE (Eixo de Bronze Simples) */}
         {tipoFinal === "bronze" && (
           <>
-            <rect x="14" y="32" width="72" height="36" rx="2" fill="none" stroke="#000" strokeWidth="2.8" />
-            <line x1="36" y1="32" x2="36" y2="68" stroke="#000" strokeWidth="1.2" />
-            <line x1="64" y1="32" x2="64" y2="68" stroke="#000" strokeWidth="1.2" />
-            <line x1="14" y1="44" x2="22" y2="32" stroke="#000" strokeWidth="1" />
-            <line x1="14" y1="56" x2="30" y2="32" stroke="#000" strokeWidth="1" />
-            <line x1="6" y1="50" x2="94" y2="50" stroke="#000" strokeWidth="0.9" strokeDasharray="4 3" />
-            <line x1="50" y1="26" x2="50" y2="74" stroke="#000" strokeWidth="0.9" strokeDasharray="4 3" />
+            <rect x="14" y="32" width="72" height="36" rx="2" fill="none" stroke="#000000" strokeWidth="2.8" />
+            <line x1="36" y1="32" x2="36" y2="68" stroke="#000000" strokeWidth="1.2" />
+            <line x1="64" y1="32" x2="64" y2="68" stroke="#000000" strokeWidth="1.2" />
+            <line x1="14" y1="44" x2="22" y2="32" stroke="#000000" strokeWidth="1" />
+            <line x1="14" y1="56" x2="30" y2="32" stroke="#000000" strokeWidth="1" />
+            <line x1="6" y1="50" x2="94" y2="50" stroke="#000000" strokeWidth="0.9" strokeDasharray="4 3" />
+            <line x1="50" y1="26" x2="50" y2="74" stroke="#000000" strokeWidth="0.9" strokeDasharray="4 3" />
           </>
         )}
 
         {/* SEXTAVADO (Sextavado Simples) */}
         {tipoFinal === "sextavado" && (
           <>
-            <polygon points="50,12 83,31 83,69 50,88 17,69 17,31" fill="none" stroke="#000" strokeWidth="2.8" />
-            <line x1="50" y1="6" x2="50" y2="94" stroke="#000" strokeWidth="0.9" strokeDasharray="4 3" />
-            <line x1="10" y1="50" x2="90" y2="50" stroke="#000" strokeWidth="0.9" strokeDasharray="4 3" />
-            <circle cx="50" cy="50" r="2.5" fill="#000" />
+            <polygon points="50,12 83,31 83,69 50,88 17,69 17,31" fill="none" stroke="#000000" strokeWidth="2.8" />
+            <line x1="50" y1="6" x2="50" y2="94" stroke="#000000" strokeWidth="0.9" strokeDasharray="4 3" />
+            <line x1="10" y1="50" x2="90" y2="50" stroke="#000000" strokeWidth="0.9" strokeDasharray="4 3" />
+            <circle cx="50" cy="50" r="2.5" fill="#000000" />
           </>
         )}
 
         {/* EIXO LISO SIMPLES (Trefilado SAE, Laminado SAE, Ferro FFNodular, Latão, Bucha, Aço VC) */}
         {(tipoFinal === "eixo-liso" || tipoFinal === "generico") && (
           <>
-            <path d="M 18 32 L 82 32 L 86 36 L 86 64 L 82 68 L 18 68 L 14 64 L 14 36 Z" fill="none" stroke="#000" strokeWidth="2.8" />
-            <line x1="6" y1="50" x2="94" y2="50" stroke="#000" strokeWidth="0.9" strokeDasharray="4 3" />
-            <line x1="50" y1="26" x2="50" y2="74" stroke="#000" strokeWidth="0.9" strokeDasharray="4 3" />
+            <path d="M 18 32 L 82 32 L 86 36 L 86 64 L 82 68 L 18 68 L 14 64 L 14 36 Z" fill="none" stroke="#000000" strokeWidth="2.8" />
+            <line x1="6" y1="50" x2="94" y2="50" stroke="#000000" strokeWidth="0.9" strokeDasharray="4 3" />
+            <line x1="50" y1="26" x2="50" y2="74" stroke="#000000" strokeWidth="0.9" strokeDasharray="4 3" />
           </>
         )}
       </svg>
@@ -216,4 +233,3 @@ export default function EtiquetaDesenho({
     </div>
   );
 }
-

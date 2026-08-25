@@ -163,6 +163,32 @@
      MODELO 3: ETIQUETA CUPOM 80x80mm (MAXIMIZADA)
      Imprime APENAS a Etiqueta de Identificação da Peça.
      --------------------------------------------------- */
+  body.print-etiqueta,
+  body.print-etiqueta #root,
+  body.print-etiqueta #app-root,
+  body.print-etiqueta .app-body,
+  body.print-etiqueta main,
+  body.print-etiqueta .content-area,
+  body.print-etiqueta #container-impressao,
+  body.print-etiqueta #screen-relatorios {
+    border: none !important;
+    border-top: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+  }
+
+  body.print-etiqueta hr,
+  body.print-etiqueta .linha-corte,
+  body.print-etiqueta .linha-separadora,
+  body.print-etiqueta #container-impressao > hr,
+  .secao-etiqueta > hr,
+  .secao-etiqueta hr,
+  .modelo-etiqueta-80 hr {
+    display: none !important;
+    border: none !important;
+  }
+
   .secao-etiqueta,
   .modelo-etiqueta-80 {
     display: flex !important;
@@ -175,16 +201,24 @@
     padding: 2mm 2.5mm !important;
     box-sizing: border-box !important;
     border: 1.5px solid #000 !important;
+    border-top: 1.5px solid #000 !important;
     font-family: Arial, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
     background: #fff !important;
     color: #000 !important;
     margin: 0 auto !important;
+    margin-top: 0 !important;
     box-shadow: none !important;
     overflow: hidden !important; /* Evita gerar páginas em branco extras */
     page-break-after: avoid !important;
     break-after: avoid !important;
     page-break-inside: avoid !important;
     break-inside: avoid !important;
+  }
+
+  .secao-etiqueta::before,
+  .modelo-etiqueta-80::before {
+    display: none !important;
+    content: none !important;
   }
 
   .etiqueta-header {

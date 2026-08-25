@@ -2397,7 +2397,23 @@ const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNu
                   const file = e.target.files?.[0];
                   if (!file) return;
                   try {
-                    const base64 = await fileToDxfImage(file);
+                    const medidasFormatadas = formatarMedidasLimpa({
+                      geometryType: itemGeometryType,
+                      diameter: itemDiameter.trim(),
+                      thickness: itemThickness.trim(),
+                      measure: itemThickness.trim() || itemDiameter.trim(),
+                      widthMm: effectiveWidthMm > 0 ? effectiveWidthMm : undefined,
+                      lengthMm: effectiveLengthMm > 0 ? effectiveLengthMm : undefined,
+                      widthLength: itemWidthLength.trim(),
+                      diameterMm: effectiveDiameterMm > 0 ? effectiveDiameterMm : undefined,
+                      thicknessMm: effectiveThicknessMm > 0 ? effectiveThicknessMm : undefined
+                    });
+                    const base64 = await fileToDxfImage(file, {
+                      medida: medidasFormatadas || undefined,
+                      material: itemConstantName.trim() || itemDescription,
+                      observacao: itemNotes,
+                      descricao: itemDescription
+                    });
                     setItemDrawingImage(base64);
                     setSuccessMessage(isDxfFile(file) ? 'Arquivo DXF convertido em vetor com sucesso!' : 'Imagem carregada com sucesso!');
                     setTimeout(() => setSuccessMessage(null), 3000);

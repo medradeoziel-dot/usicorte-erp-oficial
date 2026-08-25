@@ -815,7 +815,13 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
         const blob = item.getAsFile();
         if (blob) {
           try {
-            const base64 = await fileToDxfImage(blob);
+            const targetItem = displayQuote.items[selectedItemIndex];
+            const base64 = await fileToDxfImage(blob, {
+              medida: targetItem ? formatarMedidasLimpa(targetItem) : undefined,
+              material: targetItem?.material || targetItem?.constanteNome,
+              observacao: targetItem?.observacao || targetItem?.notes,
+              descricao: targetItem?.descricao || targetItem?.description
+            });
             setDrawingPhotos(prev => ({ ...prev, [selectedItemIndex]: base64 }));
             setPasteSuccess(true);
             setTimeout(() => setPasteSuccess(false), 4000);
@@ -831,7 +837,13 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
     const text = clipboardData.getData('text');
     if (text && (text.includes('ENTITIES') || text.includes('SECTION'))) {
       try {
-        const dataUrl = renderDxfToDataUrl(text);
+        const targetItem = displayQuote.items[selectedItemIndex];
+        const dataUrl = renderDxfToDataUrl(text, {
+          medida: targetItem ? formatarMedidasLimpa(targetItem) : undefined,
+          material: targetItem?.material || targetItem?.constanteNome,
+          observacao: targetItem?.observacao || targetItem?.notes,
+          descricao: targetItem?.descricao || targetItem?.description
+        });
         if (dataUrl) {
           setDrawingPhotos(prev => ({ ...prev, [selectedItemIndex]: dataUrl }));
           setPasteSuccess(true);
@@ -899,7 +911,13 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
 
       const idx = targetIdx;
       try {
-        const base64 = await fileToDxfImage(file);
+        const targetItem = displayQuote.items[idx];
+        const base64 = await fileToDxfImage(file, {
+          medida: targetItem ? formatarMedidasLimpa(targetItem) : undefined,
+          material: targetItem?.material || targetItem?.constanteNome,
+          observacao: targetItem?.observacao || targetItem?.notes,
+          descricao: targetItem?.descricao || targetItem?.description
+        });
         setDrawingPhotos(prev => ({ ...prev, [idx]: base64 }));
         matched.push(`${file.name} → item ${idx + 1}`);
       } catch (err) {
@@ -1094,7 +1112,7 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
 
   // ✅ Componente Reutilizável de Renderização dos 5 Modelos de Documento
   const renderDocumentosImpressao = () => (
-    <div id="container-impressao" className="bg-slate-900/60 p-2 sm:p-6 rounded-2xl border border-slate-800 w-full overflow-x-hidden">
+    <div className="bg-slate-900/60 p-2 sm:p-6 rounded-2xl border border-slate-800 w-full overflow-x-hidden print:bg-transparent print:p-0 print:m-0 print:border-none print:shadow-none">
       
       {/* ===================================================
            PROPOSTA 1: RELATÓRIO A4 INTEIRO (GERAL)
@@ -2507,7 +2525,7 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
       {/* ===================================================
            CONTAINER DE IMPRESSÃO (O QUE SAI NA IMPRESSORA E NA PRÉVIA)
            =================================================== */}
-      <div id="container-impressao" className="w-full overflow-x-hidden">
+      <div id="container-impressao" className="w-full overflow-x-hidden print:border-none print:p-0 print:m-0 print:shadow-none">
         {renderDocumentosImpressao()}
       </div>
         </>
