@@ -17,6 +17,7 @@ import {
   Package
 } from 'lucide-react';
 import { formatCurrency } from '../utils/calculator';
+import { gerarContasReceberPorOS } from '../services/inventoryFinanceService';
 import Logo from './Logo';
 
 interface DailyOSModuleProps {
@@ -136,6 +137,10 @@ export default function DailyOSModule({ clients, onNavigateToClients }: DailyOSM
     }
 
     if (confirm(`Deseja fechar e consolidar ${ordensAbertasHoje.length} OS(s) aberta(s) no dia de hoje (${new Date().toLocaleDateString('pt-BR')})?`)) {
+      ordensAbertasHoje.forEach(os => {
+        gerarContasReceberPorOS(os);
+      });
+
       setOrdens(prev =>
         prev.map(os =>
           os.data === dataHoje && os.status === 'ABERTA'
@@ -143,7 +148,7 @@ export default function DailyOSModule({ clients, onNavigateToClients }: DailyOSM
             : os
         )
       );
-      alert('🔒 Expediente encerrado com sucesso! Todas as Ordens de Serviço do dia foram concluídas.');
+      alert('🔒 Expediente encerrado com sucesso! Todas as Ordens de Serviço do dia foram concluídas e lançadas no Contas a Receber.');
     }
   };
 

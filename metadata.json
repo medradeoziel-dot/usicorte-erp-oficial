@@ -1,6 +1,6 @@
 {
   "name": "Cadastro de Clientes & Vendas UsiCorte",
-  "description": "Sistema moderno de cadastro de clientes com consultas automáticas de CNPJ/CPF (SEFAZ/Receita/ViaCEP) e módulo completo de Vendas e Orçamentos com cálculos de constantes metalúrgicas e medidas industriais UsiCorte.",
+  "description": "Sistema ERP industrial completo para UsiCorte: cadastro de clientes com consultas automáticas CNPJ/CPF, força de vendas, orçamentos com constantes e desenhos CAD/imagens, controle de estoque de chapas/barras/perfis e retalhos com baixa automática, gestão financeira de contas a pagar/receber e fluxo de caixa, sincronizados no Supabase e localStorage.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

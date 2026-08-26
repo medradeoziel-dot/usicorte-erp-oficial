@@ -1,5 +1,21 @@
 import React, { useState, useEffect } from 'react';
-import { ShieldCheck, UserPlus, LogIn, Lock, User, X, Mail, CheckCircle2, AlertCircle, Sparkles, Database } from 'lucide-react';
+import { 
+  ShieldCheck, 
+  UserPlus, 
+  LogIn, 
+  Lock, 
+  User, 
+  X, 
+  Mail, 
+  CheckCircle2, 
+  AlertCircle, 
+  Sparkles, 
+  Database,
+  Trash2,
+  Users,
+  Shield,
+  KeyRound
+} from 'lucide-react';
 import Logo from './Logo';
 import { 
   signInSupabase, 
@@ -57,6 +73,7 @@ export default function LoginModule({
 
   // Modal Novo Usuário State
   const [isModalNovoUsuarioOpen, setIsModalNovoUsuarioOpen] = useState<boolean>(false);
+  const [abaGerenciamento, setAbaGerenciamento] = useState<'lista' | 'novo'>('lista');
   const [novoNome, setNovoNome] = useState<string>('');
   const [novoEmail, setNovoEmail] = useState<string>('');
   const [novaSenha, setNovaSenha] = useState<string>('');
@@ -177,7 +194,8 @@ export default function LoginModule({
   };
 
   // 2. MODAL DE CADASTRO DE NOVO USUÁRIO
-  const abrirModalNovoUsuario = () => {
+  const abrirModalNovoUsuario = (aba: 'lista' | 'novo' = 'lista') => {
+    setAbaGerenciamento(aba);
     setIsModalNovoUsuarioOpen(true);
     setFeedback(null);
   };
@@ -188,6 +206,49 @@ export default function LoginModule({
     setNovoEmail('');
     setNovaSenha('');
     setSenhaAdminAuth('');
+  };
+
+  // 3. EXCLUIR FUNCIONÁRIO / USUÁRIO (LocalStorage & Supabase)
+  const handleExcluirUsuario = async (usuarioParaExcluir: Usuario) => {
+    if (usuarioParaExcluir.nome.toUpperCase() === 'ADMIN') {
+      alert("O usuário principal ADMINISTRADOR é protegido e não pode ser excluído do sistema!");
+      return;
+    }
+
+    const confirmacao = window.confirm(
+      `Deseja realmente excluir o funcionário "${usuarioParaExcluir.nome}"?\n\nEsta ação removerá o usuário da equipe e do banco de dados (Supabase e localStorage).`
+    );
+
+    if (!confirmacao) return;
+
+    try {
+      // 1. Remove do LocalStorage
+      const list = obterUsuariosCadastrados();
+      const novaLista = list.filter(u => u.nome.toLowerCase() !== usuarioParaExcluir.nome.toLowerCase());
+      localStorage.setItem('usicorte_usuarios', JSON.stringify(novaLista));
+
+      // 2. Tenta remover registro no Supabase
+      if (usuarioParaExcluir.email) {
+        try {
+          await db.from('user_roles').delete().eq('email', usuarioParaExcluir.email);
+        } catch (e) {
+          // Fallback silencioso
+        }
+      }
+
+      // 3. Atualiza estado da lista
+      setUsuarios(novaLista);
+
+      // 4. Se estava selecionado no login rápido, desmarca
+      if (usuarioSelecionado.toLowerCase() === usuarioParaExcluir.nome.toLowerCase()) {
+        setUsuarioSelecionado('');
+      }
+
+      alert(`Funcionário "${usuarioParaExcluir.nome}" excluído com sucesso!`);
+    } catch (err: any) {
+      console.error("Erro ao excluir usuário:", err);
+      alert(`Erro ao excluir funcionário: ${err?.message || err}`);
+    }
   };
 
   // 3. SALVAR NOVO FUNCIONÁRIO
@@ -391,10 +452,10 @@ export default function LoginModule({
           <button 
             type="button" 
             className="btn-admin-opt flex items-center justify-center gap-2 mt-3 cursor-pointer w-full" 
-            onClick={abrirModalNovoUsuario}
+            onClick={() => abrirModalNovoUsuario('lista')}
           >
-            <UserPlus className="w-4 h-4 text-blue-400" />
-            <span>⚙️ Cadastrar Novo Funcionário na Equipe</span>
+            <Users className="w-4 h-4 text-blue-400" />
+            <span>⚙️ Gerenciar Equipe & Cadastrar Funcionários</span>
           </button>
 
           {currentUser && (
@@ -412,85 +473,202 @@ export default function LoginModule({
         </div>
       </div>
 
-      {/* MODAL DE CADASTRO DE NOVO USUÁRIO (ACESSO RESTRITO) */}
+      {/* MODAL DE GESTÃO DE EQUIPE & CADASTRO DE USUÁRIOS */}
       {isModalNovoUsuarioOpen && (
         <div id="modal-novo-usuario" className="login-overlay">
-          <div className="login-card bg-slate-900 border border-slate-700 shadow-2xl">
-            <div className="login-title">Cadastrar Novo Funcionário</div>
-            <div className="login-subtitle">Registra na equipe e sincroniza com o banco Supabase</div>
+          <div className="login-card bg-slate-900 border border-slate-700 shadow-2xl max-w-[500px] w-full p-6 text-left relative">
+            <button
+              type="button"
+              onClick={fecharModalNovoUsuario}
+              className="absolute top-4 right-4 text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+              title="Fechar"
+            >
+              <X className="w-5 h-5" />
+            </button>
 
-            <form id="formCadastroUsuario" onSubmit={salvarNovoUsuario}>
-              <div className="form-group">
-                <label>Nome do Funcionário:</label>
-                <input
-                  type="text"
-                  id="novoNome"
-                  className="form-control"
-                  placeholder="Ex: Marcos Silva"
-                  value={novoNome}
-                  onChange={(e) => setNovoNome(e.target.value)}
-                  required
-                />
-              </div>
+            <div className="text-lg font-bold text-slate-100 flex items-center gap-2 mb-1">
+              <Users className="w-5 h-5 text-blue-400" />
+              <span>Gestão de Equipe & Usuários</span>
+            </div>
+            <div className="text-xs text-slate-400 mb-4">
+              Visualize, exclua ou cadastre funcionários com permissões no sistema e banco de dados.
+            </div>
 
-              <div className="form-group">
-                <label>E-mail (opcional para login Supabase):</label>
-                <input
-                  type="email"
-                  id="novoEmail"
-                  className="form-control"
-                  placeholder="marcos@usicorte.com.br"
-                  value={novoEmail}
-                  onChange={(e) => setNovoEmail(e.target.value)}
-                />
-              </div>
+            {/* Abas de Navegação */}
+            <div className="flex bg-slate-950 p-1 rounded-xl mb-4 border border-slate-800">
+              <button
+                type="button"
+                onClick={() => setAbaGerenciamento('lista')}
+                className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                  abaGerenciamento === 'lista' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Users className="w-3.5 h-3.5" />
+                <span>Equipe Cadastrada ({usuarios.length})</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setAbaGerenciamento('novo')}
+                className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                  abaGerenciamento === 'novo' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <UserPlus className="w-3.5 h-3.5" />
+                <span>+ Novo Funcionário</span>
+              </button>
+            </div>
 
-              <div className="form-group">
-                <label>Criar Senha para o Funcionário:</label>
-                <input
-                  type="password"
-                  id="novaSenha"
-                  className="form-control"
-                  placeholder="Senha de acesso"
-                  value={novaSenha}
-                  onChange={(e) => setNovaSenha(e.target.value)}
-                  required
-                />
-              </div>
+            {abaGerenciamento === 'lista' ? (
+              <div className="space-y-3">
+                <div className="max-h-[300px] overflow-y-auto space-y-2 pr-1">
+                  {usuarios.map((u, idx) => {
+                    const isAdmin = u.nome.toUpperCase() === 'ADMIN' || u.role === 'admin';
+                    return (
+                      <div 
+                        key={idx} 
+                        className="flex items-center justify-between p-3 bg-slate-800/80 border border-slate-700/80 rounded-xl hover:border-slate-600 transition-colors"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs shrink-0 border ${
+                            isAdmin 
+                              ? 'bg-amber-500/20 text-amber-400 border-amber-500/40' 
+                              : 'bg-blue-500/20 text-blue-400 border-blue-500/40'
+                          }`}>
+                            {isAdmin ? '👑' : u.nome.charAt(0).toUpperCase()}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-bold text-slate-100 truncate">
+                                {u.nome.toUpperCase()}
+                              </span>
+                              <span className={`text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded border ${
+                                isAdmin 
+                                  ? 'bg-amber-500/10 text-amber-400 border-amber-500/30' 
+                                  : 'bg-slate-700/60 text-slate-300 border-slate-600'
+                              }`}>
+                                {isAdmin ? 'Admin' : 'Operador'}
+                              </span>
+                            </div>
+                            <div className="text-[10px] text-slate-400 truncate">
+                              {u.email || 'Email padrão interno'}
+                            </div>
+                          </div>
+                        </div>
 
-              <div className="form-group" style={{ borderTop: '1px dashed #3f3f5e', paddingTop: '12px', marginTop: '15px' }}>
-                <label style={{ color: '#ff5555' }}>
-                  <strong>Senha de Autorização (ADMIN):</strong>
-                </label>
-                <input
-                  type="password"
-                  id="senhaAdminAutorizacao"
-                  className="form-control"
-                  placeholder="Digite a senha do ADMIN (padrão: 1234)"
-                  value={senhaAdminAuth}
-                  onChange={(e) => setSenhaAdminAuth(e.target.value)}
-                  required
-                />
-              </div>
+                        <div className="shrink-0 pl-2">
+                          {isAdmin ? (
+                            <span className="text-[10px] text-amber-400/80 flex items-center gap-1 font-medium bg-amber-500/5 px-2 py-1 rounded border border-amber-500/20" title="Usuário Administrador mestre protegido">
+                              <Shield className="w-3 h-3 text-amber-400" />
+                              Protegido
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleExcluirUsuario(u)}
+                              className="px-2.5 py-1.5 bg-rose-500/10 hover:bg-rose-600 text-rose-400 hover:text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 border border-rose-500/20 hover:border-rose-600 transition-all cursor-pointer shadow-xs"
+                              title={`Excluir funcionário ${u.nome} do sistema e banco de dados`}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>Excluir</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
 
-              <div style={{ display: 'flex', gap: '10px', marginTop: '15px' }}>
-                <button
-                  type="button"
-                  className="btn-admin-opt"
-                  style={{ marginTop: 0 }}
-                  onClick={fecharModalNovoUsuario}
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="btn-login"
-                  style={{ marginTop: 0 }}
-                >
-                  Confirmar Cadastro
-                </button>
+                <div className="pt-2 flex items-center justify-between border-t border-slate-800">
+                  <button
+                    type="button"
+                    onClick={fecharModalNovoUsuario}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                  >
+                    Fechar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAbaGerenciamento('novo')}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-md shadow-blue-600/20"
+                  >
+                    <UserPlus className="w-3.5 h-3.5" />
+                    <span>Cadastrar Novo</span>
+                  </button>
+                </div>
               </div>
-            </form>
+            ) : (
+              <form id="formCadastroUsuario" onSubmit={salvarNovoUsuario} className="space-y-3">
+                <div className="form-group text-left">
+                  <label className="text-xs font-semibold text-slate-300">Nome do Funcionário:</label>
+                  <input
+                    type="text"
+                    id="novoNome"
+                    className="form-control text-xs"
+                    placeholder="Ex: Marcos Silva (Vendas)"
+                    value={novoNome}
+                    onChange={(e) => setNovoNome(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="form-group text-left">
+                  <label className="text-xs font-semibold text-slate-300">E-mail (opcional para Supabase Auth):</label>
+                  <input
+                    type="email"
+                    id="novoEmail"
+                    className="form-control text-xs"
+                    placeholder="marcos@usicorte.com.br"
+                    value={novoEmail}
+                    onChange={(e) => setNovoEmail(e.target.value)}
+                  />
+                </div>
+
+                <div className="form-group text-left">
+                  <label className="text-xs font-semibold text-slate-300">Criar Senha de Acesso:</label>
+                  <input
+                    type="password"
+                    id="novaSenha"
+                    className="form-control text-xs"
+                    placeholder="Digite a senha do funcionário"
+                    value={novaSenha}
+                    onChange={(e) => setNovaSenha(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="p-3 bg-slate-950/80 rounded-xl border border-slate-800 space-y-1.5 text-left">
+                  <label className="text-xs font-bold text-amber-400 flex items-center gap-1.5">
+                    <KeyRound className="w-3.5 h-3.5" />
+                    <span>Senha de Autorização do ADMIN:</span>
+                  </label>
+                  <input
+                    type="password"
+                    id="senhaAdminAutorizacao"
+                    className="form-control text-xs"
+                    placeholder="Digite a senha do ADMIN (padrão: 1234)"
+                    value={senhaAdminAuth}
+                    onChange={(e) => setSenhaAdminAuth(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="flex gap-2 pt-2">
+                  <button
+                    type="button"
+                    className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                    onClick={() => setAbaGerenciamento('lista')}
+                  >
+                    ← Voltar para Lista
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-md shadow-emerald-600/20"
+                  >
+                    Confirmar Cadastro
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       )}

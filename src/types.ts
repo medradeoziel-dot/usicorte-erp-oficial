@@ -132,4 +132,106 @@ export interface OrdemServico {
   itens: ItemOS[];
 }
 
+// ==========================================
+// MÓDULO DE ESTOQUE DE MATÉRIA-PRIMA & RETALHOS
+// ==========================================
+
+export type TipoMaterialEstoque = 'chapa' | 'barra' | 'perfil' | 'tubo';
+
+export interface MaterialEstoque {
+  id: string;
+  codigo: string; // Ex: 'MAT-001'
+  nome: string; // Ex: 'Chapa A36 1/4" (6.35mm)'
+  tipo: TipoMaterialEstoque;
+  material: string; // Ex: 'A36', '1020', '1045', 'Inox 304', 'Alumínio', 'Bronze'
+  espessuraMm: number; // Espessura em mm
+  larguraMm: number; // Largura da chapa/perfil em mm
+  comprimentoMm: number; // Comprimento em mm
+  densidade: number; // Ex: 0.00785 (Aço Carbono), 0.00800 (Inox), etc.
+  pesoUnitarioKg: number; // Peso de 1 unidade/chapa em KG
+  quantidade: number; // Quantidade de chapas/unidades em estoque
+  pesoTotalKg: number; // Saldo total em KG (quantidade * pesoUnitarioKg)
+  estoqueMinimoKg: number; // Alerta em KG
+  estoqueMinimoQtd: number; // Alerta em Unidades
+  custoKg: number; // Custo de compra por KG (R$)
+  precoVendaKg: number; // Preço base sugerido de venda por KG (R$)
+  localizacao: string; // Pátio, Rack, Prateleira
+  fornecedor?: string;
+  observacoes?: string;
+  atualizadoEm: string;
+}
+
+export interface RetalhoEstoque {
+  id: string;
+  codigo: string; // Ex: 'RET-001'
+  materialId?: string;
+  materialNome: string;
+  tipo: TipoMaterialEstoque;
+  espessuraMm: number;
+  larguraMm: number;
+  comprimentoMm: number;
+  pesoKg: number;
+  cotacaoOrigem?: string; // Ex: 'COT-2026-0001'
+  localizacao: string; // Ex: 'Rack de Retalhos Chapa 1'
+  status: 'disponivel' | 'utilizado' | 'descartado';
+  dataEntrada: string;
+  dataUso?: string;
+  observacao?: string;
+}
+
+export interface MovimentacaoEstoque {
+  id: string;
+  materialId: string;
+  materialNome: string;
+  tipo: 'entrada' | 'saida_venda' | 'saida_ajuste' | 'entrada_retalho' | 'devolucao';
+  quantidade: number;
+  pesoKg: number;
+  referenciaDoc?: string; // Ex: 'COT-2026-0001', 'OS-12', 'NF-1002'
+  custoTotal: number;
+  data: string;
+  usuario?: string;
+  observacao?: string;
+}
+
+// ==========================================
+// MÓDULO FINANCEIRO (CAIXA E CONTAS)
+// ==========================================
+
+export type TipoLancamento = 'receita' | 'despesa';
+
+export type CategoriaLancamento = 
+  | 'venda_cotacao' 
+  | 'ordem_servico' 
+  | 'compra_chapa' 
+  | 'custo_operacional' 
+  | 'frete' 
+  | 'despesa_fixa' 
+  | 'energia' 
+  | 'manutencao' 
+  | 'impostos' 
+  | 'folha_pagamento'
+  | 'outros';
+
+export type FormaPagamentoFinanceiro = 'PIX' | 'Boleto' | 'Cartão de Crédito' | 'Cartão de Débito' | 'Transferência' | 'Dinheiro' | 'A Prazo';
+
+export type StatusFinanceiro = 'pendente' | 'pago' | 'atrasado' | 'cancelado';
+
+export interface LancamentoFinanceiro {
+  id: string;
+  tipo: TipoLancamento;
+  categoria: CategoriaLancamento;
+  descricao: string;
+  clienteFornecedor: string;
+  documentoRef?: string; // Ex: 'COT-2026-0001', 'OS-05', 'NF-8921'
+  valor: number;
+  dataVencimento: string; // YYYY-MM-DD
+  dataCompetencia: string; // YYYY-MM-DD
+  dataPagamento?: string; // YYYY-MM-DD
+  formaPagamento: FormaPagamentoFinanceiro;
+  status: StatusFinanceiro;
+  observacoes?: string;
+  cotacaoId?: string;
+  criadoEm: string;
+}
+
 

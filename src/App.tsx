@@ -16,11 +16,12 @@ import ReportsModule from './components/ReportsModule';
 import PhpCodeViewer from './components/PhpCodeViewer';
 import LoginModule from './components/LoginModule';
 import DailyOSModule from './components/DailyOSModule';
+import InventoryFinanceModule from './components/InventoryFinanceModule';
 import UsicorteCalculatorModal from './components/UsicorteCalculatorModal';
 import { MaterialProfile } from './utils/calculator';
 import { Users, FileCode } from 'lucide-react';
 
-export type ScreenType = 'home' | 'clientes' | 'produtos' | 'orcamento' | 'ordem_servico' | 'vendas' | 'relatorios' | 'php';
+export type ScreenType = 'home' | 'clientes' | 'produtos' | 'orcamento' | 'ordem_servico' | 'vendas' | 'relatorios' | 'estoque' | 'financeiro' | 'php';
 
 export default function App() {
   const { clients, activeClient, setActiveClient, handleSaveClient, handleDeleteClient, handleExportClients } = useClients();
@@ -151,6 +152,20 @@ export default function App() {
               clients={clients} 
               onNavigateToQuote={() => trocarTela('orcamento')} 
               onEditQuote={handleEditQuote}
+            />
+          )}
+
+          {currentScreen === 'estoque' && (
+            <InventoryFinanceModule 
+              initialTab="estoque" 
+              onNavigateToQuote={() => trocarTela('orcamento')} 
+            />
+          )}
+
+          {currentScreen === 'financeiro' && (
+            <InventoryFinanceModule 
+              initialTab="financeiro" 
+              onNavigateToQuote={() => trocarTela('orcamento')} 
             />
           )}
 

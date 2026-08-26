@@ -1,7 +1,21 @@
 import React from 'react';
 import { ScreenType } from '../App';
 import { MATERIAL_PROFILES } from '../utils/calculator';
-import { Home, Users, Package, Calculator, ClipboardList, ShoppingCart, FileText, FileCode, X } from 'lucide-react';
+import { 
+  Home, 
+  Users, 
+  Package, 
+  Calculator, 
+  ClipboardList, 
+  ShoppingCart, 
+  FileText, 
+  FileCode, 
+  Boxes,
+  DollarSign,
+  Scissors,
+  X 
+} from 'lucide-react';
+import { getMateriaisEstoque } from '../services/inventoryFinanceService';
 
 interface SidebarProps {
   currentScreen: ScreenType;
@@ -116,6 +130,33 @@ export default function Sidebar({
         >
           <ShoppingCart className="w-4 h-4 shrink-0" />
           <span>Força de Vendas / PDV</span>
+        </button>
+
+        <div className="text-[10px] uppercase font-bold tracking-wider text-slate-400 px-3 pt-4 pb-1">Estoque & Financeiro</div>
+
+        <button 
+          onClick={() => trocarTela('estoque')}
+          className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer w-full text-left ${
+            currentScreen === 'estoque' ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30' : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+          }`}
+        >
+          <div className="flex items-center gap-3">
+            <Boxes className="w-4 h-4 shrink-0 text-blue-400" />
+            <span>Estoque & Retalhos</span>
+          </div>
+          <span className="text-[10px] bg-blue-500/20 text-blue-400 border border-blue-500/30 px-1.5 py-0.5 rounded font-mono">
+            {getMateriaisEstoque().length}
+          </span>
+        </button>
+
+        <button 
+          onClick={() => trocarTela('financeiro')}
+          className={`flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer w-full text-left ${
+            currentScreen === 'financeiro' ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30' : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+          }`}
+        >
+          <DollarSign className="w-4 h-4 shrink-0 text-emerald-400" />
+          <span>Caixa & Financeiro</span>
         </button>
 
         <div className="text-[10px] uppercase font-bold tracking-wider text-slate-400 px-3 pt-4 pb-1">Gestão & Fiscal</div>

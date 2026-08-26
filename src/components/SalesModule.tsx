@@ -39,6 +39,10 @@ import {
   DADOS_MATERIAIS_MAP
 } from '../utils/calculator';
 import { fileToDxfImage, isDxfFile } from '../utils/dxfRenderer';
+import { 
+  baixarEstoquePorCotacao, 
+  gerarContasReceberPorCotacao 
+} from '../services/inventoryFinanceService';
 import QuotePrintModal from './QuotePrintModal';
 import QuoteHistoryModal from './QuoteHistoryModal';
 import {
@@ -1198,6 +1202,18 @@ const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNu
     setSavedQuotes(updatedQuotes);
     localStorage.setItem('s_orcamentos', JSON.stringify(updatedQuotes));
 
+    // Se a cotação estiver Aprovada ou Faturada, realiza a baixa automática no estoque e gera contas a receber
+    if (quoteStatus === 'Aprovado' || quoteStatus === 'Faturado') {
+      const baixaRes = baixarEstoquePorCotacao(currentQuoteObject);
+      const finRes = gerarContasReceberPorCotacao(currentQuoteObject);
+      if (baixaRes.itensBaixados > 0) {
+        console.log(`Estoque atualizado: ${baixaRes.itensBaixados} itens baixados (${baixaRes.pesoTotalBaixadoKg} kg).`);
+      }
+      if (finRes) {
+        console.log(`Lançamento a receber gerado: R$ ${finRes.valor}.`);
+      }
+    }
+
     // Persiste e atualiza no Supabase
     saveCotacaoDb(currentQuoteObject).then(res => {
       if (res.error) {
@@ -1211,6 +1227,68 @@ const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNu
     });
 
     setTimeout(() => setSuccessMessage(null), 3500);
+  };
+
+  // Aprovar cotação com 1 clique (baixa estoque + gera contas a receber)
+  const handleApproveAndDeductQuote = () => {
+    setQuoteStatus('Aprovado');
+    if (items.length === 0) {
+      setErrorMessage('Adicione pelo menos 1 item antes de aprovar o orçamento.');
+      setTimeout(() => setErrorMessage(null), 3500);
+      return;
+    }
+
+    const currentQuoteObject: Quote = {
+      id: quoteNumber,
+      quoteNumber: quoteNumber,
+      clientId: selectedClientId || undefined,
+      clientName: clientName.trim() || 'Cliente Balcão (UsiCorte)',
+      clientDocument: clientDocument.trim(),
+      contactPerson: contactPerson.trim(),
+      clientPhone: clientPhone.trim(),
+      clientEmail: clientEmail.trim(),
+      clientCity: clientCity.trim(),
+      clientState: clientState.trim(),
+      date: quoteDate,
+      validityDays: validityDays,
+      paymentTerms: paymentTerms,
+      status: 'Aprovado',
+      items: items,
+      discount: discountAmount,
+      discountPercent: 0,
+      shipping: shippingAmount,
+      subtotalTotal: subtotalTotal,
+      grandTotal: grandTotal,
+      totalWeightKg: totalQuoteWeightKg,
+      observations: observations,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    const existsIndex = savedQuotes.findIndex(
+      q => (q.quoteNumber && q.quoteNumber.trim().toLowerCase() === quoteNumber.trim().toLowerCase()) ||
+           (q.id && (q.id === quoteNumber || (currentQuoteObject.id && q.id === currentQuoteObject.id)))
+    );
+    let updatedQuotes: Quote[];
+
+    if (existsIndex >= 0) {
+      updatedQuotes = [...savedQuotes];
+      updatedQuotes[existsIndex] = currentQuoteObject;
+    } else {
+      updatedQuotes = [currentQuoteObject, ...savedQuotes];
+    }
+
+    setSavedQuotes(updatedQuotes);
+    localStorage.setItem('s_orcamentos', JSON.stringify(updatedQuotes));
+
+    // Executa baixa de estoque e contas a receber
+    const baixaRes = baixarEstoquePorCotacao(currentQuoteObject);
+    const finRes = gerarContasReceberPorCotacao(currentQuoteObject);
+
+    saveCotacaoDb(currentQuoteObject).catch(() => {});
+
+    setSuccessMessage(`✅ Cotação ${quoteNumber} APROVADA! ${baixaRes.itensBaixados} itens baixados no Estoque (${baixaRes.pesoTotalBaixadoKg} kg) e R$ ${formatCurrency(grandTotal)} lançado no Contas a Receber!`);
+    setTimeout(() => setSuccessMessage(null), 5000);
   };
 
   // New clean quote
@@ -3087,22 +3165,33 @@ const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNu
             </div>
 
             {/* Quick Action in Footer */}
-            <div className="grid grid-cols-2 gap-2 pt-2">
+            <div className="space-y-2 pt-2">
               <button
-                onClick={handleSaveFullQuote}
-                className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                onClick={handleApproveAndDeductQuote}
+                className="w-full py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5 shadow-md shadow-emerald-600/30 transition-all cursor-pointer border border-emerald-400/40"
+                title="Aprova o orçamento, dá baixa no estoque de matéria-prima e lança em Contas a Receber"
               >
-                <Save className="w-4 h-4" />
-                Salvar Orçamento
+                <CheckCircle2 className="w-4 h-4 text-emerald-100" />
+                Aprovar & Baixar Estoque ⚡
               </button>
 
-              <button
-                onClick={() => setShowPrintModal(true)}
-                className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition-all cursor-pointer"
-              >
-                <Printer className="w-4 h-4" />
-                Imprimir / PDF
-              </button>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={handleSaveFullQuote}
+                  className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-100 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs transition-all cursor-pointer border border-slate-700"
+                >
+                  <Save className="w-4 h-4" />
+                  Salvar Orçamento
+                </button>
+
+                <button
+                  onClick={() => setShowPrintModal(true)}
+                  className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                >
+                  <Printer className="w-4 h-4" />
+                  Imprimir / PDF
+                </button>
+              </div>
             </div>
 
           </div>
