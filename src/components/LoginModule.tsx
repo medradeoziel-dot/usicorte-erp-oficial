@@ -104,7 +104,7 @@ export default function LoginModule({
 
     if (authMode === 'email') {
       if (isRegistering) {
-        // Cadastro via Supabase Auth & user_roles
+        // Cadastro via Supabase Auth & tabela usuarios
         const { data, error } = await signUpSupabase(emailDigitado, senhaDigitada, nomeDigitado || emailDigitado.split('@')[0]);
         if (error) {
           setLoading(false);
@@ -113,11 +113,12 @@ export default function LoginModule({
         }
         const nomeFinal = nomeDigitado || emailDigitado.split('@')[0];
         
-        // Salva na tabela user_roles do Supabase
+        // Salva na tabela usuarios do Supabase
         await saveUsuarioDb({
           nome: nomeFinal,
           email: emailDigitado,
           senha: senhaDigitada,
+          cargo: 'Operador de Vendas',
           role: 'operador'
         });
 
@@ -220,7 +221,7 @@ export default function LoginModule({
     setSenhaAdminAuth('');
   };
 
-  // 3. EXCLUIR FUNCIONÁRIO / USUÁRIO DIRETAMENTE NO SUPABASE (user_roles)
+  // 3. EXCLUIR FUNCIONÁRIO / USUÁRIO DIRETAMENTE NO SUPABASE (tabela usuarios)
   const handleExcluirUsuario = async (usuarioParaExcluir: Usuario) => {
     if (usuarioParaExcluir.nome.toUpperCase() === 'ADMIN' || usuarioParaExcluir.role === 'admin') {
       alert("O usuário principal ADMINISTRADOR é protegido e não pode ser excluído do sistema!");
@@ -228,7 +229,7 @@ export default function LoginModule({
     }
 
     const confirmacao = window.confirm(
-      `Deseja realmente excluir o funcionário "${usuarioParaExcluir.nome}"?\n\nEsta ação removerá permanentemente o usuário da tabela user_roles no Supabase.`
+      `Deseja realmente excluir o funcionário "${usuarioParaExcluir.nome}"?\n\nEsta ação removerá permanentemente o usuário da tabela usuarios no Supabase.`
     );
 
     if (!confirmacao) return;
@@ -252,14 +253,14 @@ export default function LoginModule({
         setUsuarioSelecionado('');
       }
 
-      alert(`Funcionário "${usuarioParaExcluir.nome}" excluído do Supabase com sucesso!`);
+      alert(`Funcionário "${usuarioParaExcluir.nome}" excluído da tabela usuarios no Supabase com sucesso!`);
     } catch (err: any) {
       console.error("Erro ao excluir usuário no Supabase:", err);
       alert(`Erro ao excluir funcionário no Supabase: ${err?.message || err}`);
     }
   };
 
-  // 4. SALVAR NOVO FUNCIONÁRIO DIRETAMENTE NO SUPABASE (user_roles)
+  // 4. SALVAR NOVO FUNCIONÁRIO DIRETAMENTE NO SUPABASE (tabela usuarios)
   const salvarNovoUsuario = async (e: React.FormEvent) => {
     e.preventDefault();
     const nomeTrim = novoNome.trim();
