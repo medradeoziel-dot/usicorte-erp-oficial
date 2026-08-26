@@ -100,47 +100,76 @@
     margin: 0 auto !important;
     box-shadow: none !important;
     border: none !important;
-    page-break-after: avoid !important;
-    break-after: avoid !important;
   }
 
   /* ---------------------------------------------------
      MODELO 2: PEDIDO A4 DIVIDIDO AO MEIO (2 VIAS)
-     Imprime APENAS a Via do Cliente e Via da Empresa/Produção.
+     Imprime a Via do Cliente e a Via da Empresa/Produção
+     em blocos independentes com suporte a quebra de página automática.
      --------------------------------------------------- */
   .secao-pedido,
   .modelo-duas-vias {
-    display: flex !important;
-    flex-direction: column !important;
-    justify-content: space-between !important;
+    display: block !important;
     width: 100% !important;
     max-width: 100% !important;
-    height: 270mm !important; /* Cabe em 1 única folha A4 */
+    height: auto !important;
     min-height: 0 !important;
     box-sizing: border-box !important;
-    padding: 2mm !important;
+    padding: 0 !important;
     margin: 0 auto !important;
     background: #fff !important;
     color: #000 !important;
     box-shadow: none !important;
     border: none !important;
-    page-break-after: avoid !important;
-    break-after: avoid !important;
-    page-break-inside: avoid !important;
-    break-inside: avoid !important;
+    overflow: visible !important;
   }
 
-  .via-pedido {
-    height: 125mm !important;
+  .via-pedido,
+  .via-bloco {
+    width: 100% !important;
     min-height: 0 !important;
     border: 1px solid #000 !important;
-    padding: 5mm 8mm !important;
+    padding: 4mm 6mm !important;
     border-radius: 4px !important;
     box-sizing: border-box !important;
     display: flex !important;
     flex-direction: column !important;
     justify-content: space-between !important;
     background: #fff !important;
+    margin-bottom: 3mm !important;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  /* Quebra de página no final da Via do Cliente se necessário */
+  .via-cliente.quebra-pagina,
+  .via-cliente.break-after-page,
+  .via-cliente-paginada {
+    page-break-after: always !important;
+    break-after: page !important;
+  }
+
+  /* Paginação e Repetição de Cabeçalho em Tabelas */
+  table {
+    border-collapse: collapse !important;
+    page-break-inside: auto !important;
+  }
+
+  thead {
+    display: table-header-group !important;
+  }
+
+  tfoot {
+    display: table-footer-group !important;
+  }
+
+  tr {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  tbody {
+    page-break-inside: auto !important;
   }
 
   .linha-corte {

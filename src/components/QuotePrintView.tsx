@@ -392,40 +392,48 @@ export const QuotePrintView: React.FC<QuotePrintViewProps> = (props) => {
             </div>
           </div>
 
-          {/* Tabela Desktop (4 Colunas) */}
+          {/* Tabela Desktop & Impressão (7 Colunas Exatas) */}
           <table className="w-full text-left border-collapse mb-6">
             <thead>
-              <tr className="border-b-2 border-slate-200 text-slate-400 text-xs font-semibold uppercase tracking-wider">
-                <th className="py-3 px-2">Item / Descrição</th>
-                <th className="py-3 px-2 text-center w-28">Desenho</th>
-                <th className="py-3 px-2 text-center w-20">Qtd</th>
-                <th className="py-3 px-2 text-right w-32">Valor Unit.</th>
-                <th className="py-3 px-2 text-right w-32">Total</th>
+              <tr className="border-b-2 border-slate-300 text-slate-700 text-xs font-bold uppercase tracking-wider bg-slate-50">
+                <th className="py-2.5 px-2 text-left">PRODUTO / MATERIAL</th>
+                <th className="py-2.5 px-2 text-center">MEDIDAS</th>
+                <th className="py-2.5 px-2 text-left">DESCRIÇÃO</th>
+                <th className="py-2.5 px-2 text-left">INFORMAÇÕES</th>
+                <th className="py-2.5 px-2 text-right">UNITÁRIO</th>
+                <th className="py-2.5 px-2 text-center w-14">QTD</th>
+                <th className="py-2.5 px-2 text-right">SUBTOTAL</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 text-sm">
+            <tbody className="divide-y divide-slate-200 text-xs sm:text-sm">
               {itens.map((item, index) => (
-                <tr key={item.id || index} className="align-top">
-                  <td className="py-3 px-2">
-                    <p className="font-semibold text-slate-800">{item.material}</p>
-                    {item.medidas && <p className="text-xs text-slate-500 mt-0.5">Medidas: {item.medidas}</p>}
-                    {item.descricao && <p className="text-xs text-slate-600 mt-1">{item.descricao}</p>}
-                    {item.informacoes && <p className="text-xs text-slate-500 italic mt-0.5">{item.informacoes}</p>}
-                  </td>
-                  <td className="py-3 px-2 text-center">
-                    {item.drawingImage ? (
+                <tr key={item.id || index} className="align-top hover:bg-slate-50/50">
+                  <td className="py-2.5 px-2">
+                    <p className="font-semibold text-slate-900">{item.material || "—"}</p>
+                    {item.drawingImage && (
                       <img
                         src={item.drawingImage}
-                        alt={`Desenho técnico do item ${index + 1} - ${item.material}`}
-                        className="max-h-[80px] w-auto mx-auto object-contain print:contrast-[200%]"
+                        alt="Desenho"
+                        className="max-h-[50px] w-auto mt-1 object-contain print:contrast-[200%]"
                       />
-                    ) : (
-                      <span className="text-[10px] text-slate-400">—</span>
                     )}
                   </td>
-                  <td className="py-3 px-2 text-center text-slate-700">{item.quantidade}</td>
-                  <td className="py-3 px-2 text-right text-slate-700">{formatCurrency(item.valorUnitario || 0)}</td>
-                  <td className="py-3 px-2 text-right font-medium text-slate-900">
+                  <td className="py-2.5 px-2 text-center font-mono text-xs text-slate-700">
+                    {item.medidas || "—"}
+                  </td>
+                  <td className="py-2.5 px-2 text-slate-800 text-xs">
+                    {item.descricao || "—"}
+                  </td>
+                  <td className="py-2.5 px-2 text-xs text-slate-600 italic">
+                    {item.informacoes && item.informacoes !== "-" ? item.informacoes : "—"}
+                  </td>
+                  <td className="py-2.5 px-2 text-right text-slate-800 font-mono text-xs">
+                    {formatCurrency(item.valorUnitario || 0)}
+                  </td>
+                  <td className="py-2.5 px-2 text-center font-bold text-slate-800 font-mono text-xs">
+                    {item.quantidade}
+                  </td>
+                  <td className="py-2.5 px-2 text-right font-bold text-slate-900 font-mono text-xs">
                     {formatCurrency(item.valorTotal || 0)}
                   </td>
                 </tr>

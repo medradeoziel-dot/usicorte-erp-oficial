@@ -89,38 +89,37 @@ export default function A4Preview({ pedido, cliente, itens, fotosPorPeca, mode }
       ) : (
         <div className="a4-items-table">
           <div className="a4-section-title">ITENS DO PEDIDO</div>
-          <table className="a4-table">
+          <table className="a4-table w-full">
             <thead>
               <tr>
-                <th className="a4-th a4-th-num">#</th>
-                <th className="a4-th">Descrição</th>
-                <th className="a4-th">Material</th>
-                <th className="a4-th">Medida</th>
-                <th className="a4-th a4-th-r">Qtd</th>
-                <th className="a4-th a4-th-r">Unit.</th>
-                <th className="a4-th a4-th-r">Total</th>
+                <th className="a4-th text-left">PRODUTO / MATERIAL</th>
+                <th className="a4-th text-center">MEDIDAS</th>
+                <th className="a4-th text-left">DESCRIÇÃO</th>
+                <th className="a4-th text-left">INFORMAÇÕES</th>
+                <th className="a4-th a4-th-r text-right">UNITÁRIO</th>
+                <th className="a4-th a4-th-r text-center w-14">QTD</th>
+                <th className="a4-th a4-th-r text-right">SUBTOTAL</th>
               </tr>
             </thead>
             <tbody>
               {itens.map((item) => (
                 <tr key={item.id} className="a4-tr">
-                  <td className="a4-td a4-td-num">{item.id}</td>
+                  <td className="a4-td font-semibold">{item.material || "—"}</td>
+                  <td className="a4-td text-center font-mono text-xs">{item.medida || "—"}</td>
                   <td className="a4-td a4-td-desc">
-                    <div className="a4-td-name">{item.descricao}</div>
-                    <div className="a4-td-obs">{item.observacoes}</div>
+                    <div className="a4-td-name font-medium">{item.descricao || "—"}</div>
                   </td>
-                  <td className="a4-td">{item.material}</td>
-                  <td className="a4-td">{item.medida}</td>
-                  <td className="a4-td a4-td-r">{item.quantidade}</td>
-                  <td className="a4-td a4-td-r">{formatCurrency(item.valorUnit)}</td>
-                  <td className="a4-td a4-td-r a4-td-total">{formatCurrency(item.valorUnit * item.quantidade)}</td>
+                  <td className="a4-td text-xs text-slate-600 italic">{item.observacoes || "—"}</td>
+                  <td className="a4-td a4-td-r text-right font-mono">{formatCurrency(item.valorUnit)}</td>
+                  <td className="a4-td a4-td-r text-center font-mono font-semibold">{item.quantidade}</td>
+                  <td className="a4-td a4-td-r text-right font-mono font-bold a4-td-total">{formatCurrency(item.valorUnit * item.quantidade)}</td>
                 </tr>
               ))}
             </tbody>
             <tfoot>
               <tr className="a4-tfoot">
-                <td colSpan={6} className="a4-td a4-td-total-label">TOTAL GERAL</td>
-                <td className="a4-td a4-td-r a4-td-grand-total">{formatCurrency(totalVal)}</td>
+                <td colSpan={6} className="a4-td a4-td-total-label font-bold text-right">TOTAL GERAL</td>
+                <td className="a4-td a4-td-r a4-td-grand-total text-right font-bold">{formatCurrency(totalVal)}</td>
               </tr>
             </tfoot>
           </table>
@@ -140,11 +139,16 @@ export default function A4Preview({ pedido, cliente, itens, fotosPorPeca, mode }
   );
 
   if (is2vias) {
+    const isMultiPage = itens.length > 3;
     return (
       <div className="flex flex-col gap-4">
-        <DocumentBlock label="1ª VIA — CLIENTE" />
-        <div className="border-t-4 border-dashed border-slate-400 my-2 no-print" />
-        <DocumentBlock label="2ª VIA — EMPRESA" />
+        <div className={`via-bloco via-cliente ${isMultiPage ? 'quebra-pagina' : ''}`} style={{ breakAfter: isMultiPage ? 'page' : 'auto', pageBreakAfter: isMultiPage ? 'always' : 'auto' }}>
+          <DocumentBlock label="1ª VIA — CLIENTE" />
+        </div>
+        <div className={`border-t-4 border-dashed border-slate-400 my-2 ${isMultiPage ? 'hidden print:hidden' : 'no-print'}`} />
+        <div className="via-bloco via-empresa">
+          <DocumentBlock label="2ª VIA — EMPRESA / PRODUÇÃO" />
+        </div>
       </div>
     );
   }

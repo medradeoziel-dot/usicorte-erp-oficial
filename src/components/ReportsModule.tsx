@@ -1541,7 +1541,7 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
           )}
         </div>
 
-        {/* 🖥️ DESKTOP: 8-Column Table (>= 640px) */}
+        {/* 🖥️ DESKTOP: 7-Column Table (>= 640px) */}
         <table className="hidden sm:table w-full border-collapse text-xs mb-6" border={1} cellPadding={6}>
           <thead>
             <tr className="bg-slate-200 text-slate-900 font-bold uppercase text-[11px] border-b border-black">
@@ -1551,14 +1551,13 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
               <th className="text-left p-2">INFORMAÇÕES</th>
               <th className="text-right p-2">UNITÁRIO</th>
               <th className="text-center p-2 w-12">QTD</th>
-              <th className="text-right p-2">PESO TOTAL</th>
               <th className="text-right p-2">SUBTOTAL</th>
             </tr>
           </thead>
           <tbody id="tbody-a4-inteiro" className="divide-y divide-slate-300">
             {displayQuote.items.length === 0 ? (
               <tr>
-                <td colSpan={8} className="py-8 text-center text-slate-500 italic">
+                <td colSpan={7} className="py-8 text-center text-slate-500 italic">
                   Nenhum item na cotação para exibição.
                 </td>
               </tr>
@@ -1570,7 +1569,6 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
                 const informacoesObs = item.observacao || item.notes || item.info || '-';
                 const valorUnitario = Number(item.valorUnitario !== undefined ? item.valorUnitario : (item.unitPrice || 0));
                 const qtd = Number(item.qtd !== undefined ? item.qtd : (item.quantity || 1));
-                const pesoTotal = Number(item.pesoTotal !== undefined ? item.pesoTotal : (item.totalWeightKg || 0));
                 const subtotal = Number(item.subtotal !== undefined ? item.subtotal : (valorUnitario * qtd));
 
                 return (
@@ -1581,7 +1579,6 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
                     <td className="text-left p-2 text-slate-600 italic text-[10px]">{informacoesObs}</td>
                     <td className="text-right font-mono p-2">{formatCurrency(valorUnitario)}</td>
                     <td className="text-center font-bold font-mono p-2">{qtd}</td>
-                    <td className="text-right font-mono font-bold p-2 text-slate-900">{formatWeightKg(pesoTotal, 3)}</td>
                     <td className="text-right font-mono font-bold p-2 text-slate-950">{formatCurrency(subtotal)}</td>
                   </tr>
                 );
@@ -1626,152 +1623,196 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
       {/* ===================================================
            PROPOSTA 2: PEDIDO A4 DIVIDIDO AO MEIO (2 VIAS)
            =================================================== */}
-      <div 
-        id="doc-A4-2vias" 
-        className={`documento-modelo secao-pedido modelo-duas-vias bg-white text-slate-900 p-4 sm:p-6 rounded-xl shadow-2xl w-full max-w-4xl mx-auto font-sans overflow-x-hidden ${
-          activeModel === 'A4-2vias' ? 'block' : 'hidden'
-        }`}
-        style={{ minHeight: '850px' }}
-      >
-        {/* VIA 1: CLIENTE */}
-        <div className="via-pedido border border-black p-3 sm:p-4 rounded bg-white flex flex-col justify-between" style={{ minHeight: '380px' }}>
-          <div>
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-black pb-2 mb-3 gap-2">
-              <div className="flex items-center gap-3">
-                <div className="logo-impressao" style={{ width: '130px' }}>
-                  <Logo variant="light" className="w-[130px] h-auto" />
-                </div>
-                <span className="text-xs px-2 py-0.5 bg-blue-100 text-blue-800 rounded font-bold">VIA DO CLIENTE</span>
-              </div>
-              <span className="text-xs">
-                <strong>PEDIDO Nº:</strong> <span className="rel-numero font-mono font-bold">{displayQuote.quoteNumber || '00124'}</span>
-              </span>
-            </div>
-
-            <div className="text-xs mb-3 text-slate-700 flex flex-col sm:flex-row justify-between gap-1">
-              <div><strong>Cliente:</strong> <span className="lbl-cliente-nome font-bold uppercase">{selectedClientName || displayQuote.clientName}</span></div>
-              <div><strong>Data:</strong> <span className="rel-data font-mono">{displayQuote.date || new Date().toLocaleDateString('pt-BR')}</span></div>
-            </div>
-
-            {/* Mobile Cards Via 1 */}
-            <div className="block sm:hidden space-y-2 mb-3">
-              {displayQuote.items.map((item, idx) => (
-                <div key={idx} className="border border-slate-200 rounded p-2 text-xs bg-slate-50 space-y-1">
-                  <div className="flex justify-between font-bold">
-                    <span>{item.constanteNome || item.material || 'MATERIAL'}</span>
-                    <span className="font-mono">{formatCurrency(item.subtotal || ((item.unitPrice || 0) * (item.quantity || 1)))}</span>
-                  </div>
-                  <div className="text-[11px] text-slate-600 flex justify-between">
-                    <span>Medida: {formatarMedidasLimpa(item)}</span>
-                    <span>Qtd: {item.qtd || item.quantity || 1}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* Desktop Table Via 1 */}
-            <table className="hidden sm:table w-full text-xs border-collapse mb-3" border={1} cellPadding={4}>
-              <thead>
-                <tr className="bg-slate-100 font-bold text-[10px] uppercase">
-                  <th className="text-left p-1.5">MATERIAL</th>
-                  <th className="text-center p-1.5">MEDIDAS</th>
-                  <th className="text-center p-1.5 w-12">QTD</th>
-                  <th className="text-right p-1.5">PESO TOTAL</th>
-                  <th className="text-right p-1.5">TOTAL</th>
-                </tr>
-              </thead>
-              <tbody className="tbody-resumido divide-y divide-slate-200">
-                {displayQuote.items.map((item, idx) => (
-                  <tr key={idx}>
-                    <td className="p-1.5 font-bold text-slate-900">{item.constanteNome || item.material || 'MATERIAL'}</td>
-                    <td className="p-1.5 text-center font-mono text-[10px]">{formatarMedidasLimpa(item)}</td>
-                    <td className="p-1.5 text-center font-mono font-bold">{item.qtd || item.quantity || 1}</td>
-                    <td className="p-1.5 text-right font-mono">{formatWeightKg(item.pesoTotal || item.totalWeightKg || 0, 3)}</td>
-                    <td className="p-1.5 text-right font-mono font-bold">{formatCurrency(item.subtotal || ((item.unitPrice || 0) * (item.quantity || 1)))}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center text-xs border-t border-black pt-2 mt-2 gap-2">
-            <span className="text-slate-600">Assinatura Cliente: ___________________________________</span>
-            <strong className="text-sm font-mono text-slate-950">TOTAL: <span className="lbl-valor-total">{formatCurrency(grandTotal)}</span></strong>
-          </div>
-        </div>
-
-        {/* LINHA DE CORTE */}
-        <div className="linha-corte my-6 border-t-2 border-dashed border-black text-center relative">
-          <span className="bg-white px-3 text-[11px] font-bold text-slate-900 relative -top-3">
-            ✂️ CORTE AQUI
-          </span>
-        </div>
-
-        {/* VIA 2: EMPRESA / PRODUÇÃO */}
-        <div className="via-pedido border border-black p-3 sm:p-4 rounded bg-white flex flex-col justify-between" style={{ minHeight: '380px' }}>
-          <div>
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-black pb-2 mb-3 gap-2">
+      {(() => {
+        const isMultiPage = displayQuote.items.length > 3;
+        return (
+          <div 
+            id="doc-A4-2vias" 
+            className={`documento-modelo secao-pedido modelo-duas-vias bg-white text-slate-900 p-4 sm:p-6 rounded-xl shadow-2xl w-full max-w-4xl mx-auto font-sans overflow-x-hidden ${
+              activeModel === 'A4-2vias' ? 'block' : 'hidden'
+            }`}
+            style={{ minHeight: isMultiPage ? 'auto' : '850px' }}
+          >
+            {/* VIA 1: CLIENTE (Container / Bloco Independente) */}
+            <div 
+              className={`via-pedido via-cliente border border-black p-3 sm:p-4 rounded bg-white flex flex-col justify-between ${isMultiPage ? 'quebra-pagina' : ''}`} 
+              style={{ 
+                minHeight: isMultiPage ? 'auto' : '380px',
+                breakAfter: isMultiPage ? 'page' : 'auto',
+                pageBreakAfter: isMultiPage ? 'always' : 'auto',
+                marginBottom: isMultiPage ? '0' : '8px'
+              }}
+            >
               <div>
-                <strong className="text-sm tracking-tight text-slate-900 font-black">USICORTE METAIS</strong>
-                <span className="text-xs ml-2 px-2 py-0.5 bg-amber-100 text-amber-900 rounded font-bold">VIA DA EMPRESA / PRODUÇÃO</span>
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-black pb-2 mb-3 gap-2">
+                  <div className="flex items-center gap-3">
+                    <div className="logo-impressao" style={{ width: '130px' }}>
+                      <Logo variant="light" className="w-[130px] h-auto" />
+                    </div>
+                    <span className="text-xs px-2 py-0.5 bg-blue-100 text-blue-800 rounded font-bold">VIA DO CLIENTE</span>
+                  </div>
+                  <span className="text-xs">
+                    <strong>PEDIDO Nº:</strong> <span className="rel-numero font-mono font-bold">{displayQuote.quoteNumber || '00124'}</span>
+                  </span>
+                </div>
+
+                <div className="text-xs mb-3 text-slate-700 flex flex-col sm:flex-row justify-between gap-1">
+                  <div><strong>Cliente:</strong> <span className="lbl-cliente-nome font-bold uppercase">{selectedClientName || displayQuote.clientName}</span></div>
+                  <div><strong>Data:</strong> <span className="rel-data font-mono">{displayQuote.date || new Date().toLocaleDateString('pt-BR')}</span></div>
+                </div>
+
+                {/* Mobile Cards Via 1 */}
+                <div className="block sm:hidden space-y-2 mb-3">
+                  {displayQuote.items.map((item, idx) => (
+                    <div key={idx} className="border border-slate-200 rounded p-2 text-xs bg-slate-50 space-y-1">
+                      <div className="flex justify-between font-bold">
+                        <span>{item.constanteNome || item.material || 'MATERIAL'}</span>
+                        <span className="font-mono">{formatCurrency(item.subtotal || ((item.unitPrice || 0) * (item.quantity || 1)))}</span>
+                      </div>
+                      <div className="text-[11px] text-slate-600 flex justify-between">
+                        <span>Medida: {formatarMedidasLimpa(item)}</span>
+                        <span>Qtd: {item.qtd || item.quantity || 1}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Desktop Table Via 1 (7 Colunas Exatas) */}
+                <table className="hidden sm:table w-full text-xs border-collapse mb-3" border={1} cellPadding={4}>
+                  <thead>
+                    <tr className="bg-slate-100 font-bold text-[10px] uppercase border-b border-black">
+                      <th className="text-left p-1.5">PRODUTO / MATERIAL</th>
+                      <th className="text-center p-1.5">MEDIDAS</th>
+                      <th className="text-left p-1.5">DESCRIÇÃO</th>
+                      <th className="text-left p-1.5">INFORMAÇÕES</th>
+                      <th className="text-right p-1.5">UNITÁRIO</th>
+                      <th className="text-center p-1.5 w-12">QTD</th>
+                      <th className="text-right p-1.5">SUBTOTAL</th>
+                    </tr>
+                  </thead>
+                  <tbody className="tbody-resumido divide-y divide-slate-200">
+                    {displayQuote.items.map((item, idx) => {
+                      const produtoMaterial = item.constanteNome || item.constantName || item.material || 'MATERIAL';
+                      const medidasFormatadas = formatarMedidasLimpa(item);
+                      const descricaoItem = item.descricao || item.description || '-';
+                      const informacoesObs = item.observacao || item.notes || item.info || '-';
+                      const valorUnitario = Number(item.valorUnitario !== undefined ? item.valorUnitario : (item.unitPrice || 0));
+                      const qtd = Number(item.qtd !== undefined ? item.qtd : (item.quantity || 1));
+                      const subtotal = Number(item.subtotal !== undefined ? item.subtotal : (valorUnitario * qtd));
+
+                      return (
+                        <tr key={idx} className="hover:bg-slate-50">
+                          <td className="p-1.5 font-bold text-slate-900">{produtoMaterial}</td>
+                          <td className="p-1.5 text-center font-mono text-[10px]">{medidasFormatadas}</td>
+                          <td className="p-1.5 text-left text-slate-800 text-[11px]">{descricaoItem}</td>
+                          <td className="p-1.5 text-left text-slate-600 italic text-[10px]">{informacoesObs}</td>
+                          <td className="p-1.5 text-right font-mono">{formatCurrency(valorUnitario)}</td>
+                          <td className="p-1.5 text-center font-mono font-bold">{qtd}</td>
+                          <td className="p-1.5 text-right font-mono font-bold">{formatCurrency(subtotal)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
-              <span className="text-xs">
-                <strong>PEDIDO Nº:</strong> <span className="rel-numero font-mono font-bold">{displayQuote.quoteNumber || '00124'}</span>
+
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center text-xs border-t border-black pt-2 mt-2 gap-2">
+                <span className="text-slate-600">Assinatura Cliente: ___________________________________</span>
+                <strong className="text-sm font-mono text-slate-950">TOTAL: <span className="lbl-valor-total">{formatCurrency(grandTotal)}</span></strong>
+              </div>
+            </div>
+
+            {/* LINHA DE CORTE */}
+            <div className={`linha-corte my-6 border-t-2 border-dashed border-black text-center relative ${isMultiPage ? 'hidden print:hidden' : ''}`}>
+              <span className="bg-white px-3 text-[11px] font-bold text-slate-900 relative -top-3">
+                ✂️ CORTE AQUI
               </span>
             </div>
 
-            <div className="text-xs mb-3 text-slate-700 flex flex-col sm:flex-row justify-between gap-1">
-              <div><strong>Cliente:</strong> <span className="lbl-cliente-nome font-bold uppercase">{selectedClientName || displayQuote.clientName}</span></div>
-              <div><strong>Data:</strong> <span className="rel-data font-mono">{displayQuote.date || new Date().toLocaleDateString('pt-BR')}</span></div>
-            </div>
-
-            {/* Mobile Cards Via 2 */}
-            <div className="block sm:hidden space-y-2 mb-3">
-              {displayQuote.items.map((item, idx) => (
-                <div key={idx} className="border border-slate-200 rounded p-2 text-xs bg-slate-50 space-y-1">
-                  <div className="flex justify-between font-bold">
-                    <span>{item.constanteNome || item.material || 'MATERIAL'}</span>
-                    <span className="font-mono">{formatCurrency(item.subtotal || ((item.unitPrice || 0) * (item.quantity || 1)))}</span>
+            {/* VIA 2: EMPRESA / PRODUÇÃO (Container / Bloco Independente) */}
+            <div 
+              className="via-pedido via-empresa border border-black p-3 sm:p-4 rounded bg-white flex flex-col justify-between" 
+              style={{ minHeight: isMultiPage ? 'auto' : '380px' }}
+            >
+              <div>
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-black pb-2 mb-3 gap-2">
+                  <div>
+                    <strong className="text-sm tracking-tight text-slate-900 font-black">USICORTE METAIS</strong>
+                    <span className="text-xs ml-2 px-2 py-0.5 bg-amber-100 text-amber-900 rounded font-bold">VIA DA EMPRESA / PRODUÇÃO</span>
                   </div>
-                  <div className="text-[11px] text-slate-600 flex justify-between">
-                    <span>Medida: {formatarMedidasLimpa(item)}</span>
-                    <span>Qtd: {item.qtd || item.quantity || 1}</span>
-                  </div>
+                  <span className="text-xs">
+                    <strong>PEDIDO Nº:</strong> <span className="rel-numero font-mono font-bold">{displayQuote.quoteNumber || '00124'}</span>
+                  </span>
                 </div>
-              ))}
+
+                <div className="text-xs mb-3 text-slate-700 flex flex-col sm:flex-row justify-between gap-1">
+                  <div><strong>Cliente:</strong> <span className="lbl-cliente-nome font-bold uppercase">{selectedClientName || displayQuote.clientName}</span></div>
+                  <div><strong>Data:</strong> <span className="rel-data font-mono">{displayQuote.date || new Date().toLocaleDateString('pt-BR')}</span></div>
+                </div>
+
+                {/* Mobile Cards Via 2 */}
+                <div className="block sm:hidden space-y-2 mb-3">
+                  {displayQuote.items.map((item, idx) => (
+                    <div key={idx} className="border border-slate-200 rounded p-2 text-xs bg-slate-50 space-y-1">
+                      <div className="flex justify-between font-bold">
+                        <span>{item.constanteNome || item.material || 'MATERIAL'}</span>
+                        <span className="font-mono">{formatCurrency(item.subtotal || ((item.unitPrice || 0) * (item.quantity || 1)))}</span>
+                      </div>
+                      <div className="text-[11px] text-slate-600 flex justify-between">
+                        <span>Medida: {formatarMedidasLimpa(item)}</span>
+                        <span>Qtd: {item.qtd || item.quantity || 1}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Desktop Table Via 2 (7 Colunas Exatas) */}
+                <table className="hidden sm:table w-full text-xs border-collapse mb-3" border={1} cellPadding={4}>
+                  <thead>
+                    <tr className="bg-slate-100 font-bold text-[10px] uppercase border-b border-black">
+                      <th className="text-left p-1.5">PRODUTO / MATERIAL</th>
+                      <th className="text-center p-1.5">MEDIDAS</th>
+                      <th className="text-left p-1.5">DESCRIÇÃO</th>
+                      <th className="text-left p-1.5">INFORMAÇÕES</th>
+                      <th className="text-right p-1.5">UNITÁRIO</th>
+                      <th className="text-center p-1.5 w-12">QTD</th>
+                      <th className="text-right p-1.5">SUBTOTAL</th>
+                    </tr>
+                  </thead>
+                  <tbody className="tbody-resumido divide-y divide-slate-200">
+                    {displayQuote.items.map((item, idx) => {
+                      const produtoMaterial = item.constanteNome || item.constantName || item.material || 'MATERIAL';
+                      const medidasFormatadas = formatarMedidasLimpa(item);
+                      const descricaoItem = item.descricao || item.description || '-';
+                      const informacoesObs = item.observacao || item.notes || item.info || '-';
+                      const valorUnitario = Number(item.valorUnitario !== undefined ? item.valorUnitario : (item.unitPrice || 0));
+                      const qtd = Number(item.qtd !== undefined ? item.qtd : (item.quantity || 1));
+                      const subtotal = Number(item.subtotal !== undefined ? item.subtotal : (valorUnitario * qtd));
+
+                      return (
+                        <tr key={idx} className="hover:bg-slate-50">
+                          <td className="p-1.5 font-bold text-slate-900">{produtoMaterial}</td>
+                          <td className="p-1.5 text-center font-mono text-[10px]">{medidasFormatadas}</td>
+                          <td className="p-1.5 text-left text-slate-800 text-[11px]">{descricaoItem}</td>
+                          <td className="p-1.5 text-left text-slate-600 italic text-[10px]">{informacoesObs}</td>
+                          <td className="p-1.5 text-right font-mono">{formatCurrency(valorUnitario)}</td>
+                          <td className="p-1.5 text-center font-mono font-bold">{qtd}</td>
+                          <td className="p-1.5 text-right font-mono font-bold">{formatCurrency(subtotal)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center text-xs border-t border-black pt-2 mt-2 gap-2">
+                <span className="text-slate-600">Vendedor / Produção: ___________________________________</span>
+                <strong className="text-sm font-mono text-slate-950">TOTAL: <span className="lbl-valor-total">{formatCurrency(grandTotal)}</span></strong>
+              </div>
             </div>
-
-            {/* Desktop Table Via 2 */}
-            <table className="hidden sm:table w-full text-xs border-collapse mb-3" border={1} cellPadding={4}>
-              <thead>
-                <tr className="bg-slate-100 font-bold text-[10px] uppercase">
-                  <th className="text-left p-1.5">MATERIAL</th>
-                  <th className="text-center p-1.5">MEDIDAS</th>
-                  <th className="text-center p-1.5 w-12">QTD</th>
-                  <th className="text-right p-1.5">PESO TOTAL</th>
-                  <th className="text-right p-1.5">TOTAL</th>
-                </tr>
-              </thead>
-              <tbody className="tbody-resumido divide-y divide-slate-200">
-                {displayQuote.items.map((item, idx) => (
-                  <tr key={idx}>
-                    <td className="p-1.5 font-bold text-slate-900">{item.constanteNome || item.material || 'MATERIAL'}</td>
-                    <td className="p-1.5 text-center font-mono text-[10px]">{formatarMedidasLimpa(item)}</td>
-                    <td className="p-1.5 text-center font-mono font-bold">{item.qtd || item.quantity || 1}</td>
-                    <td className="p-1.5 text-right font-mono">{formatWeightKg(item.pesoTotal || item.totalWeightKg || 0, 3)}</td>
-                    <td className="p-1.5 text-right font-mono font-bold">{formatCurrency(item.subtotal || ((item.unitPrice || 0) * (item.quantity || 1)))}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
           </div>
-
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center text-xs border-t border-black pt-2 mt-2 gap-2">
-            <span className="text-slate-600">Vendedor / Produção: ___________________________________</span>
-            <strong className="text-sm font-mono text-slate-950">TOTAL: <span className="lbl-valor-total">{formatCurrency(grandTotal)}</span></strong>
-          </div>
-        </div>
-      </div>
+        );
+      })()}
 
       {/* ===================================================
            PROPOSTA 3: ETIQUETA CUPOM 80x80mm (IDENTIFICAÇÃO DA PEÇA)
@@ -1989,6 +2030,13 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
       {/* Regras de impressão de todos os modelos */}
       <style>{`
         @media print {
+          thead { display: table-header-group !important; }
+          tfoot { display: table-footer-group !important; }
+          tr { page-break-inside: avoid !important; break-inside: avoid !important; }
+          table { page-break-inside: auto !important; }
+          .via-cliente.quebra-pagina,
+          .quebra-pagina { break-after: page !important; page-break-after: always !important; }
+
           body.print-corte .btn-no-print,
           body.print-corte .filtros-bar,
           body.print-corte .tabela-container,
@@ -2003,7 +2051,7 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
           body.print-pedido .tabela-container,
           body.print-pedido .screen-header,
           body.print-pedido .documento-modelo:not(.secao-pedido) { display: none !important; }
-          body.print-pedido #doc-A4-2vias { display: flex !important; box-shadow: none !important; }
+          body.print-pedido #doc-A4-2vias { display: block !important; box-shadow: none !important; width: 100% !important; max-width: 100% !important; }
 
           body.print-etiqueta .btn-no-print,
           body.print-etiqueta .filtros-bar,
