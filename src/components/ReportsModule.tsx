@@ -34,6 +34,7 @@ import {
   Scissors,
   Tag,
   Image as ImageIcon,
+  Camera,
   Upload,
   Trash2,
   Eye,
@@ -77,6 +78,7 @@ export interface ConsultaItem {
   itemId?: string | number;
   observacao?: string;
   status: StatusProposta;
+  desenhoUrl?: string;
 }
 
 // Dados de consulta (inicia vazio para produção)
@@ -202,6 +204,23 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
   
   // Selected saved order/file
   const [selectedOrderKey, setSelectedOrderKey] = useState<string>('CURRENT');
+
+  // Lista de pedidos salvos filtrada pelo cliente selecionado
+  const filteredSavedQuotes = useMemo(() => {
+    if (!selectedClientName || selectedClientName.trim() === '' || selectedClientName === '-- SELECIONE O CLIENTE --' || selectedClientName === 'TODOS') {
+      return savedDbQuotes;
+    }
+    const normSelected = selectedClientName.trim().toLowerCase();
+    const isBalcao = normSelected.includes('balcao') || normSelected.includes('balcão');
+
+    return savedDbQuotes.filter(sq => {
+      const clientStr = String(sq.cliente || '').trim().toLowerCase();
+      if (isBalcao) {
+        return clientStr.includes('balcao') || clientStr.includes('balcão') || !clientStr || clientStr === 'cliente';
+      }
+      return clientStr.includes(normSelected) || normSelected.includes(clientStr);
+    });
+  }, [savedDbQuotes, selectedClientName]);
   
   // Drawing photo for item/label
   // ✅ UMA imagem POR ITEM (chave = índice do item), em vez de uma única imagem global
@@ -229,10 +248,16 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
   const [deleteFeedback, setDeleteFeedback] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
+  // Estados para anexo direto de Imagem/DXF na tabela de consulta
+  const [targetImageItem, setTargetImageItem] = useState<ConsultaItem | null>(null);
+  const [activeImagePreviewItem, setActiveImagePreviewItem] = useState<ConsultaItem | null>(null);
+  const [uploadingItemId, setUploadingItemId] = useState<number | null>(null);
+  const itemFileInputRef = useRef<HTMLInputElement>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pasteAreaRef = useRef<HTMLDivElement>(null);
 
-  // Busca e carrega uma cotação estritamente por ID no banco de dados
+  // Busca e carrega uma cotação estritamente por ID no banco de dados com fallback para LocalStorage
   const carregarCotacaoPorId = async (idOuNumero: string) => {
     if (!idOuNumero) return null;
     try {
@@ -317,7 +342,7 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
 
         setActiveQuote(newQ);
         setSelectedClientName(newQ.clientName);
-        setSelectedOrderKey(newQ.quoteNumber);
+        setSelectedOrderKey(newQ.id || newQ.quoteNumber);
 
         const fotosMap: Record<number, string> = {};
         mappedItems.forEach((it, idx) => {
@@ -338,8 +363,37 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
         return newQ;
       }
     } catch (err) {
-      console.error("Erro ao carregar cotação filtrada por ID:", err);
+      console.warn("Supabase sem resposta para ID:", err);
     }
+
+    // Fallback: busca em localStorage se não encontrar no Supabase
+    try {
+      const saved = localStorage.getItem('s_orcamentos');
+      if (saved) {
+        const quotes: Quote[] = JSON.parse(saved);
+        const found = quotes.find(
+          q => q.id === idOuNumero || q.quoteNumber === idOuNumero || (q.quoteNumber && q.quoteNumber.trim().toLowerCase() === idOuNumero.trim().toLowerCase())
+        );
+        if (found) {
+          setActiveQuote(found);
+          setSelectedClientName(found.clientName || 'Cliente Balcão');
+          setSelectedOrderKey(found.id || found.quoteNumber);
+
+          const fotosMap: Record<number, string> = {};
+          (found.items || []).forEach((it, idx) => {
+            if (it.drawingImage || (it as any).fotoDesenho) {
+              fotosMap[idx] = it.drawingImage || (it as any).fotoDesenho;
+            }
+          });
+          setDrawingPhotos(fotosMap);
+          setSelectedItemIndex(0);
+          return found;
+        }
+      }
+    } catch (e) {
+      console.warn("Erro ao buscar quote local:", e);
+    }
+
     return null;
   };
 
@@ -398,12 +452,11 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
               cotacaoId: q.id,
               itemId: it.id,
               observacao: it.observacao || '',
-              status: q.status as StatusProposta
+              status: q.status as StatusProposta,
+              desenhoUrl: it.desenho_url || undefined
             });
           });
         });
-
-        setSavedDbQuotes(distinctQuotesList);
       }
     } catch (err) {
       console.warn('Supabase offline ou sem cotações:', err);
@@ -426,6 +479,16 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
             const key = String(q.quoteNumber || q.id || '').trim().toLowerCase();
             if (key && !seenQuoteNumbers.has(key)) {
               seenQuoteNumbers.add(key);
+
+              distinctQuotesList.push({
+                id: q.id || '',
+                numero: q.quoteNumber || `COT-LOCAL-${qIdx + 1}`,
+                cliente: q.clientName || 'Cliente Balcão',
+                data: q.date || q.createdAt || '',
+                total: q.grandTotal || q.subtotalTotal || (q.items || []).reduce((acc, i) => acc + ((i.unitPrice || 0) * (i.quantity || 1)), 0),
+                createdAt: q.createdAt || q.updatedAt || q.date || ''
+              });
+
               (q.items || []).forEach((it, itIdx) => {
                 itemsList.push({
                   idVer: 20000 + qIdx * 100 + itIdx,
@@ -445,7 +508,8 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
                   observacao: it.notes || '',
                   status: (q.status?.toLowerCase().includes('aprov') ? 'aprovado' :
                            q.status?.toLowerCase().includes('canc') ? 'rejeitado' :
-                           q.status?.toLowerCase().includes('env') ? 'pendente' : 'rascunho') as StatusProposta
+                           q.status?.toLowerCase().includes('env') ? 'pendente' : 'rascunho') as StatusProposta,
+                  desenhoUrl: it.drawingImage || (it as any).fotoDesenho || (it as any).desenho_url || undefined
                 });
               });
             }
@@ -456,12 +520,228 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
       }
     }
 
+    setSavedDbQuotes(distinctQuotesList);
     setDbQuotesItems(itemsList);
   };
 
   useEffect(() => {
     loadAllConsultaData();
   }, []);
+
+  // Mantém a cotação ativa sincronizada com currentQuote se o usuário estiver na visualização da cotação atual
+  useEffect(() => {
+    if (selectedOrderKey === 'CURRENT') {
+      setActiveQuote(currentQuote);
+    }
+  }, [currentQuote, selectedOrderKey]);
+
+  // Handler para clicar no botão de imagem na tabela de consulta
+  const handleItemImageButtonClick = (item: ConsultaItem) => {
+    setTargetImageItem(item);
+    if (item.desenhoUrl) {
+      setActiveImagePreviewItem(item);
+    } else {
+      if (itemFileInputRef.current) {
+        itemFileInputRef.current.value = '';
+        itemFileInputRef.current.click();
+      }
+    }
+  };
+
+  // Handler para processar o arquivo selecionado (Imagem ou DXF) para um item específico
+  const handleItemFileInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !targetImageItem) return;
+
+    const currentTarget = targetImageItem;
+    setUploadingItemId(currentTarget.idVer);
+
+    try {
+      // 1. Converte imagem ou arquivo DXF em base64 com alto contraste e geometria enquadrada
+      const base64 = await fileToDxfImage(file, {
+        medida: currentTarget.medida,
+        material: currentTarget.produto,
+        observacao: currentTarget.observacao,
+        descricao: currentTarget.descricao
+      });
+
+      // 2. Upload para o bucket 'desenhos' do Supabase Storage
+      const cotacaoKey = currentTarget.cotacao || String(currentTarget.cotacaoId || 'geral');
+      try {
+        await uploadDesenhoStorage(cotacaoKey, file, currentTarget.itemId);
+      } catch (storageErr) {
+        console.warn('Aviso upload storage:', storageErr);
+      }
+
+      // 3. Atualiza na tabela cotacao_itens no Supabase se houver itemId
+      if (currentTarget.itemId) {
+        try {
+          await db
+            .from('cotacao_itens')
+            .update({ desenho_url: base64 })
+            .eq('id', currentTarget.itemId);
+        } catch (dbErr) {
+          console.warn('Aviso update cotacao_itens:', dbErr);
+        }
+      }
+
+      // 4. Atualiza no LocalStorage (s_orcamentos)
+      try {
+        const saved = localStorage.getItem('s_orcamentos');
+        if (saved) {
+          const quotes: Quote[] = JSON.parse(saved);
+          if (Array.isArray(quotes)) {
+            const qIndex = quotes.findIndex(
+              q => q.id === currentTarget.cotacaoId ||
+                   q.quoteNumber === currentTarget.cotacao ||
+                   (q.quoteNumber && q.quoteNumber.trim().toLowerCase() === String(currentTarget.cotacao).trim().toLowerCase())
+            );
+            if (qIndex !== -1) {
+              const quote = quotes[qIndex];
+              if (quote.items && quote.items.length > 0) {
+                const itIdx = quote.items.findIndex(
+                  (it, idx) => (currentTarget.itemId && String(it.id) === String(currentTarget.itemId)) ||
+                               it.description === currentTarget.descricao ||
+                               idx === (currentTarget.idVer % 100)
+                );
+                const targetIndex = itIdx !== -1 ? itIdx : 0;
+                quote.items[targetIndex].drawingImage = base64;
+                (quote.items[targetIndex] as any).fotoDesenho = base64;
+                (quote.items[targetIndex] as any).desenho_url = base64;
+                quote.updatedAt = new Date().toISOString();
+                localStorage.setItem('s_orcamentos', JSON.stringify(quotes));
+              }
+            }
+          }
+        }
+      } catch (lsErr) {
+        console.warn('Aviso localStorage:', lsErr);
+      }
+
+      // 5. Atualiza estado da tabela de consulta
+      setDbQuotesItems(prev => prev.map(it => {
+        if (it.idVer === currentTarget.idVer) {
+          return { ...it, desenhoUrl: base64 };
+        }
+        return it;
+      }));
+
+      // 6. Atualiza activeImagePreviewItem se o modal estiver aberto
+      if (activeImagePreviewItem && activeImagePreviewItem.idVer === currentTarget.idVer) {
+        setActiveImagePreviewItem({ ...currentTarget, desenhoUrl: base64 });
+      }
+
+      // 7. Sincroniza com activeQuote / drawingPhotos se cotação estiver aberta
+      if (activeQuote.quoteNumber === currentTarget.cotacao || activeQuote.id === currentTarget.cotacaoId) {
+        const itemIndex = activeQuote.items?.findIndex(
+          (it, idx) => (currentTarget.itemId && String(it.id) === String(currentTarget.itemId)) ||
+                       idx === (currentTarget.idVer % 100)
+        );
+        if (itemIndex !== undefined && itemIndex >= 0) {
+          setDrawingPhotos(prev => ({ ...prev, [itemIndex]: base64 }));
+        }
+      }
+
+      setDeleteFeedback({
+        message: `Imagem/desenho salvo com sucesso no item "${currentTarget.descricao}".`,
+        type: 'success'
+      });
+      setTimeout(() => setDeleteFeedback(null), 4000);
+    } catch (err: any) {
+      console.error('Erro ao salvar imagem do item:', err);
+      setDeleteFeedback({
+        message: `Erro ao processar imagem: ${err?.message || 'Falha na conversão'}`,
+        type: 'error'
+      });
+      setTimeout(() => setDeleteFeedback(null), 4500);
+    } finally {
+      setUploadingItemId(null);
+      e.target.value = '';
+    }
+  };
+
+  // Remove a imagem do item no Supabase, LocalStorage e Estado Local
+  const handleRemoveItemImage = async (item: ConsultaItem) => {
+    try {
+      // 1. Supabase
+      if (item.itemId) {
+        await db
+          .from('cotacao_itens')
+          .update({ desenho_url: null })
+          .eq('id', item.itemId);
+      }
+
+      // 2. LocalStorage
+      try {
+        const saved = localStorage.getItem('s_orcamentos');
+        if (saved) {
+          const quotes: Quote[] = JSON.parse(saved);
+          if (Array.isArray(quotes)) {
+            const qIndex = quotes.findIndex(
+              q => q.id === item.cotacaoId ||
+                   q.quoteNumber === item.cotacao ||
+                   (q.quoteNumber && q.quoteNumber.trim().toLowerCase() === String(item.cotacao).trim().toLowerCase())
+            );
+            if (qIndex !== -1) {
+              const quote = quotes[qIndex];
+              if (quote.items && quote.items.length > 0) {
+                const itIdx = quote.items.findIndex(
+                  (it, idx) => (item.itemId && String(it.id) === String(item.itemId)) ||
+                               it.description === item.descricao ||
+                               idx === (item.idVer % 100)
+                );
+                if (itIdx !== -1) {
+                  delete quote.items[itIdx].drawingImage;
+                  delete (quote.items[itIdx] as any).fotoDesenho;
+                  delete (quote.items[itIdx] as any).desenho_url;
+                  quote.updatedAt = new Date().toISOString();
+                  localStorage.setItem('s_orcamentos', JSON.stringify(quotes));
+                }
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Aviso ao remover do localStorage:', e);
+      }
+
+      // 3. Estado local
+      setDbQuotesItems(prev => prev.map(it => {
+        if (it.idVer === item.idVer) {
+          return { ...it, desenhoUrl: undefined };
+        }
+        return it;
+      }));
+
+      if (activeQuote.quoteNumber === item.cotacao || activeQuote.id === item.cotacaoId) {
+        const itemIndex = activeQuote.items?.findIndex(
+          (it, idx) => (item.itemId && String(it.id) === String(item.itemId)) ||
+                       idx === (item.idVer % 100)
+        );
+        if (itemIndex !== undefined && itemIndex >= 0) {
+          setDrawingPhotos(prev => {
+            const next = { ...prev };
+            delete next[itemIndex];
+            return next;
+          });
+        }
+      }
+
+      setActiveImagePreviewItem(null);
+      setDeleteFeedback({
+        message: `Imagem/desenho removido do item "${item.descricao}".`,
+        type: 'success'
+      });
+      setTimeout(() => setDeleteFeedback(null), 4000);
+    } catch (err: any) {
+      console.error('Erro ao remover imagem do item:', err);
+      setDeleteFeedback({
+        message: `Erro ao remover imagem: ${err?.message || 'Falha na operação'}`,
+        type: 'error'
+      });
+      setTimeout(() => setDeleteFeedback(null), 4000);
+    }
+  };
 
   // Exclusão Individual (Item / Orçamento)
   const executeDeleteItem = async (item: ConsultaItem) => {
@@ -867,8 +1147,60 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
       setActiveQuote(currentQuote);
       setSelectedClientName(currentQuote.clientName || 'Cliente Balcão');
       setDrawingPhotos({});
-    } else {
-      await carregarCotacaoPorId(key);
+      setSelectedItemIndex(0);
+      return;
+    }
+
+    const loaded = await carregarCotacaoPorId(key);
+    if (!loaded) {
+      // Fallback para itens da lista em memória
+      const matchedItems = dbQuotesItems.filter(
+        i => i.cotacao === key || i.cotacaoId === key
+      );
+      if (matchedItems.length > 0) {
+        const first = matchedItems[0];
+        const sumTotal = matchedItems.reduce((acc, curr) => acc + (curr.valorGeral || (curr.unitario * curr.qtd)), 0);
+        const reconstructed: Quote = {
+          id: first.cotacaoId || first.cotacao || key,
+          quoteNumber: first.cotacao || key,
+          date: first.data || new Date().toISOString().slice(0, 10),
+          clientName: first.empresa || 'Cliente Balcão',
+          contactPerson: first.contato !== '-' ? first.contato : '',
+          status: (first.status === 'aprovado' ? 'Aprovado' : first.status === 'pendente' ? 'Enviado' : first.status === 'rejeitado' ? 'Cancelado' : 'Rascunho'),
+          validityDays: 10,
+          paymentTerms: 'À Vista / Pix',
+          observations: first.observacao || '',
+          items: matchedItems.map((it, idx) => ({
+            id: String(it.itemId || it.idVer || idx + 1),
+            date: it.data || new Date().toISOString().slice(0, 10),
+            companyName: it.empresa,
+            description: it.descricao,
+            descricao: it.descricao,
+            constantName: it.produto,
+            material: it.produto,
+            constant: '1.0',
+            measure: it.medida,
+            widthLength: it.medida,
+            quantity: it.qtd,
+            qtd: it.qtd,
+            unitPrice: it.unitario,
+            valorUnitario: it.unitario,
+            subtotal: it.valorGeral,
+            notes: it.observacao || '',
+            observacao: it.observacao || ''
+          })),
+          subtotalTotal: sumTotal,
+          grandTotal: sumTotal,
+          discount: 0,
+          shipping: 0,
+          totalWeightKg: 0,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+        setActiveQuote(reconstructed);
+        setSelectedClientName(reconstructed.clientName);
+        setSelectedItemIndex(0);
+      }
     }
   };
 
@@ -1910,7 +2242,7 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
                       onChange={(e) => handleSelectAll(e.target.checked)} 
                     />
                   </th>
-                  <th style={{ width: '160px', textAlign: 'center' }}>Ações</th>
+                  <th style={{ width: '180px', textAlign: 'center' }}>Ações</th>
                   <th>Cotação</th>
                   <th>Situação</th>
                   <th>Data</th>
@@ -1984,6 +2316,29 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
                             >
                               <Eye className="w-3 h-3" />
                               <span>Abrir</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleItemImageButtonClick(item);
+                              }}
+                              className={`p-1 rounded text-[11px] transition-all cursor-pointer flex items-center justify-center ${
+                                item.desenhoUrl
+                                  ? 'bg-emerald-600/25 hover:bg-emerald-600 text-emerald-400 hover:text-white border border-emerald-500/50 shadow-xs shadow-emerald-950/40'
+                                  : 'bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 border border-slate-700'
+                              }`}
+                              title={
+                                item.desenhoUrl
+                                  ? 'Imagem/Desenho já anexado. Clique para visualizar, substituir ou remover'
+                                  : 'Anexar imagem (.jpg, .png) ou desenho CAD (.dxf) diretamente neste item'
+                              }
+                            >
+                              {uploadingItemId === item.idVer ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-400" />
+                              ) : (
+                                <Camera className={`w-3.5 h-3.5 ${item.desenhoUrl ? 'text-emerald-400 group-hover:text-white' : ''}`} />
+                              )}
                             </button>
                             <button
                               type="button"
@@ -2139,6 +2494,114 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
                       </>
                     )}
                   </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ===================================================
+               INPUT DE ARQUIVO OCULTO PARA ANEXAR IMAGEM/DXF
+               =================================================== */}
+          <input 
+            type="file" 
+            ref={itemFileInputRef} 
+            onChange={handleItemFileInputChange} 
+            accept="image/png, image/jpeg, image/jpg, image/webp, .dxf" 
+            className="hidden" 
+          />
+
+          {/* ===================================================
+               MODAL DE VISUALIZAÇÃO / GESTÃO DA IMAGEM DO ITEM
+               =================================================== */}
+          {activeImagePreviewItem && (
+            <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200">
+              <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4 text-slate-100 relative">
+                <button 
+                  type="button"
+                  onClick={() => setActiveImagePreviewItem(null)}
+                  className="absolute top-4 right-4 text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+
+                <div className="flex items-center gap-3 text-emerald-400">
+                  <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl">
+                    <Camera className="w-6 h-6 text-emerald-400" />
+                  </div>
+                  <div>
+                    <h3 className="font-black text-base text-slate-100">Desenho Técnico / Imagem do Item</h3>
+                    <p className="text-xs text-slate-400">Arquivo vinculado ao registro no banco e armazenamento</p>
+                  </div>
+                </div>
+
+                <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-xl text-xs space-y-1.5 text-slate-300">
+                  <div className="flex justify-between">
+                    <span><strong className="text-slate-400">Cotação:</strong> <span className="font-mono text-blue-400 font-bold">{activeImagePreviewItem.cotacao || '-'}</span></span>
+                    <span><strong className="text-slate-400">Cliente:</strong> <span className="text-slate-200 font-semibold">{activeImagePreviewItem.empresa}</span></span>
+                  </div>
+                  <div><strong className="text-slate-400">Item:</strong> <span className="text-slate-200">{activeImagePreviewItem.descricao}</span></div>
+                  <div><strong className="text-slate-400">Medida / Material:</strong> <span className="text-slate-200 font-mono">{activeImagePreviewItem.medida || '-'} ({activeImagePreviewItem.produto})</span></div>
+                </div>
+
+                <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 flex items-center justify-center min-h-[220px] max-h-[360px] overflow-hidden">
+                  {activeImagePreviewItem.desenhoUrl ? (
+                    <img 
+                      src={activeImagePreviewItem.desenhoUrl} 
+                      alt={`Desenho de ${activeImagePreviewItem.descricao}`}
+                      className="max-h-72 w-auto object-contain rounded bg-white p-2 border border-slate-700 shadow-md"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <div className="text-center py-8 text-slate-500 text-xs">
+                      Nenhuma imagem anexada.
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-between gap-2 pt-3 border-t border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveItemImage(activeImagePreviewItem)}
+                    className="px-3.5 py-2 rounded-lg text-xs font-semibold bg-rose-600/20 hover:bg-rose-600 text-rose-400 hover:text-white border border-rose-500/40 transition-all flex items-center gap-1.5 cursor-pointer"
+                    title="Remover permanentemente a imagem deste item"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Remover Imagem</span>
+                  </button>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTargetImageItem(activeImagePreviewItem);
+                        if (itemFileInputRef.current) {
+                          itemFileInputRef.current.value = '';
+                          itemFileInputRef.current.click();
+                        }
+                      }}
+                      disabled={uploadingItemId === activeImagePreviewItem.idVer}
+                      className="px-3.5 py-2 rounded-lg text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white transition-all shadow-md shadow-blue-600/30 flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                    >
+                      {uploadingItemId === activeImagePreviewItem.idVer ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>Atualizando...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Upload className="w-3.5 h-3.5" />
+                          <span>Substituir Arquivo (.jpg, .png, .dxf)</span>
+                        </>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveImagePreviewItem(null)}
+                      className="px-3 py-2 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors cursor-pointer"
+                    >
+                      Fechar
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -2352,10 +2815,12 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
               onChange={(e) => handleOrderChange(e.target.value)}
               className="w-full px-3 py-2 bg-slate-950 text-slate-100 border border-slate-700 rounded-lg text-xs focus:outline-hidden focus:border-blue-500 font-mono"
             >
-              <option value="CURRENT">{displayQuote.quoteNumber || 'Cotação Atual'} (Cotação Selecionada)</option>
-              {savedDbQuotes.map(sq => (
+              <option value="CURRENT">
+                {displayQuote.quoteNumber ? `[${displayQuote.quoteNumber}] ${displayQuote.clientName || 'Cotação Atual'} (Cotação Selecionada)` : 'Cotação Atual (Em Edição)'}
+              </option>
+              {filteredSavedQuotes.map(sq => (
                 <option key={sq.id || sq.numero} value={sq.id || sq.numero}>
-                  {sq.numero || sq.id.slice(0, 8)} - {typeof sq.cliente === 'string' ? sq.cliente : 'Cliente'} ({formatSafeDate(sq.data || sq.createdAt)})
+                  [{sq.numero || 'COT'}] {sq.cliente || 'CLIENTE BALCÃO'} - {formatSafeDate(sq.data || sq.createdAt)}
                 </option>
               ))}
             </select>

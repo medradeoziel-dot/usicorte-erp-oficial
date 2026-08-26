@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { clientes as mockClientes, pedidosPorCliente as mockPedidos, itensPorPedido as mockItens } from "@/lib/mockData";
 import type { ViewType, ItemPedido, Cliente as LocalCliente, Pedido } from "@/lib/types";
+import type { Quote } from "@/types";
 import { useLocalStorage } from "@/lib/useLocalStorage";
 import { db, fetchCotacaoById, type SupabaseCotacao, type SupabaseCliente, type SupabaseCotacaoItem, type StatusCotacao, uploadDesenhoStorage } from "@/lib/db";
 import LabelPreview from "@/components/LabelPreview";
@@ -160,7 +161,97 @@ export default function Proposals() {
         return cot;
       }
     } catch (err) {
-      console.error("Erro ao carregar cotação filtrada por ID:", err);
+      console.warn("Supabase sem resposta para ID:", err);
+    }
+
+    // Fallback: busca em localStorage
+    try {
+      const saved = localStorage.getItem('s_orcamentos');
+      if (saved) {
+        const quotes: Quote[] = JSON.parse(saved);
+        const cot = quotes.find(
+          q => q.id === targetId || q.quoteNumber === targetId || (q.quoteNumber && q.quoteNumber.trim().toLowerCase() === targetId.trim().toLowerCase())
+        );
+        if (cot) {
+          const numId = cot.quoteNumber || cot.id || targetId;
+          const cotClienteNome = cot.clientName || 'Cliente Selecionado';
+
+          const existingClient = dbClientes.find(
+            (c) => c.nome.toLowerCase() === cotClienteNome.toLowerCase()
+          );
+          const activeCId = existingClient ? existingClient.id : 999;
+
+          if (!existingClient) {
+            const newClient: LocalCliente = {
+              id: activeCId,
+              nome: cotClienteNome,
+              cnpj: cot.clientDocument || "",
+              telefone: cot.clientPhone || "",
+              cidade: cot.clientCity || "",
+              email: cot.clientEmail || "",
+              contato: cot.contactPerson || "",
+            };
+            setDbClientes((prev) => [newClient, ...prev]);
+          }
+
+          setClienteId(activeCId);
+          setPedidoId(numId);
+
+          const mappedItens: ItemPedido[] = (cot.items && cot.items.length > 0)
+            ? cot.items.map((it: any, itemIdx: number) => ({
+                id: itemIdx + 1,
+                descricao: it.description || it.descricao || it.produto || `Peça #${itemIdx + 1}`,
+                material: it.material || it.constantName || "Aço Carbono",
+                medida: it.measure || it.widthLength || "Conforme desenho",
+                quantidade: Number(it.quantity || it.qtd) || 1,
+                valorUnit: Number(it.unitPrice || it.valorUnitario) || 0,
+                observacoes: it.notes || it.observacao || "",
+                foto: it.drawingImage || it.fotoDesenho || undefined,
+              }))
+            : [{
+                id: 1,
+                descricao: cot.observations || "Item da cotação",
+                material: "Aço Carbono",
+                medida: "Conforme projeto",
+                quantidade: 1,
+                valorUnit: Number(cot.grandTotal || cot.subtotalTotal) || 0,
+                observacoes: cot.observations || "",
+              }];
+
+          const novoPedidoObj: Pedido = {
+            id: numId,
+            data: cot.date || new Date().toISOString().slice(0, 10),
+            status: cot.status === 'Aprovado' ? 'Aprovado' : cot.status === 'Cancelado' ? 'Cancelado' : cot.status === 'Enviado' ? 'Pendente' : 'Rascunho',
+            clienteNome: cotClienteNome,
+            total: Number(cot.grandTotal || cot.subtotalTotal) || 0,
+          };
+
+          setDbPedidosPorCliente((prev) => ({
+            ...prev,
+            [activeCId]: [novoPedidoObj, ...(prev[activeCId] || []).filter((p) => p.id !== numId)],
+          }));
+
+          setDbItensPorPedido((prev) => ({
+            ...prev,
+            [numId]: mappedItens,
+          }));
+
+          const initialFotos: Record<number, string> = {};
+          mappedItens.forEach((it) => {
+            if (it.foto) {
+              initialFotos[it.id] = it.foto;
+            }
+          });
+          if (Object.keys(initialFotos).length > 0) {
+            setFotosPorPeca(initialFotos);
+          }
+
+          setPecaAtiva(mappedItens[0]?.id || 1);
+          return cot as any;
+        }
+      }
+    } catch (e) {
+      console.warn("Erro ao carregar do localStorage:", e);
     } finally {
       setIsLoadingDb(false);
     }
@@ -243,6 +334,52 @@ export default function Proposals() {
             }));
           }
         });
+
+        // 3. Mescla com cotações locais de s_orcamentos
+        try {
+          const saved = localStorage.getItem('s_orcamentos');
+          if (saved) {
+            const localQuotes: Quote[] = JSON.parse(saved);
+            if (Array.isArray(localQuotes)) {
+              localQuotes.forEach((lq, lIdx) => {
+                const numId = lq.quoteNumber || lq.id || `COT-LOC-${lIdx + 1}`;
+                const clientMatch = currentClientsList.find(
+                  (c) => c.nome.toLowerCase() === (lq.clientName || "").toLowerCase()
+                ) || currentClientsList[0];
+                const cId = clientMatch ? clientMatch.id : 1;
+
+                if (!newPedidosPorCliente[cId]) {
+                  newPedidosPorCliente[cId] = [];
+                }
+
+                if (!newPedidosPorCliente[cId].some((p) => p.id === numId)) {
+                  newPedidosPorCliente[cId].push({
+                    id: numId,
+                    data: lq.date || new Date().toISOString().slice(0, 10),
+                    status: lq.status === 'Aprovado' ? 'Aprovado' : lq.status === 'Cancelado' ? 'Cancelado' : lq.status === 'Enviado' ? 'Pendente' : 'Rascunho',
+                    clienteNome: lq.clientName,
+                    total: Number(lq.grandTotal || lq.subtotalTotal) || 0
+                  });
+                }
+
+                if (lq.items && lq.items.length > 0 && !newItensPorPedido[numId]) {
+                  newItensPorPedido[numId] = lq.items.map((it: any, itemIdx: number) => ({
+                    id: itemIdx + 1,
+                    descricao: it.description || it.descricao || it.produto || `Peça #${itemIdx + 1}`,
+                    material: it.material || it.constantName || "Aço Carbono",
+                    medida: it.measure || it.widthLength || "Conforme desenho",
+                    quantidade: Number(it.quantity || it.qtd) || 1,
+                    valorUnit: Number(it.unitPrice || it.valorUnitario) || 0,
+                    observacoes: it.notes || it.observacao || "",
+                    foto: it.drawingImage || it.fotoDesenho || undefined
+                  }));
+                }
+              });
+            }
+          }
+        } catch (e) {
+          console.warn("Erro ao ler s_orcamentos em Proposals:", e);
+        }
 
         setDbPedidosPorCliente(newPedidosPorCliente);
         setDbItensPorPedido(newItensPorPedido);
