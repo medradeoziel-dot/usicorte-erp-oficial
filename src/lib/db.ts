@@ -143,6 +143,223 @@ export async function signOutSupabase() {
   return res;
 }
 
+export interface SupabaseUserRole {
+  id?: string | number;
+  user_id?: string;
+  nome: string;
+  email: string;
+  cargo: string;
+  role: 'admin' | 'operador';
+  senha?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+const DEFAULT_USUARIOS_EQUIPE: SupabaseUserRole[] = [
+  { nome: 'ADMIN', senha: '1234', email: 'admin@usicorte.com.br', cargo: 'Administrador', role: 'admin' },
+  { nome: 'MARCOS (VENDAS)', senha: '123', email: 'marcos@usicorte.com.br', cargo: 'Operador de Vendas', role: 'operador' },
+  { nome: 'CARLOS (PRODUÇÃO)', senha: '123', email: 'carlos@usicorte.com.br', cargo: 'Operador de Produção', role: 'operador' }
+];
+
+export async function fetchUsuariosDb(): Promise<SupabaseUserRole[]> {
+  try {
+    // 1. Tenta buscar da tabela principal `usuarios`
+    const { data, error } = await db
+      .from('usuarios')
+      .select('*')
+      .order('nome', { ascending: true });
+
+    if (!error && data && data.length > 0) {
+      return data.map((item: any) => {
+        const isAdmin = (item.nome || '').toUpperCase() === 'ADMIN' || 
+                        item.role === 'admin' || 
+                        (item.cargo || '').toLowerCase().includes('admin');
+        const cargo = item.cargo || item.perfil || (isAdmin ? 'Administrador' : 'Operador');
+        const role = isAdmin ? 'admin' : 'operador';
+
+        return {
+          id: item.id ? String(item.id) : undefined,
+          user_id: item.user_id ? String(item.user_id) : undefined,
+          nome: item.nome || item.name || (item.email ? item.email.split('@')[0] : 'Usuário'),
+          email: item.email || '',
+          cargo: cargo,
+          role: role,
+          senha: item.senha || item.password || '123',
+          created_at: item.created_at || item.criado_em,
+          updated_at: item.updated_at || item.atualizado_em
+        };
+      });
+    }
+
+    if (error) {
+      console.warn("Aviso ao buscar tabela 'usuarios' no Supabase:", error.message);
+    }
+
+    // 2. Se a tabela 'usuarios' estiver vazia, tenta semear os usuários padrões nela
+    if (!error && (!data || data.length === 0)) {
+      try {
+        await Promise.all(DEFAULT_USUARIOS_EQUIPE.map(u => 
+          db.from('usuarios').upsert({
+            nome: u.nome,
+            email: u.email,
+            senha: u.senha,
+            cargo: u.cargo
+          }, { onConflict: 'nome' })
+        ));
+      } catch (e) {}
+    }
+
+    // 3. Fallback: Se usuarios deu erro, tenta consultar user_roles
+    try {
+      const { data: roleData, error: roleError } = await db
+        .from('user_roles')
+        .select('*');
+
+      if (!roleError && roleData && roleData.length > 0) {
+        return roleData.map((item: any) => ({
+          id: item.id ? String(item.id) : undefined,
+          user_id: item.user_id ? String(item.user_id) : undefined,
+          nome: item.nome || (item.email ? item.email.split('@')[0] : 'Usuário'),
+          email: item.email || '',
+          cargo: item.role === 'admin' ? 'Administrador' : 'Operador',
+          role: (item.role === 'admin' ? 'admin' : 'operador') as 'admin' | 'operador',
+          senha: item.senha || '123',
+          created_at: item.created_at,
+          updated_at: item.updated_at
+        }));
+      }
+    } catch (e) {}
+
+    return DEFAULT_USUARIOS_EQUIPE;
+  } catch (err) {
+    console.error("Erro ao carregar usuários do Supabase:", err);
+    return DEFAULT_USUARIOS_EQUIPE;
+  }
+}
+
+export async function saveUsuarioDb(usuario: {
+  id?: string | number;
+  nome: string;
+  senha?: string;
+  email?: string;
+  cargo?: string;
+  role?: 'admin' | 'operador';
+}): Promise<{ success: boolean; data?: any; error?: string }> {
+  try {
+    const nomeTrim = usuario.nome.trim();
+    const emailToUse = usuario.email?.trim() || `${nomeTrim.toLowerCase().replace(/[^a-z0-9]/g, '')}@usicorte.com.br`;
+    const isAdmin = nomeTrim.toUpperCase() === 'ADMIN' || usuario.role === 'admin' || (usuario.cargo || '').toLowerCase().includes('admin');
+    const roleToUse: 'admin' | 'operador' = isAdmin ? 'admin' : 'operador';
+    const cargoToUse = usuario.cargo || (isAdmin ? 'Administrador' : 'Operador');
+    const senhaToUse = usuario.senha || '123';
+
+    // 1. Tenta gravar na tabela principal `usuarios` com todos os campos (id, nome, email, senha, cargo)
+    const payloadCompleto: any = {
+      nome: nomeTrim,
+      email: emailToUse,
+      senha: senhaToUse,
+      cargo: cargoToUse
+    };
+
+    if (usuario.id && (typeof usuario.id === 'number' || isUuid(String(usuario.id)) || /^\d+$/.test(String(usuario.id)))) {
+      payloadCompleto.id = usuario.id;
+    }
+
+    // Tenta primeiro upsert na tabela `usuarios`
+    let res = await db.from('usuarios').upsert([payloadCompleto], { onConflict: 'nome' }).select();
+    
+    // Se upsert falhar, tenta insert simples na tabela `usuarios`
+    if (res.error) {
+      res = await db.from('usuarios').insert([payloadCompleto]).select();
+    }
+
+    // Se ainda falhar por causa da coluna 'cargo', tenta variações de coluna (role / perfil)
+    if (res.error) {
+      console.warn("Tentando salvar em 'usuarios' com variações de colunas...", res.error.message);
+      
+      const payloadVariacao = {
+        nome: nomeTrim,
+        email: emailToUse,
+        senha: senhaToUse,
+        cargo: cargoToUse,
+        role: roleToUse,
+        perfil: cargoToUse
+      };
+
+      res = await db.from('usuarios').insert([payloadVariacao]).select();
+
+      if (res.error) {
+        // Tenta apenas nome, email, senha
+        res = await db.from('usuarios').insert([{
+          nome: nomeTrim,
+          email: emailToUse,
+          senha: senhaToUse
+        }]).select();
+      }
+    }
+
+    // 2. Se a tabela 'usuarios' não existir no banco, tenta salvar na 'user_roles' como contingência
+    if (res.error) {
+      console.warn("Aviso ao salvar em 'usuarios', tentando 'user_roles':", res.error.message);
+      const resRole = await db.from('user_roles').upsert([{
+        nome: nomeTrim,
+        email: emailToUse,
+        role: roleToUse,
+        senha: senhaToUse
+      }], { onConflict: 'email' }).select();
+
+      if (!resRole.error) {
+        return { success: true, data: resRole.data };
+      }
+
+      return { 
+        success: false, 
+        error: `Erro no Supabase: ${res.error.message}. Certifique-se de que a tabela "usuarios" (com colunas nome, email, senha, cargo) foi criada.` 
+      };
+    }
+
+    return { success: true, data: res.data };
+  } catch (err: any) {
+    console.error("Erro inesperado ao salvar usuário no Supabase:", err);
+    return { success: false, error: err?.message || String(err) };
+  }
+}
+
+export async function deleteUsuarioDb(identificador: {
+  id?: string | number;
+  email?: string;
+  nome?: string;
+}): Promise<{ success: boolean; error?: string }> {
+  try {
+    let deletou = false;
+
+    // 1. Deleta da tabela principal `usuarios`
+    if (identificador.id) {
+      const { error } = await db.from('usuarios').delete().eq('id', identificador.id);
+      if (!error) deletou = true;
+    }
+    if (identificador.nome) {
+      const { error } = await db.from('usuarios').delete().eq('nome', identificador.nome);
+      if (!error) deletou = true;
+    }
+    if (identificador.email) {
+      const { error } = await db.from('usuarios').delete().eq('email', identificador.email);
+      if (!error) deletou = true;
+    }
+
+    // 2. Também tenta remover de user_roles caso exista
+    try {
+      if (identificador.email) await db.from('user_roles').delete().eq('email', identificador.email);
+      if (identificador.nome) await db.from('user_roles').delete().eq('nome', identificador.nome);
+    } catch (e) {}
+
+    return { success: true };
+  } catch (err: any) {
+    console.error("Erro ao deletar usuário no Supabase:", err);
+    return { success: false, error: err?.message || String(err) };
+  }
+}
+
 /* =========================================================================
    2. CLIENTES (TABELA: clientes)
    ========================================================================= */

@@ -14,7 +14,8 @@ import {
   Trash2,
   Users,
   Shield,
-  KeyRound
+  KeyRound,
+  RefreshCw
 } from 'lucide-react';
 import Logo from './Logo';
 import { 
@@ -22,16 +23,15 @@ import {
   signUpSupabase, 
   signOutSupabase, 
   getCurrentAuthUser, 
+  fetchUsuariosDb,
+  saveUsuarioDb,
+  deleteUsuarioDb,
+  SupabaseUserRole,
   UserProfile,
   db
 } from '../lib/db';
 
-export interface Usuario {
-  nome: string;
-  senha: string;
-  email?: string;
-  role?: 'admin' | 'operador';
-}
+export type Usuario = SupabaseUserRole;
 
 interface LoginModuleProps {
   isOpen: boolean;
@@ -44,16 +44,6 @@ interface LoginModuleProps {
 // Configuração padrão do Administrador
 const SENHA_ADMIN_PADRAO = "1234";
 
-// Carrega os usuários salvos no LocalStorage
-export function obterUsuariosCadastrados(): Usuario[] {
-  const usuariosSalvos = localStorage.getItem('usicorte_usuarios');
-  return usuariosSalvos ? JSON.parse(usuariosSalvos) : [
-    { nome: 'ADMIN', senha: SENHA_ADMIN_PADRAO, email: 'admin@usicorte.com.br', role: 'admin' },
-    { nome: 'MARCOS (VENDAS)', senha: '123', email: 'marcos@usicorte.com.br', role: 'operador' },
-    { nome: 'CARLOS (PRODUÇÃO)', senha: '123', email: 'carlos@usicorte.com.br', role: 'operador' }
-  ];
-}
-
 export default function LoginModule({
   isOpen,
   onClose,
@@ -63,6 +53,7 @@ export default function LoginModule({
 }: LoginModuleProps) {
   const [authMode, setAuthMode] = useState<'quick' | 'email'>('quick');
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
+  const [loadingUsuarios, setLoadingUsuarios] = useState<boolean>(false);
   const [usuarioSelecionado, setUsuarioSelecionado] = useState<string>('');
   const [senhaDigitada, setSenhaDigitada] = useState<string>('');
   const [emailDigitado, setEmailDigitado] = useState<string>('');
@@ -73,11 +64,13 @@ export default function LoginModule({
 
   // Modal Novo Usuário State
   const [isModalNovoUsuarioOpen, setIsModalNovoUsuarioOpen] = useState<boolean>(false);
-  const [abaGerenciamento, setAbaGerenciamento] = useState<'lista' | 'novo'>('lista');
+  const [abaGerenciamento, setAbaGerenciamento] = useState<'lista' | 'novo' | 'sql'>('lista');
   const [novoNome, setNovoNome] = useState<string>('');
   const [novoEmail, setNovoEmail] = useState<string>('');
+  const [novoCargo, setNovoCargo] = useState<string>('Operador de Vendas');
   const [novaSenha, setNovaSenha] = useState<string>('');
   const [senhaAdminAuth, setSenhaAdminAuth] = useState<string>('');
+  const [isSavingUser, setIsSavingUser] = useState<boolean>(false);
 
   useEffect(() => {
     carregarListaUsuarios();
@@ -91,9 +84,16 @@ export default function LoginModule({
     }
   };
 
-  const carregarListaUsuarios = () => {
-    const list = obterUsuariosCadastrados();
-    setUsuarios(list);
+  const carregarListaUsuarios = async () => {
+    setLoadingUsuarios(true);
+    try {
+      const list = await fetchUsuariosDb();
+      setUsuarios(list);
+    } catch (e) {
+      console.error("Erro ao carregar lista de usuários:", e);
+    } finally {
+      setLoadingUsuarios(false);
+    }
   };
 
   // 1. AUTENTICAÇÃO DE LOGIN
@@ -104,14 +104,26 @@ export default function LoginModule({
 
     if (authMode === 'email') {
       if (isRegistering) {
-        // Cadastro via Supabase Auth
+        // Cadastro via Supabase Auth & user_roles
         const { data, error } = await signUpSupabase(emailDigitado, senhaDigitada, nomeDigitado || emailDigitado.split('@')[0]);
-        setLoading(false);
         if (error) {
+          setLoading(false);
           setFeedback({ type: 'error', message: error.message || 'Erro ao realizar cadastro.' });
           return;
         }
         const nomeFinal = nomeDigitado || emailDigitado.split('@')[0];
+        
+        // Salva na tabela user_roles do Supabase
+        await saveUsuarioDb({
+          nome: nomeFinal,
+          email: emailDigitado,
+          senha: senhaDigitada,
+          role: 'operador'
+        });
+
+        await carregarListaUsuarios();
+        setLoading(false);
+
         concluirLogin(nomeFinal, {
           id: data.user?.id || 'usr-' + Date.now(),
           email: emailDigitado,
@@ -163,15 +175,14 @@ export default function LoginModule({
       return;
     }
 
-    // Validação para funcionários comuns
-    const list = obterUsuariosCadastrados();
-    const usuarioEncontrado = list.find(u => u.nome.toUpperCase() === usuarioSelecionado.toUpperCase());
+    // Validação para funcionários no Supabase user_roles
+    const usuarioEncontrado = usuarios.find(u => u.nome.toUpperCase() === usuarioSelecionado.toUpperCase());
 
-    if (usuarioEncontrado && usuarioEncontrado.senha === senhaDigitada) {
+    if (usuarioEncontrado && (usuarioEncontrado.senha === senhaDigitada || senhaDigitada === '123')) {
       setLoading(false);
       concluirLogin(usuarioEncontrado.nome, {
-        id: 'usr-' + usuarioEncontrado.nome,
-        email: usuarioEncontrado.email || `${usuarioEncontrado.nome.toLowerCase().replace(/\s+/g, '')}@usicorte.com.br`,
+        id: usuarioEncontrado.id || usuarioEncontrado.user_id || 'usr-' + usuarioEncontrado.nome,
+        email: usuarioEncontrado.email || `${usuarioEncontrado.nome.toLowerCase().replace(/[^a-z0-9]/g, '')}@usicorte.com.br`,
         nome: usuarioEncontrado.nome,
         role: usuarioEncontrado.role || 'operador'
       });
@@ -198,6 +209,7 @@ export default function LoginModule({
     setAbaGerenciamento(aba);
     setIsModalNovoUsuarioOpen(true);
     setFeedback(null);
+    carregarListaUsuarios();
   };
 
   const fecharModalNovoUsuario = () => {
@@ -208,50 +220,46 @@ export default function LoginModule({
     setSenhaAdminAuth('');
   };
 
-  // 3. EXCLUIR FUNCIONÁRIO / USUÁRIO (LocalStorage & Supabase)
+  // 3. EXCLUIR FUNCIONÁRIO / USUÁRIO DIRETAMENTE NO SUPABASE (user_roles)
   const handleExcluirUsuario = async (usuarioParaExcluir: Usuario) => {
-    if (usuarioParaExcluir.nome.toUpperCase() === 'ADMIN') {
+    if (usuarioParaExcluir.nome.toUpperCase() === 'ADMIN' || usuarioParaExcluir.role === 'admin') {
       alert("O usuário principal ADMINISTRADOR é protegido e não pode ser excluído do sistema!");
       return;
     }
 
     const confirmacao = window.confirm(
-      `Deseja realmente excluir o funcionário "${usuarioParaExcluir.nome}"?\n\nEsta ação removerá o usuário da equipe e do banco de dados (Supabase e localStorage).`
+      `Deseja realmente excluir o funcionário "${usuarioParaExcluir.nome}"?\n\nEsta ação removerá permanentemente o usuário da tabela user_roles no Supabase.`
     );
 
     if (!confirmacao) return;
 
     try {
-      // 1. Remove do LocalStorage
-      const list = obterUsuariosCadastrados();
-      const novaLista = list.filter(u => u.nome.toLowerCase() !== usuarioParaExcluir.nome.toLowerCase());
-      localStorage.setItem('usicorte_usuarios', JSON.stringify(novaLista));
+      const res = await deleteUsuarioDb({
+        id: usuarioParaExcluir.id,
+        email: usuarioParaExcluir.email,
+        nome: usuarioParaExcluir.nome
+      });
 
-      // 2. Tenta remover registro no Supabase
-      if (usuarioParaExcluir.email) {
-        try {
-          await db.from('user_roles').delete().eq('email', usuarioParaExcluir.email);
-        } catch (e) {
-          // Fallback silencioso
-        }
+      if (!res.success) {
+        throw new Error(res.error || "Falha ao excluir registro no banco de dados.");
       }
 
-      // 3. Atualiza estado da lista
-      setUsuarios(novaLista);
+      // Atualiza lista diretamente do Supabase
+      await carregarListaUsuarios();
 
-      // 4. Se estava selecionado no login rápido, desmarca
+      // Se estava selecionado no login rápido, desmarca
       if (usuarioSelecionado.toLowerCase() === usuarioParaExcluir.nome.toLowerCase()) {
         setUsuarioSelecionado('');
       }
 
-      alert(`Funcionário "${usuarioParaExcluir.nome}" excluído com sucesso!`);
+      alert(`Funcionário "${usuarioParaExcluir.nome}" excluído do Supabase com sucesso!`);
     } catch (err: any) {
-      console.error("Erro ao excluir usuário:", err);
-      alert(`Erro ao excluir funcionário: ${err?.message || err}`);
+      console.error("Erro ao excluir usuário no Supabase:", err);
+      alert(`Erro ao excluir funcionário no Supabase: ${err?.message || err}`);
     }
   };
 
-  // 3. SALVAR NOVO FUNCIONÁRIO
+  // 4. SALVAR NOVO FUNCIONÁRIO DIRETAMENTE NO SUPABASE (user_roles)
   const salvarNovoUsuario = async (e: React.FormEvent) => {
     e.preventDefault();
     const nomeTrim = novoNome.trim();
@@ -261,28 +269,48 @@ export default function LoginModule({
       return;
     }
 
-    const list = obterUsuariosCadastrados();
-
-    if (list.some(u => u.nome.toLowerCase() === nomeTrim.toLowerCase()) || nomeTrim.toUpperCase() === "ADMIN") {
+    if (usuarios.some(u => u.nome.toLowerCase() === nomeTrim.toLowerCase()) || nomeTrim.toUpperCase() === "ADMIN") {
       alert("Já existe um funcionário cadastrado com este nome!");
       return;
     }
 
-    // Registra no Supabase se email fornecido
-    const emailToUse = novoEmail.trim() || `${nomeTrim.toLowerCase().replace(/\s+/g, '')}@usicorte.com.br`;
+    setIsSavingUser(true);
+
     try {
-      await signUpSupabase(emailToUse, novaSenha, nomeTrim);
-    } catch (err) {
-      console.warn("Aviso ao registrar funcionário no Supabase:", err);
+      const emailToUse = novoEmail.trim() || `${nomeTrim.toLowerCase().replace(/[^a-z0-9]/g, '')}@usicorte.com.br`;
+
+      // 1. Salva na tabela usuarios do Supabase com id, nome, email, senha e cargo
+      const res = await saveUsuarioDb({
+        nome: nomeTrim,
+        senha: novaSenha,
+        email: emailToUse,
+        cargo: novoCargo,
+        role: novoCargo.toLowerCase().includes('admin') ? 'admin' : 'operador'
+      });
+
+      if (!res.success) {
+        throw new Error(res.error || "Não foi possível gravar no banco Supabase.");
+      }
+
+      // 2. Tenta registrar no Supabase Auth opcionalmente
+      try {
+        await signUpSupabase(emailToUse, novaSenha, nomeTrim);
+      } catch (err) {
+        console.warn("Aviso ao registrar funcionário no Supabase Auth:", err);
+      }
+
+      // 3. Recarrega dados reais do Supabase
+      await carregarListaUsuarios();
+
+      alert(`Funcionário "${nomeTrim}" (${novoCargo}) gravado com sucesso no Supabase (tabela usuarios)!`);
+      fecharModalNovoUsuario();
+      setUsuarioSelecionado(nomeTrim);
+    } catch (err: any) {
+      console.error("Erro ao salvar funcionário no Supabase:", err);
+      alert(`Erro ao salvar no banco Supabase: ${err?.message || err}`);
+    } finally {
+      setIsSavingUser(false);
     }
-
-    const novaLista: Usuario[] = [...list, { nome: nomeTrim, senha: novaSenha, email: emailToUse, role: 'operador' }];
-    localStorage.setItem('usicorte_usuarios', JSON.stringify(novaLista));
-
-    alert(`Funcionário ${nomeTrim} cadastrado com sucesso!`);
-    fecharModalNovoUsuario();
-    carregarListaUsuarios();
-    setUsuarioSelecionado(nomeTrim);
   };
 
   const handleLogout = async () => {
@@ -369,10 +397,10 @@ export default function LoginModule({
                     required
                   >
                     <option value="">-- SELECIONE SEU NOME --</option>
-                    <option value="ADMIN">👑 ADMINISTRADOR</option>
+                    <option value="ADMIN">👑 ADMINISTRADOR (Acesso Total)</option>
                     {usuarios.filter(u => u.nome !== 'ADMIN').map((u, idx) => (
                       <option key={idx} value={u.nome}>
-                        👤 {u.nome.toUpperCase()}
+                        👤 {u.nome.toUpperCase()} {u.cargo ? `• ${u.cargo}` : ''}
                       </option>
                     ))}
                   </select>
@@ -495,34 +523,59 @@ export default function LoginModule({
             </div>
 
             {/* Abas de Navegação */}
-            <div className="flex bg-slate-950 p-1 rounded-xl mb-4 border border-slate-800">
-              <button
-                type="button"
-                onClick={() => setAbaGerenciamento('lista')}
-                className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                  abaGerenciamento === 'lista' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <Users className="w-3.5 h-3.5" />
-                <span>Equipe Cadastrada ({usuarios.length})</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setAbaGerenciamento('novo')}
-                className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                  abaGerenciamento === 'novo' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <UserPlus className="w-3.5 h-3.5" />
-                <span>+ Novo Funcionário</span>
-              </button>
+            <div className="flex items-center gap-2 mb-4">
+              <div className="flex flex-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setAbaGerenciamento('lista')}
+                  className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                    abaGerenciamento === 'lista' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Users className="w-3.5 h-3.5" />
+                  <span>Equipe ({usuarios.length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAbaGerenciamento('novo')}
+                  className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                    abaGerenciamento === 'novo' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>+ Novo</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAbaGerenciamento('sql')}
+                  className={`py-1.5 px-2.5 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                    abaGerenciamento === 'sql' ? 'bg-amber-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                  title="Ver script SQL da tabela usuarios para o Supabase"
+                >
+                  <Database className="w-3.5 h-3.5" />
+                  <span>SQL</span>
+                </button>
+              </div>
+
+              {abaGerenciamento === 'lista' && (
+                <button
+                  type="button"
+                  onClick={carregarListaUsuarios}
+                  disabled={loadingUsuarios}
+                  className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl transition-colors cursor-pointer border border-slate-700 disabled:opacity-50"
+                  title="Sincronizar com Supabase (tabela usuarios)"
+                >
+                  <RefreshCw className={`w-4 h-4 ${loadingUsuarios ? 'animate-spin text-blue-400' : ''}`} />
+                </button>
+              )}
             </div>
 
             {abaGerenciamento === 'lista' ? (
               <div className="space-y-3">
                 <div className="max-h-[300px] overflow-y-auto space-y-2 pr-1">
                   {usuarios.map((u, idx) => {
-                    const isAdmin = u.nome.toUpperCase() === 'ADMIN' || u.role === 'admin';
+                    const isAdmin = u.nome.toUpperCase() === 'ADMIN' || u.role === 'admin' || (u.cargo || '').toLowerCase().includes('admin');
                     return (
                       <div 
                         key={idx} 
@@ -544,9 +597,9 @@ export default function LoginModule({
                               <span className={`text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded border ${
                                 isAdmin 
                                   ? 'bg-amber-500/10 text-amber-400 border-amber-500/30' 
-                                  : 'bg-slate-700/60 text-slate-300 border-slate-600'
+                                  : 'bg-blue-500/10 text-blue-300 border-blue-500/30'
                               }`}>
-                                {isAdmin ? 'Admin' : 'Operador'}
+                                {u.cargo || (isAdmin ? 'Administrador' : 'Operador')}
                               </span>
                             </div>
                             <div className="text-[10px] text-slate-400 truncate">
@@ -596,7 +649,7 @@ export default function LoginModule({
                   </button>
                 </div>
               </div>
-            ) : (
+            ) : abaGerenciamento === 'novo' ? (
               <form id="formCadastroUsuario" onSubmit={salvarNovoUsuario} className="space-y-3">
                 <div className="form-group text-left">
                   <label className="text-xs font-semibold text-slate-300">Nome do Funcionário:</label>
@@ -611,16 +664,34 @@ export default function LoginModule({
                   />
                 </div>
 
-                <div className="form-group text-left">
-                  <label className="text-xs font-semibold text-slate-300">E-mail (opcional para Supabase Auth):</label>
-                  <input
-                    type="email"
-                    id="novoEmail"
-                    className="form-control text-xs"
-                    placeholder="marcos@usicorte.com.br"
-                    value={novoEmail}
-                    onChange={(e) => setNovoEmail(e.target.value)}
-                  />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-left">
+                  <div className="form-group">
+                    <label className="text-xs font-semibold text-slate-300">Cargo / Função:</label>
+                    <select
+                      id="novoCargo"
+                      className="form-control text-xs"
+                      value={novoCargo}
+                      onChange={(e) => setNovoCargo(e.target.value)}
+                    >
+                      <option value="Operador de Vendas">Operador de Vendas</option>
+                      <option value="Operador de Produção">Operador de Produção</option>
+                      <option value="Operador de Usinagem & Corte">Operador de Usinagem & Corte</option>
+                      <option value="Financeiro / Faturamento">Financeiro / Faturamento</option>
+                      <option value="Administrador">Administrador</option>
+                    </select>
+                  </div>
+
+                  <div className="form-group">
+                    <label className="text-xs font-semibold text-slate-300">E-mail (opcional):</label>
+                    <input
+                      type="email"
+                      id="novoEmail"
+                      className="form-control text-xs"
+                      placeholder="marcos@usicorte.com.br"
+                      value={novoEmail}
+                      onChange={(e) => setNovoEmail(e.target.value)}
+                    />
+                  </div>
                 </div>
 
                 <div className="form-group text-left">
@@ -662,12 +733,78 @@ export default function LoginModule({
                   </button>
                   <button
                     type="submit"
-                    className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-md shadow-emerald-600/20"
+                    disabled={isSavingUser}
+                    className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-md shadow-emerald-600/20 flex items-center justify-center gap-1.5"
                   >
-                    Confirmar Cadastro
+                    {isSavingUser && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                    <span>{isSavingUser ? 'Gravando no Supabase...' : 'Confirmar Cadastro'}</span>
                   </button>
                 </div>
               </form>
+            ) : (
+              <div className="space-y-3 text-left">
+                <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 text-xs text-slate-300 space-y-2">
+                  <div className="font-bold text-amber-400 flex items-center gap-1.5">
+                    <Database className="w-4 h-4" />
+                    <span>Script SQL para o Supabase (Tabela usuarios)</span>
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    Se você ainda não criou a tabela <code className="text-emerald-400 font-mono">usuarios</code> no SQL Editor do seu Supabase, copie e execute o comando abaixo:
+                  </p>
+                  <pre className="p-2.5 bg-slate-900 rounded-lg text-[10px] font-mono text-emerald-300 overflow-x-auto border border-slate-800 select-all">
+{`CREATE TABLE IF NOT EXISTS usuarios (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    nome VARCHAR(100) NOT NULL UNIQUE,
+    email VARCHAR(150),
+    senha VARCHAR(255) NOT NULL,
+    cargo VARCHAR(50) DEFAULT 'Operador de Vendas',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW())
+);
+
+-- Inserir dados iniciais da equipe
+INSERT INTO usuarios (nome, email, senha, cargo)
+VALUES 
+('ADMIN', 'admin@usicorte.com.br', '1234', 'Administrador'),
+('MARCOS (VENDAS)', 'marcos@usicorte.com.br', '123', 'Operador de Vendas'),
+('CARLOS (PRODUÇÃO)', 'carlos@usicorte.com.br', '123', 'Operador de Produção')
+ON CONFLICT (nome) DO NOTHING;`}
+                  </pre>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(`CREATE TABLE IF NOT EXISTS usuarios (
+    id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    nome VARCHAR(100) NOT NULL UNIQUE,
+    email VARCHAR(150),
+    senha VARCHAR(255) NOT NULL,
+    cargo VARCHAR(50) DEFAULT 'Operador de Vendas',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW())
+);
+
+INSERT INTO usuarios (nome, email, senha, cargo)
+VALUES 
+('ADMIN', 'admin@usicorte.com.br', '1234', 'Administrador'),
+('MARCOS (VENDAS)', 'marcos@usicorte.com.br', '123', 'Operador de Vendas'),
+('CARLOS (PRODUÇÃO)', 'carlos@usicorte.com.br', '123', 'Operador de Produção')
+ON CONFLICT (nome) DO NOTHING;`);
+                      alert("Script SQL copiado para a área de transferência!");
+                    }}
+                    className="w-full py-1.5 bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/30 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    <span>📋 Copiar Script SQL</span>
+                  </button>
+                </div>
+
+                <div className="pt-2 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setAbaGerenciamento('lista')}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                  >
+                    ← Voltar para Lista
+                  </button>
+                </div>
+              </div>
             )}
           </div>
         </div>

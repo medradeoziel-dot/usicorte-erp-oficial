@@ -22,8 +22,6 @@ export default function Logo({
   return (
     <svg 
       viewBox="0 0 540 210" 
-      width="100%" 
-      height="auto" 
       xmlns="http://www.w3.org/2000/svg"
       className={className}
       style={style}
@@ -59,7 +57,7 @@ export function getLogoSvgString(variant: 'dark' | 'light' = 'light'): string {
   const textColor = variant === 'dark' ? '#ffffff' : '#111827';
   const redColor = '#ff0000';
 
-  return `<svg viewBox="0 0 540 210" width="100%" height="auto" xmlns="http://www.w3.org/2000/svg" style="background: transparent;">
+  return `<svg viewBox="0 0 540 210" class="w-full h-auto" xmlns="http://www.w3.org/2000/svg" style="background: transparent;">
     <defs>
       <style>
         @import url('https://fonts.googleapis.com/css2?family=Comfortaa:wght@700&display=swap');
