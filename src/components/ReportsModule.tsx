@@ -1967,9 +1967,9 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
             {/* Conteúdo: Dados + Desenho */}
             <div className="etiqueta-corpo grid grid-cols-12 gap-2 items-start mb-3">
               {/* Coluna Esquerda - Informações */}
-              <div className="etiqueta-dados col-span-7 text-xs space-y-1.5 leading-tight">
+              <div className="etiqueta-dados col-span-7 text-xs space-y-1.4 leading-tight">
                 <div>
-                  <span className="font-bold text-gray-600 block text-[10px]">EMPRESA / CLIENTE:</span>
+                  <span className="font-bold text-gray-600 block text-[12px]">EMPRESA / CLIENTE:</span>
                   <span className="lbl-cliente-nome font-extrabold uppercase block">{selectedClientName || displayQuote.clientName || 'CLIENTE BALCÃO'}</span>
                 </div>
 
@@ -1982,7 +1982,7 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
 
                 <div>
                   <span className="font-bold text-gray-600 block text-[8px]">MEDIDA:</span>
-                  <span id="etiq-medida" className="font-bold block text-[10px] font-mono">
+                  <span id="etiq-medida" className="font-extrabold text-[10px] font-mono">
                     {formatarMedidasLimpa(item) || 'Ø 50 x 200 mm'}
                   </span>
                 </div>
