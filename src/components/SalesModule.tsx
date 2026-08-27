@@ -991,12 +991,20 @@ const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNu
         pricePerKg: priceKgNum,
         measure: itemThickness.trim() || itemDiameter.trim(),
         thickness: itemThickness.trim(),
+        espessura: itemThickness.trim(),
         thicknessMm: effectiveThicknessMm > 0 ? effectiveThicknessMm : undefined,
+        espessuraMm: effectiveThicknessMm > 0 ? effectiveThicknessMm : undefined,
         diameter: itemDiameter.trim(),
+        diametro: itemDiameter.trim(),
         diameterMm: effectiveDiameterMm > 0 ? effectiveDiameterMm : undefined,
+        diametroMm: effectiveDiameterMm > 0 ? effectiveDiameterMm : undefined,
         widthLength: formattedWidthLength,
         widthMm: effectiveWidthMm > 0 ? effectiveWidthMm : undefined,
+        largura: itemWidthMm.trim(),
+        larguraMm: effectiveWidthMm > 0 ? effectiveWidthMm : undefined,
         lengthMm: effectiveLengthMm > 0 ? effectiveLengthMm : undefined,
+        comprimento: itemLengthMm.trim(),
+        comprimentoMm: effectiveLengthMm > 0 ? effectiveLengthMm : undefined,
         unitWeightKg: unitWeightKg,
         totalWeightKg: totalWeightKg,
         pesoTotal: totalWeightKg,
@@ -1009,6 +1017,7 @@ const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNu
         observacao: itemNotes.trim(),
         info: itemNotes.trim(),
         medidasFormatadas: medidasFormatadas,
+        medidaFormatada: medidasFormatadas,
         drawingImage: itemDrawingImage || undefined,
         fotoDesenho: itemDrawingImage || undefined
       } : item));
@@ -1031,12 +1040,20 @@ const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNu
         pricePerKg: priceKgNum,
         measure: itemThickness.trim() || itemDiameter.trim(),
         thickness: itemThickness.trim(),
+        espessura: itemThickness.trim(),
         thicknessMm: effectiveThicknessMm > 0 ? effectiveThicknessMm : undefined,
+        espessuraMm: effectiveThicknessMm > 0 ? effectiveThicknessMm : undefined,
         diameter: itemDiameter.trim(),
+        diametro: itemDiameter.trim(),
         diameterMm: effectiveDiameterMm > 0 ? effectiveDiameterMm : undefined,
+        diametroMm: effectiveDiameterMm > 0 ? effectiveDiameterMm : undefined,
         widthLength: formattedWidthLength,
         widthMm: effectiveWidthMm > 0 ? effectiveWidthMm : undefined,
+        largura: itemWidthMm.trim(),
+        larguraMm: effectiveWidthMm > 0 ? effectiveWidthMm : undefined,
         lengthMm: effectiveLengthMm > 0 ? effectiveLengthMm : undefined,
+        comprimento: itemLengthMm.trim(),
+        comprimentoMm: effectiveLengthMm > 0 ? effectiveLengthMm : undefined,
         unitWeightKg: unitWeightKg,
         totalWeightKg: totalWeightKg,
         pesoTotal: totalWeightKg,
@@ -1049,6 +1066,7 @@ const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNu
         observacao: itemNotes.trim(),
         info: itemNotes.trim(),
         medidasFormatadas: medidasFormatadas,
+        medidaFormatada: medidasFormatadas,
         drawingImage: itemDrawingImage || undefined,
         fotoDesenho: itemDrawingImage || undefined
       };
@@ -1091,33 +1109,249 @@ const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNu
     focusNextField('constante');
   };
 
+  // Helper para resolver o tipo de geometria oficial (1. Chapa / Retângulo, 2. Maciço ou 3. Tubo)
+  const resolveItemGeometry = (it: any): GeometryType => {
+    // 1. Checa geometryType explícito
+    const g = String(it.geometryType || it.profileType || it.geometry || it.tipo || '').toLowerCase();
+    if (g.includes('bucha') || g.includes('tubo') || g === 'tubo_bucha') {
+      return 'bucha';
+    }
+    if (g.includes('macico') || g.includes('maciço') || g.includes('redondo') || g.includes('sextavado') || g === 'redondo_quadrado') {
+      return 'macico';
+    }
+    if (g.includes('chapa') || g.includes('retangulo') || g.includes('placa') || g === 'chapa_retangulo') {
+      return 'chapa';
+    }
+
+    // 2. Checa tabela de materiais e constantes
+    const matName = String(it.constanteNome || it.constantName || it.material || it.description || it.descricao || '').toLowerCase();
+    const matchMap = DADOS_MATERIAIS_MAP[matName] || MATERIAL_PROFILES.find(p => p.name.toLowerCase() === matName);
+    if (matchMap) {
+      if (matchMap.tipo === 'bucha') return 'bucha';
+      if (matchMap.tipo === 'macico') return 'macico';
+      if (matchMap.tipo === 'chapa') return 'chapa';
+    }
+
+    // 3. Detecção por palavras-chave na descrição ou medida
+    const combinedText = `${matName} ${it.description || it.descricao || ''} ${it.measure || it.medidaFormatada || ''}`.toLowerCase();
+    if (combinedText.includes('bucha') || combinedText.includes('tubo') || combinedText.includes('tubo mecanico')) {
+      return 'bucha';
+    }
+    if (
+      combinedText.includes('redondo') ||
+      combinedText.includes('macico') ||
+      combinedText.includes('maciço') ||
+      combinedText.includes('tarugo') ||
+      combinedText.includes('eixo') ||
+      combinedText.includes('sextavado') ||
+      combinedText.includes('bronze tm') ||
+      combinedText.includes('nylon redondo') ||
+      combinedText.includes('aluminio redondo') ||
+      combinedText.includes('aço vc') ||
+      combinedText.includes('ffnodular')
+    ) {
+      return 'macico';
+    }
+    if (
+      combinedText.includes('chapa') ||
+      combinedText.includes('laser') ||
+      combinedText.includes('oxicorte') ||
+      combinedText.includes('retalho') ||
+      combinedText.includes('barra chata') ||
+      combinedText.includes('placa') ||
+      combinedText.includes('chaveta')
+    ) {
+      return 'chapa';
+    }
+
+    return 'chapa';
+  };
+
+  // Helper para extrair e preencher isoladamente as medidas (espessura, largura, comprimento, diametro)
+  const extractItemDimensions = (it: any, geom: GeometryType) => {
+    const isSingleValue = (val: any) => {
+      if (val === undefined || val === null) return false;
+      const s = String(val).trim();
+      if (!s) return false;
+      // Se contém delimitadores de medidas concatenadas (x, X, ×, *), NÃO é um valor individual
+      if (/[xX×*]/.test(s)) return false;
+      return true;
+    };
+
+    const cleanNumberStr = (val: any): string => {
+      if (val === undefined || val === null) return '';
+      let s = String(val).trim();
+      if (!s) return '';
+      // Remove prefixos de diâmetro e sufixos de unidades (mantém frações como 1/2 ou decimais)
+      s = s.replace(/^[Øø\s]+/, '').replace(/\s*mm$/i, '').trim();
+      return s;
+    };
+
+    // 1. Mapeamento Correto dos Campos Numéricos individuais
+    let espessura = isSingleValue(it.espessura) ? cleanNumberStr(it.espessura)
+      : isSingleValue(it.espessuraMm) ? cleanNumberStr(it.espessuraMm)
+      : isSingleValue(it.thicknessMm) ? cleanNumberStr(it.thicknessMm)
+      : isSingleValue(it.thickness) ? cleanNumberStr(it.thickness)
+      : '';
+
+    let largura = isSingleValue(it.largura) ? cleanNumberStr(it.largura)
+      : isSingleValue(it.larguraMm) ? cleanNumberStr(it.larguraMm)
+      : isSingleValue(it.widthMm) ? cleanNumberStr(it.widthMm)
+      : isSingleValue(it.width) ? cleanNumberStr(it.width)
+      : '';
+
+    let comprimento = isSingleValue(it.comprimento) ? cleanNumberStr(it.comprimento)
+      : isSingleValue(it.comprimentoMm) ? cleanNumberStr(it.comprimentoMm)
+      : isSingleValue(it.lengthMm) ? cleanNumberStr(it.lengthMm)
+      : isSingleValue(it.length) ? cleanNumberStr(it.length)
+      : '';
+
+    let diametro = isSingleValue(it.diametro) ? cleanNumberStr(it.diametro)
+      : isSingleValue(it.diametroMm) ? cleanNumberStr(it.diametroMm)
+      : isSingleValue(it.diameterMm) ? cleanNumberStr(it.diameterMm)
+      : isSingleValue(it.diameter) ? cleanNumberStr(it.diameter)
+      : '';
+
+    // 2. Sanitização e Parse de Medidas se o item contiver apenas o texto formatado no campo de medida
+    const formattedCandidates = [
+      it.medidaFormatada,
+      it.medidasFormatadas,
+      it.descricaoMedida,
+      it.medida,
+      it.measure,
+      it.widthLength,
+      it.dimensoes,
+      it.medidas,
+      it.thickness,
+      it.diameter
+    ];
+
+    let rawConcatString = '';
+    for (const cand of formattedCandidates) {
+      if (cand && typeof cand === 'string' && /[xX×*]/.test(cand)) {
+        rawConcatString = cand;
+        break;
+      }
+    }
+
+    if (rawConcatString) {
+      const parts = rawConcatString
+        .replace(/[×*]/g, 'x')
+        .split(/[xX]/)
+        .map(p => cleanNumberStr(p))
+        .filter(p => p !== '');
+
+      if (geom === 'chapa' || geom === 'CHAPA_RETANGULO') {
+        if (parts.length >= 3) {
+          if (!espessura) espessura = parts[0];
+          if (!largura) largura = parts[1];
+          if (!comprimento) comprimento = parts[2];
+        } else if (parts.length === 2) {
+          if (!largura) largura = parts[0];
+          if (!comprimento) comprimento = parts[1];
+        }
+      } else if (geom === 'macico' || geom === 'REDONDO_QUADRADO') {
+        if (parts.length >= 2) {
+          if (!diametro) diametro = parts[0];
+          if (!comprimento) comprimento = parts[parts.length - 1];
+        } else if (parts.length === 1) {
+          if (!diametro) diametro = parts[0];
+        }
+      } else if (geom === 'bucha' || geom === 'TUBO_BUCHA') {
+        if (parts.length >= 3) {
+          if (!diametro) diametro = parts[0];
+          if (!espessura) espessura = parts[1];
+          if (!comprimento) comprimento = parts[2];
+        } else if (parts.length === 2) {
+          if (!diametro) diametro = parts[0];
+          if (!comprimento) comprimento = parts[1];
+        }
+      }
+    }
+
+    // Se o comprimento não foi preenchido, verificar se widthLength é valor numérico único
+    if (!comprimento && it.widthLength && isSingleValue(it.widthLength)) {
+      comprimento = cleanNumberStr(it.widthLength);
+    }
+
+    // 3. Validação do Tipo de Geometria: Limpa campos que não pertencem àquela geometria
+    if (geom === 'chapa' || geom === 'CHAPA_RETANGULO') {
+      diametro = ''; // Diâmetro zerado/desabilitado na Chapa/Retângulo
+    } else if (geom === 'macico' || geom === 'REDONDO_QUADRADO') {
+      espessura = ''; // Espessura zerada/desabilitada no Maciço
+      largura = '';   // Largura zerada/desabilitada no Maciço
+    } else if (geom === 'bucha' || geom === 'TUBO_BUCHA') {
+      largura = '';   // Largura zerada/desabilitada no Tubo/Bucha
+    }
+
+    return { espessura, largura, comprimento, diametro };
+  };
+
   const handleEditItem = (item: QuoteItem) => {
     setEditingItemId(item.id);
-    setItemDescription(item.description || item.descricao || '');
-    setItemConstant(item.constant.toString());
+    setItemDescription(item.description || item.descricao || (item as any).produto || '');
+
+    // 1. Resolução automática e validação do tipo de geometria (Chapa, Maciço ou Tubo)
+    const resolvedGeometry = resolveItemGeometry(item);
+    setItemGeometryType(resolvedGeometry);
+
+    // 2. Extração isolada e sanitizada das medidas numéricas individuais
+    const dims = extractItemDimensions(item, resolvedGeometry);
+    setItemDiameter(dims.diametro);
+    setItemThickness(dims.espessura);
+    setItemWidthMm(dims.largura);
+    setItemLengthMm(dims.comprimento);
+    setItemWidthLength(
+      resolvedGeometry === 'chapa' || resolvedGeometry === 'CHAPA_RETANGULO'
+        ? (dims.largura && dims.comprimento ? `${dims.largura} x ${dims.comprimento} mm` : dims.comprimento ? `${dims.comprimento} mm` : '')
+        : (dims.comprimento ? `${dims.comprimento} mm` : '')
+    );
+
+    // 3. Mapeamento de Constante e Perfil de Material
     const matchedProfile = MATERIAL_PROFILES.find(
-      p => p.k.toString() === item.constant.toString() || p.tipo === item.geometryType || p.name.toLowerCase() === (item.constanteNome || item.constantName || item.material || item.description).toLowerCase()
+      p => p.id === (item as any).materialProfileId ||
+           p.name.toLowerCase() === (item.constanteNome || item.constantName || item.material || '').toLowerCase() ||
+           (p.k.toString() === item.constant.toString() && (p.tipo === resolvedGeometry || (p.tipo === 'chapa' && resolvedGeometry === 'CHAPA_RETANGULO') || (p.tipo === 'macico' && resolvedGeometry === 'REDONDO_QUADRADO') || (p.tipo === 'bucha' && resolvedGeometry === 'TUBO_BUCHA')))
     );
-    const resolvedConstantName = item.constanteNome || item.constantName || item.material || matchedProfile?.name || 'CHAPA';
+
+    const defaultProfileName = resolvedGeometry === 'chapa' || resolvedGeometry === 'CHAPA_RETANGULO'
+      ? 'LASER A36'
+      : resolvedGeometry === 'macico' || resolvedGeometry === 'REDONDO_QUADRADO'
+      ? 'AÇO REDONDO SAE 1045'
+      : 'BUCHA REDONDO';
+
+    const resolvedConstantName = item.constanteNome || item.constantName || item.material || matchedProfile?.name || defaultProfileName;
     setItemConstantName(resolvedConstantName);
-    setItemConstantSelect(matchedProfile?.id || 'chapa');
-    setItemPricePerKg(
-      item.pricePerKg !== undefined
-        ? item.pricePerKg.toFixed(2).replace('.', ',')
-        : (item.unitWeightKg && item.unitWeightKg > 0
-          ? (item.unitPrice / item.unitWeightKg).toFixed(2).replace('.', ',')
-          : '22,00')
-    );
-    setItemGeometryType(item.geometryType || detectGeometryTypeFromText(item.description + ' ' + (item.diameter || item.measure || '')));
-    setItemDiameter(item.diameter || '');
-    setItemThickness(item.measure || item.thickness || '');
-    setItemWidthLength(item.widthLength || '');
-    setItemWidthMm(item.widthMm ? item.widthMm.toString() : '');
-    setItemLengthMm(item.lengthMm ? item.lengthMm.toString() : '');
-    setItemUnitPrice((item.unitPrice || item.valorUnitario || 0).toFixed(2).replace('.', ','));
-    setItemQuantity((item.quantity || item.qtd || 1).toString());
-    setItemNotes(item.notes || item.observacao || '');
-    setItemDrawingImage(item.drawingImage || item.fotoDesenho || null);
+    setItemConstantSelect(matchedProfile?.id || (resolvedGeometry === 'chapa' || resolvedGeometry === 'CHAPA_RETANGULO' ? 'laser_a36' : resolvedGeometry === 'macico' || resolvedGeometry === 'REDONDO_QUADRADO' ? 'aco_redondo_sae_1045' : 'bucha_redondo'));
+    
+    const constantVal = item.constant !== undefined && item.constant !== null
+      ? item.constant.toString()
+      : (matchedProfile ? matchedProfile.k.toString() : (resolvedGeometry === 'chapa' || resolvedGeometry === 'CHAPA_RETANGULO' ? '0.00785' : '0.00617'));
+    setItemConstant(constantVal);
+
+    // 4. Preço por Kg e Preço Unitário
+    const rawPriceKg = item.pricePerKg !== undefined 
+      ? item.pricePerKg 
+      : ((item as any).precoKg !== undefined ? (item as any).precoKg : undefined);
+
+    let pricePerKgStr = '22,00';
+    if (rawPriceKg !== undefined && !isNaN(Number(rawPriceKg))) {
+      pricePerKgStr = Number(rawPriceKg).toFixed(2).replace('.', ',');
+    } else if (item.unitWeightKg && item.unitWeightKg > 0 && item.unitPrice) {
+      pricePerKgStr = (item.unitPrice / item.unitWeightKg).toFixed(2).replace('.', ',');
+    } else if (matchedProfile) {
+      pricePerKgStr = matchedProfile.defaultPriceKg.toFixed(2).replace('.', ',');
+    }
+    setItemPricePerKg(pricePerKgStr);
+
+    const unitPriceVal = item.unitPrice !== undefined ? item.unitPrice : (item.valorUnitario !== undefined ? item.valorUnitario : 0);
+    setItemUnitPrice(Number(unitPriceVal).toFixed(2).replace('.', ','));
+
+    const qtyVal = item.quantity !== undefined ? item.quantity : (item.qtd !== undefined ? item.qtd : 1);
+    setItemQuantity(qtyVal.toString());
+
+    setItemNotes(item.notes || item.observacao || (item as any).info || '');
+    setItemDrawingImage(item.drawingImage || item.fotoDesenho || (item as any).desenhoUrl || (item as any).desenho_url || null);
     setIsManualUnitPrice(false);
 
     // Scroll smoothly to item form
@@ -1743,17 +1977,20 @@ const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNu
               type="button"
               onClick={() => {
                 setItemGeometryType('chapa');
+                setItemDiameter(''); // Diâmetro zerado/desabilitado na Chapa
+                const newConstantSelect = (itemConstantSelect === 'redondo_aco' || itemConstantSelect === 'tubo_mecanico') ? 'chapa_aco' : itemConstantSelect;
+                const newConstant = (itemConstantSelect === 'redondo_aco' || itemConstantSelect === 'tubo_mecanico') ? '0.00785' : itemConstant;
                 if (itemConstantSelect === 'redondo_aco' || itemConstantSelect === 'tubo_mecanico') {
                   setItemConstantSelect('chapa_aco');
                   setItemConstant('0.00785');
                 }
                 updateCascadingUnitPrice(
                   itemPricePerKg,
-                  itemConstant,
+                  newConstant,
                   'chapa',
                   itemWidthMm,
                   itemLengthMm,
-                  itemDiameter,
+                  '',
                   itemThickness
                 );
               }}
@@ -1779,18 +2016,22 @@ const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNu
               type="button"
               onClick={() => {
                 setItemGeometryType('macico');
+                setItemThickness(''); // Espessura zerada/desabilitada no Maciço
+                setItemWidthMm('');   // Largura zerada/desabilitada no Maciço
+                const newConstantSelect = (itemConstantSelect === 'chapa_aco' || itemConstantSelect === 'tubo_mecanico') ? 'redondo_aco' : itemConstantSelect;
+                const newConstant = (itemConstantSelect === 'chapa_aco' || itemConstantSelect === 'tubo_mecanico') ? '0.00617' : itemConstant;
                 if (itemConstantSelect === 'chapa_aco' || itemConstantSelect === 'tubo_mecanico') {
                   setItemConstantSelect('redondo_aco');
                   setItemConstant('0.00617');
                 }
                 updateCascadingUnitPrice(
                   itemPricePerKg,
-                  itemConstant,
+                  newConstant,
                   'macico',
-                  itemWidthMm,
+                  '',
                   itemLengthMm,
                   itemDiameter,
-                  itemThickness
+                  ''
                 );
               }}
               className={`p-2.5 rounded-xl text-xs font-bold text-left border transition-all cursor-pointer flex items-center gap-3 ${
@@ -1815,16 +2056,18 @@ const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNu
               type="button"
               onClick={() => {
                 setItemGeometryType('bucha');
+                setItemWidthMm(''); // Largura zerada/desabilitada na Bucha/Tubo
                 setItemConstantSelect('tubo_mecanico');
                 setItemConstant('0.00617');
+                const newPriceKg = (!itemPricePerKg || itemPricePerKg === '22,00') ? '24,00' : itemPricePerKg;
                 if (!itemPricePerKg || itemPricePerKg === '22,00') {
                   setItemPricePerKg('24,00');
                 }
                 updateCascadingUnitPrice(
-                  itemPricePerKg || '24,00',
+                  newPriceKg,
                   '0.00617',
                   'bucha',
-                  itemWidthMm,
+                  '',
                   itemLengthMm,
                   itemDiameter,
                   itemThickness

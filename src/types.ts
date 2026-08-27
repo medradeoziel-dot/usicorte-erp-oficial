@@ -58,18 +58,30 @@ export interface QuoteItem {
   unitWeightKg?: number; // Peso Unitário em Kg
   totalWeightKg?: number; // Peso Total do Item em Kg (unitWeightKg * quantity)
   notes?: string;
-  // Campos auxiliares em português para compatibilidade direta com relatórios
+  // Campos auxiliares em português para compatibilidade direta com relatórios e edição
   descricao?: string;
   produto?: string;
   medida?: string;
+  medidaFormatada?: string;
+  medidasFormatadas?: string;
+  descricaoMedida?: string;
+  espessura?: string | number;
+  espessuraMm?: number;
+  largura?: string | number;
+  larguraMm?: number;
+  comprimento?: string | number;
+  comprimentoMm?: number;
+  diametro?: string | number;
+  diametroMm?: number;
   observacao?: string;
   info?: string;
   valorUnitario?: number;
   qtd?: number;
   pesoTotal?: number;
-  medidasFormatadas?: string;
   drawingImage?: string; // Foto ou imagem do desenho técnico em base64 / URL
   fotoDesenho?: string;
+  desenhoUrl?: string;
+  desenho_url?: string;
 }
 
 export interface Quote {

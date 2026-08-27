@@ -1106,6 +1106,44 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
             setDrawingPhotos(prev => ({ ...prev, [selectedItemIndex]: base64 }));
             setPasteSuccess(true);
             setTimeout(() => setPasteSuccess(false), 4000);
+
+            // Persistência local e DB
+            if (displayQuote?.items?.[selectedItemIndex]) {
+              displayQuote.items[selectedItemIndex].drawingImage = base64;
+              (displayQuote.items[selectedItemIndex] as any).fotoDesenho = base64;
+              (displayQuote.items[selectedItemIndex] as any).desenho_url = base64;
+            }
+
+            try {
+              const saved = localStorage.getItem('s_orcamentos');
+              if (saved) {
+                const quotes: Quote[] = JSON.parse(saved);
+                if (Array.isArray(quotes)) {
+                  const qIdx = quotes.findIndex(
+                    q => q.id === displayQuote.id ||
+                         q.quoteNumber === displayQuote.quoteNumber ||
+                         (q.quoteNumber && q.quoteNumber.trim().toLowerCase() === String(displayQuote.quoteNumber).trim().toLowerCase())
+                  );
+                  if (qIdx !== -1 && quotes[qIdx].items?.[selectedItemIndex]) {
+                    quotes[qIdx].items[selectedItemIndex].drawingImage = base64;
+                    (quotes[qIdx].items[selectedItemIndex] as any).fotoDesenho = base64;
+                    (quotes[qIdx].items[selectedItemIndex] as any).desenho_url = base64;
+                    quotes[qIdx].updatedAt = new Date().toISOString();
+                    localStorage.setItem('s_orcamentos', JSON.stringify(quotes));
+                  }
+                }
+              }
+            } catch (e) {
+              console.warn('Erro ao salvar no localStorage:', e);
+            }
+
+            const targetDbItem = targetItem as any;
+            if (targetDbItem?.id && !isNaN(Number(targetDbItem.id))) {
+              db.from('cotacao_itens')
+                .update({ desenho_url: base64 })
+                .eq('id', Number(targetDbItem.id))
+                .then(() => {}, (dbErr: any) => console.warn('Aviso update cotacao_itens:', dbErr));
+            }
           } catch (err) {
             console.warn('Erro ao processar imagem ou DXF colado:', err);
           }
@@ -1129,6 +1167,43 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
           setDrawingPhotos(prev => ({ ...prev, [selectedItemIndex]: dataUrl }));
           setPasteSuccess(true);
           setTimeout(() => setPasteSuccess(false), 4000);
+
+          if (displayQuote?.items?.[selectedItemIndex]) {
+            displayQuote.items[selectedItemIndex].drawingImage = dataUrl;
+            (displayQuote.items[selectedItemIndex] as any).fotoDesenho = dataUrl;
+            (displayQuote.items[selectedItemIndex] as any).desenho_url = dataUrl;
+          }
+
+          try {
+            const saved = localStorage.getItem('s_orcamentos');
+            if (saved) {
+              const quotes: Quote[] = JSON.parse(saved);
+              if (Array.isArray(quotes)) {
+                const qIdx = quotes.findIndex(
+                  q => q.id === displayQuote.id ||
+                       q.quoteNumber === displayQuote.quoteNumber ||
+                       (q.quoteNumber && q.quoteNumber.trim().toLowerCase() === String(displayQuote.quoteNumber).trim().toLowerCase())
+                );
+                if (qIdx !== -1 && quotes[qIdx].items?.[selectedItemIndex]) {
+                  quotes[qIdx].items[selectedItemIndex].drawingImage = dataUrl;
+                  (quotes[qIdx].items[selectedItemIndex] as any).fotoDesenho = dataUrl;
+                  (quotes[qIdx].items[selectedItemIndex] as any).desenho_url = dataUrl;
+                  quotes[qIdx].updatedAt = new Date().toISOString();
+                  localStorage.setItem('s_orcamentos', JSON.stringify(quotes));
+                }
+              }
+            }
+          } catch (e) {
+            console.warn('Erro ao salvar no localStorage:', e);
+          }
+
+          const targetDbItem = targetItem as any;
+          if (targetDbItem?.id && !isNaN(Number(targetDbItem.id))) {
+            db.from('cotacao_itens')
+              .update({ desenho_url: dataUrl })
+              .eq('id', Number(targetDbItem.id))
+              .then(() => {}, (dbErr: any) => console.warn('Aviso update cotacao_itens:', dbErr));
+          }
         }
       } catch (err) {
         console.warn('Erro ao interpretar texto DXF colado:', err);
@@ -1188,7 +1263,9 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
             valorUnitario: it.unitario,
             subtotal: it.valorGeral,
             notes: it.observacao || '',
-            observacao: it.observacao || ''
+            observacao: it.observacao || '',
+            drawingImage: it.desenhoUrl || undefined,
+            fotoDesenho: it.desenhoUrl || undefined
           })),
           subtotalTotal: sumTotal,
           grandTotal: sumTotal,
@@ -1198,6 +1275,15 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString()
         };
+
+        const fotosMap: Record<number, string> = {};
+        reconstructed.items.forEach((it, idx) => {
+          if (it.drawingImage) {
+            fotosMap[idx] = it.drawingImage;
+          }
+        });
+        setDrawingPhotos(fotosMap);
+
         setActiveQuote(reconstructed);
         setSelectedClientName(reconstructed.clientName);
         setSelectedItemIndex(0);
@@ -1253,16 +1339,56 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
         });
         setDrawingPhotos(prev => ({ ...prev, [idx]: base64 }));
         matched.push(`${file.name} → item ${idx + 1}`);
+
+        // Persistência no item do activeQuote
+        if (displayQuote?.items?.[idx]) {
+          displayQuote.items[idx].drawingImage = base64;
+          (displayQuote.items[idx] as any).fotoDesenho = base64;
+          (displayQuote.items[idx] as any).desenho_url = base64;
+        }
+
+        // Persistência no LocalStorage (s_orcamentos)
+        try {
+          const saved = localStorage.getItem('s_orcamentos');
+          if (saved) {
+            const quotes: Quote[] = JSON.parse(saved);
+            if (Array.isArray(quotes)) {
+              const qIndex = quotes.findIndex(
+                q => q.id === displayQuote.id ||
+                     q.quoteNumber === displayQuote.quoteNumber ||
+                     (q.quoteNumber && q.quoteNumber.trim().toLowerCase() === String(displayQuote.quoteNumber).trim().toLowerCase())
+              );
+              if (qIndex !== -1 && quotes[qIndex].items?.[idx]) {
+                quotes[qIndex].items[idx].drawingImage = base64;
+                (quotes[qIndex].items[idx] as any).fotoDesenho = base64;
+                (quotes[qIndex].items[idx] as any).desenho_url = base64;
+                quotes[qIndex].updatedAt = new Date().toISOString();
+                localStorage.setItem('s_orcamentos', JSON.stringify(quotes));
+              }
+            }
+          }
+        } catch (lsErr) {
+          console.warn('Aviso localStorage:', lsErr);
+        }
+
+        // Persistência no Supabase cotacao_itens
+        const targetDbItem = targetItem as any;
+        if (targetDbItem?.id && !isNaN(Number(targetDbItem.id))) {
+          db.from('cotacao_itens')
+            .update({ desenho_url: base64 })
+            .eq('id', Number(targetDbItem.id))
+            .then(() => {}, (dbErr: any) => console.warn('Aviso update cotacao_itens:', dbErr));
+        }
+
+        // Sincroniza com Supabase Storage bucket 'desenhos'
+        if (displayQuote?.quoteNumber) {
+          uploadDesenhoStorage(displayQuote.quoteNumber, file, targetDbItem?.id).catch(e => {
+            console.warn('Upload bucket desenhos aviso:', e);
+          });
+        }
       } catch (err) {
         console.error('Erro ao converter arquivo para imagem:', err);
         unmatched.push(file.name);
-      }
-
-      // Sincroniza com Supabase Storage bucket 'desenhos'
-      if (displayQuote?.quoteNumber) {
-        uploadDesenhoStorage(displayQuote.quoteNumber, file).catch(e => {
-          console.warn('Upload bucket desenhos aviso:', e);
-        });
       }
     }
 
@@ -1320,6 +1446,8 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
         aqIt => String(aqIt.id) === String(it.itemId) || aqIt.descricao === it.descricao
       );
 
+      const persistentDrawing = it.desenhoUrl || matchInActive?.drawingImage || matchInActive?.fotoDesenho || drawingPhotos[idx] || undefined;
+
       return {
         id: String(it.itemId || it.idVer || idx + 1),
         date: dateVal,
@@ -1339,8 +1467,8 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
         subtotal: Number(it.valorGeral) || ((Number(it.unitario) || 0) * (Number(it.qtd) || 1)),
         notes: it.observacao || matchInActive?.notes || '',
         observacao: it.observacao || matchInActive?.observacao || '',
-        drawingImage: matchInActive?.drawingImage || drawingPhotos[idx] || undefined,
-        fotoDesenho: matchInActive?.fotoDesenho || drawingPhotos[idx] || undefined,
+        drawingImage: persistentDrawing,
+        fotoDesenho: persistentDrawing,
         totalWeightKg: matchInActive?.totalWeightKg || matchInActive?.pesoTotal || 0,
         pesoTotal: matchInActive?.pesoTotal || matchInActive?.totalWeightKg || 0
       };

@@ -153,7 +153,7 @@ export const QuotePrintView: React.FC<QuotePrintViewProps> = (props) => {
     quantidade: item.quantidade ?? item.qtd ?? item.quantity ?? 1,
     valorUnitario: item.valorUnitario ?? item.unitPrice ?? 0,
     valorTotal: item.valorTotal ?? item.subtotal ?? (Number(item.valorUnitario || item.unitPrice || 0) * Number(item.quantidade || item.qtd || item.quantity || 1)),
-    drawingImage: item.drawingImage ?? item.fotoDesenho ?? item.desenhoUrl ?? "",
+    drawingImage: item.drawingImage ?? item.fotoDesenho ?? item.desenhoUrl ?? item.desenho_url ?? item.foto ?? "",
   }));
 
   const subtotal =
