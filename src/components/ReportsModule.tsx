@@ -1957,7 +1957,7 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
                 SOB CNPJ: 25.038.430/0001-23
               </p>
               <p className="text-[5px] font-semibold text-slate-800 leading-tight mt-0.5 font-sans">
-                (14)3203-1742 - (14)99880-9362 - (14)99819-6873 (14)99925-7633
+                (14)3203-1742   (14)99880-9362   (14)99925-7633
               </p>
               <div className="text-xs font-bold text-slate-900 mt-1 pt-1 border-t border-slate-200">
                 PEDIDO Nº: <span className="font-mono font-black text-blue-900 rel-numero">{displayQuote.quoteNumber || displayQuote.id || 'COT-2026-9663'}</span>
@@ -1982,7 +1982,7 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
 
                 <div>
                   <span className="font-bold text-gray-600 block text-[8px]">MEDIDA:</span>
-                  <span id="etiq-medida" className="font-bold block text-[11.5px] font-mono">
+                  <span id="etiq-medida" className="font-bold block text-[10px] font-mono">
                     {formatarMedidasLimpa(item) || 'Ø 50 x 200 mm'}
                   </span>
                 </div>
