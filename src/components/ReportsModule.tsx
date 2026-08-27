@@ -1967,7 +1967,7 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
             {/* Conteúdo: Dados + Desenho */}
             <div className="etiqueta-corpo grid grid-cols-12 gap-2 items-start mb-3">
               {/* Coluna Esquerda - Informações */}
-              <div className="etiqueta-dados col-span-7 text-xs space-y-1.3 leading-tight">
+              <div className="etiqueta-dados col-span-7 text-xs space-y-1.5 leading-tight">
                 <div>
                   <span className="font-bold text-gray-600 block text-[10px]">EMPRESA / CLIENTE:</span>
                   <span className="lbl-cliente-nome font-extrabold uppercase block">{selectedClientName || displayQuote.clientName || 'CLIENTE BALCÃO'}</span>
@@ -1975,7 +1975,7 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
 
                 <div>
                   <span className="font-bold text-gray-600 block text-[8px]">MATERIAL:</span>
-                  <span id="etiq-material" className="font-extrabold uppercase text-sm text-blue-950 block truncate">
+                  <span id="etiq-material" className="font-extrabold uppercase text-[10px] text-blue-950 block truncate">
                     {item.constanteNome || item.material || 'BRONZE TM-23'}
                   </span>
                 </div>
@@ -1989,7 +1989,7 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
 
                 <div>
                   <span className="font-bold text-gray-600 block text-[8px]">QTD:</span>
-                  <span id="etiq-qtd" className="font-black text-sm">
+                  <span id="etiq-qtd" className="font-black text-[10px]">
                     {item.qtd || item.quantity || 1} PC
                   </span>
                 </div>
