@@ -1953,10 +1953,10 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
               <h2 className="font-black text-sm tracking-wide uppercase leading-tight text-slate-950 font-sans">
                 USICORTE METAIS
               </h2>
-              <p className="text-[8px] font-bold text-slate-900 leading-tight mt-0.5 font-sans">
+              <p className="text-[7px] font-bold text-slate-900 leading-tight mt-0.5 font-sans">
                 SOB CNPJ: 25.038.430/0001-23
               </p>
-              <p className="text-[6px] font-semibold text-slate-800 leading-tight mt-0.5 font-sans">
+              <p className="text-[5px] font-semibold text-slate-800 leading-tight mt-0.5 font-sans">
                 (14)3203-1742 (14)99880-9362 (14)99819-6873 (14)99925-7633
               </p>
               <div className="text-xs font-bold text-slate-900 mt-1 pt-1 border-t border-slate-200">
@@ -1967,14 +1967,14 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
             {/* Conteúdo: Dados + Desenho */}
             <div className="etiqueta-corpo grid grid-cols-12 gap-2 items-start mb-3">
               {/* Coluna Esquerda - Informações */}
-              <div className="etiqueta-dados col-span-7 text-xs space-y-1.2 leading-tight">
+              <div className="etiqueta-dados col-span-7 text-xs space-y-1.3 leading-tight">
                 <div>
                   <span className="font-bold text-gray-600 block text-[10px]">EMPRESA / CLIENTE:</span>
                   <span className="lbl-cliente-nome font-extrabold uppercase block">{selectedClientName || displayQuote.clientName || 'CLIENTE BALCÃO'}</span>
                 </div>
 
                 <div>
-                  <span className="font-bold text-gray-600 block text-[10px]">MATERIAL:</span>
+                  <span className="font-bold text-gray-600 block text-[8px]">MATERIAL:</span>
                   <span id="etiq-material" className="font-extrabold uppercase text-sm text-blue-950 block truncate">
                     {item.constanteNome || item.material || 'BRONZE TM-23'}
                   </span>
@@ -1988,7 +1988,7 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
                 </div>
 
                 <div>
-                  <span className="font-bold text-gray-600 block text-[10px]">QTD:</span>
+                  <span className="font-bold text-gray-600 block text-[8px]">QTD:</span>
                   <span id="etiq-qtd" className="font-black text-sm">
                     {item.qtd || item.quantity || 1} PC
                   </span>
@@ -1998,7 +1998,7 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
                 {(item.observacao || item.notes || item.info || item.descricao || displayQuote.observations) && (
                   <div className="pt-1">
                     <span className="font-bold text-gray-600 block text-[10px]">OBSERVAÇÃO:</span>
-                    <span id="etiq-obs" className="font-semibold text-[11px] block text-gray-800 italic leading-snug">
+                    <span id="etiq-obs" className="font-semibold text-[10px] block text-gray-800 italic leading-snug">
                       {item.observacao || item.notes || item.info || item.descricao || displayQuote.observations}
                     </span>
                   </div>
@@ -2041,7 +2041,7 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
             )}
 
             {/* Rodapé Interno */}
-            <div className="etiqueta-footer pt-2 border-t border-black text-center mt-auto">
+            <div className="etiqueta-footer pt-2 text-center mt-auto">
               <span className="site-url text-[10px] font-bold tracking-widest text-black uppercase block">
                 www.usicortemetais.com.br
               </span>
