@@ -248,4 +248,65 @@ export interface LancamentoFinanceiro {
   criadoEm: string;
 }
 
+// ==========================================
+// DADOS DA EMPRESA / EMITENTE (NF-e E CABEÇALHO)
+// ==========================================
+
+export interface CompanyFiscalData {
+  id?: string;
+  // Dados Fiscais
+  personType: 'Jurídica' | 'Física';
+  corporateName: string; // Razão Social (L. M. BANZATTO METAIS)
+  tradeName: string; // Nome Fantasia (USICORTE METAIS)
+  cnpj: string; // CNPJ (25.038.430/0001-23)
+  ie: string; // Inscrição Estadual / IE (209632312114)
+  im?: string; // Inscrição Municipal / IM (558747)
+  cnae?: string; // CNAE Principal (4744001)
+  taxRegime: string; // Regime Tributário (Simples Nacional, etc.)
+
+  // Endereço Completo
+  cep: string; // CEP (17031-350)
+  street: string; // Endereço (RUA CORONEL IVON CESAR PIMENTEL)
+  number: string; // Número (3-41)
+  complement?: string; // Complemento
+  neighborhood: string; // Bairro (PARQUE PAULISTA)
+  city: string; // Cidade (BAURU)
+  state: string; // UF (SP)
+  ibgeCode?: string; // Código IBGE Cidade (3506003)
+  countryCode?: string; // Código País (1058 - BRASIL)
+
+  // Contato e Mídia
+  email: string; // E-mail (LUAN.USICORTE@GMAIL.COM)
+  website?: string; // Website (WWW.USICORTEMETAIS.COM.BR)
+  phone: string; // Telefone ((14) 3203-1742)
+  mobile?: string; // Celular / WhatsApp ((14) 99880-9362)
+  logoUrl?: string; // Upload da Logomarca da Empresa (Base64 ou URL)
+
+  // Responsável Legal
+  legalRepresentativeName?: string; // Nome do Responsável (MARCOS MARTINS)
+  legalRepresentativeDoc?: string; // CPF/CNPJ Representante (092.345.510/0001-94)
+
+  // Aliases em português para integração direta com Supabase
+  tipo_pessoa?: string;
+  razao_social?: string;
+  nome_fantasia?: string;
+  inscricao_estadual?: string;
+  inscricao_municipal?: string;
+  regime_tributario?: string;
+  endereco?: string;
+  numero?: string;
+  complemento?: string;
+  bairro?: string;
+  cidade?: string;
+  uf?: string;
+  ibge_cidade?: string;
+  codigo_pais?: string;
+  telefone?: string;
+  celular?: string;
+  logo_url?: string;
+  nome_responsavel?: string;
+  documento_responsavel?: string;
+  updated_at?: string;
+}
+
 

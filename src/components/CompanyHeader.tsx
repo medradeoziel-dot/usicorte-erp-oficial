@@ -1,5 +1,7 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import Logo from './Logo';
+import { getLocalCompanyData, DEFAULT_COMPANY_DATA } from '../services/companyService';
+import { CompanyFiscalData } from '../types';
 
 interface CompanyHeaderProps {
   className?: string;
@@ -12,6 +14,7 @@ interface CompanyHeaderProps {
   tagColor?: 'blue' | 'amber' | 'emerald' | 'slate';
   showLogo?: boolean;
   rightContent?: React.ReactNode;
+  companyData?: Partial<CompanyFiscalData>;
 }
 
 export default function CompanyHeader({
@@ -25,7 +28,22 @@ export default function CompanyHeader({
   tagColor = 'blue',
   showLogo = true,
   rightContent,
+  companyData: customCompanyData,
 }: CompanyHeaderProps) {
+  const [company, setCompany] = useState<CompanyFiscalData>(() => getLocalCompanyData());
+
+  useEffect(() => {
+    const handleUpdate = (e: any) => {
+      if (e.detail) {
+        setCompany(e.detail);
+      }
+    };
+    window.addEventListener('company-data-updated', handleUpdate);
+    return () => window.removeEventListener('company-data-updated', handleUpdate);
+  }, []);
+
+  const activeCompany = { ...company, ...customCompanyData };
+
   const getTagClasses = () => {
     switch (tagColor) {
       case 'amber':
@@ -54,7 +72,15 @@ export default function CompanyHeader({
         <div className={`flex items-center justify-start shrink-0 ${logoWidthClass}`}>
           {showLogo ? (
             <div className="logo-impressao">
-              <Logo variant="light" className={`${compact ? 'h-8 sm:h-10' : 'h-10 sm:h-12'} w-auto`} />
+              {activeCompany.logoUrl ? (
+                <img 
+                  src={activeCompany.logoUrl} 
+                  alt={activeCompany.tradeName || activeCompany.corporateName} 
+                  className={`${compact ? 'h-8 sm:h-10' : 'h-10 sm:h-12'} w-auto object-contain`} 
+                />
+              ) : (
+                <Logo variant="light" className={`${compact ? 'h-8 sm:h-10' : 'h-10 sm:h-12'} w-auto`} />
+              )}
             </div>
           ) : (
             <div className="w-full" />
@@ -69,7 +95,7 @@ export default function CompanyHeader({
               compact ? 'text-xs sm:text-sm md:text-base' : 'text-sm sm:text-base md:text-lg lg:text-xl'
             }`}
           >
-            L.M BANZATTO METAIS - ME
+            {activeCompany.corporateName || DEFAULT_COMPANY_DATA.corporateName}
           </h1>
 
           {/* Linha 2 */}
@@ -78,7 +104,7 @@ export default function CompanyHeader({
               compact ? 'text-[10px] sm:text-xs' : 'text-xs sm:text-sm'
             }`}
           >
-            SOB CNPJ: 25.038.430/0001-23
+            SOB CNPJ: {activeCompany.cnpj || DEFAULT_COMPANY_DATA.cnpj} {activeCompany.ie ? `| IE: ${activeCompany.ie}` : ''}
           </p>
 
           {/* Linha 3 */}
@@ -87,7 +113,7 @@ export default function CompanyHeader({
               compact ? 'text-[8.5px] sm:text-[10px]' : 'text-[9.5px] sm:text-xs'
             }`}
           >
-            FONE:(14) 3203-1742 Fixo / (14) 99880-9362 Luan - Proprietário / (14) 99819-6873 / (14) 99925-7633 /
+            FONE: {activeCompany.phone || DEFAULT_COMPANY_DATA.phone} {activeCompany.mobile ? `/ ${activeCompany.mobile} WhatsApp` : ''} / {activeCompany.email || DEFAULT_COMPANY_DATA.email}
           </p>
         </div>
 
@@ -141,3 +167,4 @@ export default function CompanyHeader({
     </header>
   );
 }
+

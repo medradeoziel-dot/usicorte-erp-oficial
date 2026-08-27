@@ -1,7 +1,7 @@
 import React from 'react';
 import Logo from './Logo';
 import { ScreenType } from '../App';
-import { Menu, Package, Users, Calculator, ShoppingCart, FileText, Boxes, DollarSign } from 'lucide-react';
+import { Menu, Package, Users, Calculator, ShoppingCart, FileText, Boxes, DollarSign, Building2 } from 'lucide-react';
 
 interface TopBarProps {
   currentScreen: ScreenType;
@@ -51,6 +51,7 @@ export default function TopBar({
           { id: 'estoque', label: 'Estoque', icon: Boxes },
           { id: 'financeiro', label: 'Financeiro', icon: DollarSign },
           { id: 'relatorios', label: 'Relatórios', icon: FileText },
+          { id: 'empresa', label: 'Emitente', icon: Building2 },
         ].map((item) => {
           const Icon = item.icon;
           const isActive = currentScreen === item.id;

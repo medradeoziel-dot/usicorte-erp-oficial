@@ -17,11 +17,12 @@ import PhpCodeViewer from './components/PhpCodeViewer';
 import LoginModule from './components/LoginModule';
 import DailyOSModule from './components/DailyOSModule';
 import InventoryFinanceModule from './components/InventoryFinanceModule';
+import CompanySettingsModule from './components/CompanySettingsModule';
 import UsicorteCalculatorModal from './components/UsicorteCalculatorModal';
 import { MaterialProfile } from './utils/calculator';
 import { Users, FileCode } from 'lucide-react';
 
-export type ScreenType = 'home' | 'clientes' | 'produtos' | 'orcamento' | 'ordem_servico' | 'vendas' | 'relatorios' | 'estoque' | 'financeiro' | 'php';
+export type ScreenType = 'home' | 'clientes' | 'produtos' | 'orcamento' | 'ordem_servico' | 'vendas' | 'relatorios' | 'estoque' | 'financeiro' | 'empresa' | 'php';
 
 export default function App() {
   const { 
@@ -191,6 +192,12 @@ export default function App() {
             <InventoryFinanceModule 
               initialTab="financeiro" 
               onNavigateToQuote={() => trocarTela('orcamento')} 
+            />
+          )}
+
+          {currentScreen === 'empresa' && (
+            <CompanySettingsModule 
+              onBackToDashboard={() => trocarTela('home')} 
             />
           )}
 

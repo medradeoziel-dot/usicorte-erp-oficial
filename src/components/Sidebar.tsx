@@ -12,6 +12,7 @@ import {
   FileCode, 
   Boxes,
   DollarSign,
+  Building2,
   Scissors,
   X 
 } from 'lucide-react';
@@ -169,6 +170,21 @@ export default function Sidebar({
         >
           <FileText className="w-4 h-4 shrink-0" />
           <span>Relatórios & Propostas</span>
+        </button>
+
+        <button 
+          onClick={() => trocarTela('empresa')}
+          className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer w-full text-left ${
+            currentScreen === 'empresa' ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30' : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+          }`}
+        >
+          <div className="flex items-center gap-3">
+            <Building2 className="w-4 h-4 shrink-0 text-blue-400" />
+            <span>Dados da Empresa / Emitente</span>
+          </div>
+          <span className="text-[9px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-1 py-0.5 rounded font-mono font-bold">
+            NF-e
+          </span>
         </button>
 
         <button 
