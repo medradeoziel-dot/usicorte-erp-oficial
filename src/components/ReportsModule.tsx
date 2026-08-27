@@ -1951,13 +1951,13 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
             {/* Cabeçalho da Empresa */}
             <div className="etiqueta-header text-center pb-2 mb-3 border-b border-black">
               <h2 className="font-black text-sm tracking-wide uppercase leading-tight text-slate-950 font-sans">
-                L.M BANZATTO METAIS - ME
+                USICORTE METAIS
               </h2>
               <p className="text-[10px] font-bold text-slate-900 leading-tight mt-0.5 font-sans">
                 SOB CNPJ: 25.038.430/0001-23
               </p>
               <p className="text-[8.5px] font-semibold text-slate-800 leading-tight mt-0.5 font-sans">
-                FONE:(14) 3203-1742 / (14) 99880-9362 / (14) 99819-6873 / (14) 99925-7633 /
+                FONE:(14) 3203-1742 / (14) 99880-9362 / (14) 99819-6873 / (14) 99925-7633
               </p>
               <div className="text-xs font-bold text-slate-900 mt-1 pt-1 border-t border-slate-200">
                 PEDIDO Nº: <span className="font-mono font-black text-blue-900 rel-numero">{displayQuote.quoteNumber || displayQuote.id || 'COT-2026-9663'}</span>
@@ -1967,9 +1967,9 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
             {/* Conteúdo: Dados + Desenho */}
             <div className="etiqueta-corpo grid grid-cols-12 gap-2 items-start mb-3">
               {/* Coluna Esquerda - Informações */}
-              <div className="etiqueta-dados col-span-7 text-xs space-y-1.5 leading-tight">
+              <div className="etiqueta-dados col-span-7 text-xs space-y-1.0 leading-tight">
                 <div>
-                  <span className="font-bold text-gray-600 block text-[10px]">EMPRESA / CLIENTE:</span>
+                  <span className="font-bold text-gray-600 block text-[8px]">EMPRESA / CLIENTE:</span>
                   <span className="lbl-cliente-nome font-extrabold uppercase block">{selectedClientName || displayQuote.clientName || 'CLIENTE BALCÃO'}</span>
                 </div>
 
