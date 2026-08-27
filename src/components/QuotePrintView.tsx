@@ -1,5 +1,6 @@
 import React from "react";
 import { formatSafeDate } from "../utils/calculator";
+import CompanyHeader from "./CompanyHeader";
 
 // Types/Interfaces
 export interface QuoteItem {
@@ -74,6 +75,7 @@ export interface QuoteData {
 }
 
 export interface QuotePrintViewProps {
+  quote?: QuoteData;
   numeroOrcamento?: string;
   dataEmissao?: string;
   validade?: string;
@@ -84,107 +86,93 @@ export interface QuotePrintViewProps {
   desconto?: number;
   valorTotal?: number;
   observacoes?: string;
-  quote?: QuoteData;
-  [key: string]: any;
 }
 
 export const QuotePrintView: React.FC<QuotePrintViewProps> = (props) => {
-  const quote = props.quote;
+  const { quote } = props;
 
   const numeroOrcamento =
-    props.numeroOrcamento ||
-    quote?.quoteNumber ||
-    quote?.id ||
+    props.numeroOrcamento ??
+    quote?.quoteNumber ??
+    quote?.id ??
     "COT-2026-3169";
 
   const dataEmissao =
-    props.dataEmissao ||
-    (quote?.date ? formatSafeDate(quote.date) : formatSafeDate(new Date()));
+    props.dataEmissao ??
+    quote?.date ??
+    (quote?.createdAt ? formatSafeDate(quote.createdAt) : new Date().toLocaleDateString("pt-BR"));
 
   const validade =
-    props.validade ||
-    (quote?.validityDays ? `${quote.validityDays} dias` : undefined) ||
-    "10 dias";
+    props.validade ??
+    (quote?.validityDays ? `${quote.validityDays} dias` : "10 dias");
 
-  const cliente: CustomerData = props.cliente ||
-    quote?.cliente ||
-    quote?.client || {
-      nome: quote?.clientName || "BRASIL TECNOLOGIAS LTDA",
-      documento: "12.345.678/0001-90",
-      telefone: "(11) 98765-4321",
-      email: "contato@brasiltecnologias.com.br",
-    };
+  const cliente: CustomerData = {
+    nome:
+      props.cliente?.nome ??
+      props.cliente?.name ??
+      quote?.clientName ??
+      quote?.client?.name ??
+      quote?.cliente?.nome ??
+      "CLIENTE BALCÃO",
+    documento:
+      props.cliente?.documento ??
+      quote?.client?.documento ??
+      quote?.cliente?.documento ??
+      "",
+    telefone:
+      props.cliente?.telefone ??
+      props.cliente?.phone ??
+      quote?.client?.telefone ??
+      quote?.cliente?.telefone ??
+      "",
+    email:
+      props.cliente?.email ??
+      quote?.client?.email ??
+      quote?.cliente?.email ??
+      "",
+    endereco:
+      props.cliente?.endereco ??
+      props.cliente?.address ??
+      quote?.client?.endereco ??
+      quote?.cliente?.endereco ??
+      "",
+  };
 
-  const empresa: CompanyData = props.empresa ||
-    quote?.empresa ||
-    quote?.company || {
-      nome: "Usicorte Metais",
-      cnpj: "12.345.678/0001-00",
-      telefone: "(11) 4002-8922",
-      email: "vendas@usicortemetais.com.br",
-      endereco: "Rua Industrial, 1000 - Distrito Industrial - SP",
-    };
+  const rawItens =
+    props.itens ??
+    quote?.items ??
+    quote?.itens ??
+    [];
 
-  const rawItens: QuoteItem[] =
-    props.itens ||
-    quote?.itens ||
-    quote?.items || [
-      {
-        id: "1",
-        material: "CHAPA",
-        medidas: '1/2" (12,7mm) × 1200 × 2400',
-        descricao: "Chapa Aço SAE 1020 Cortada a Plasma CNC",
-        informacoes: "Bordas escariadas e desbastadas",
-        quantidade: 2,
-        valorUnitario: 3800,
-        valorTotal: 7600,
-      },
-      {
-        id: "2",
-        material: "CHAPA",
-        medidas: '1" (25,4mm) × 300 × 600',
-        descricao: "Chapa Aço SAE 1045 Bloco Retangular",
-        informacoes: "Tolerância e esquadro usinados",
-        quantidade: 1,
-        valorUnitario: 7738.42,
-        valorTotal: 7738.42,
-      },
-    ];
-
-  const itens: QuoteItem[] = rawItens.map((item, idx) => ({
-    id: item.id || `item-${idx}`,
-    material: item.material || "MATERIAL",
-    medidas: item.medidas || item.dimensões || item.dimensions || "",
-    descricao: item.descricao || item.descrição || item.description || "",
-    informacoes: item.informacoes || item.informação || item.info || "",
-    quantidade: item.quantidade ?? 1,
-    valorUnitario:
-      item.valorUnitario ??
-      (item.valorTotal ? item.valorTotal / (item.quantidade || 1) : 0),
-    valorTotal:
-      item.valorTotal ??
-      (item.valorUnitario ? item.valorUnitario * (item.quantidade || 1) : 0),
-    // imagem PROPRIA de cada item (nunca uma imagem global compartilhada)
-    drawingImage: item.drawingImage || item.fotoDesenho || "",
+  const itens: QuoteItem[] = rawItens.map((item, index) => ({
+    id: item.id ?? index + 1,
+    material: item.material ?? item.name ?? "MATERIAL",
+    medidas: item.medidas ?? item.dimensions ?? item.dimensões ?? "",
+    descricao: item.descricao ?? item.descrição ?? item.description ?? "",
+    informacoes: item.informacoes ?? item.informação ?? item.info ?? "-",
+    quantidade: item.quantidade ?? item.qtd ?? item.quantity ?? 1,
+    valorUnitario: item.valorUnitario ?? item.unitPrice ?? 0,
+    valorTotal: item.valorTotal ?? item.subtotal ?? (Number(item.valorUnitario || item.unitPrice || 0) * Number(item.quantidade || item.qtd || item.quantity || 1)),
+    drawingImage: item.drawingImage ?? item.fotoDesenho ?? item.desenhoUrl ?? "",
   }));
 
   const subtotal =
     props.subtotal ??
     quote?.subtotal ??
-    (itens.reduce((acc, it) => acc + (it.valorTotal || 0), 0) || 15338.42);
+    itens.reduce((acc, it) => acc + (it.valorTotal || 0), 0);
 
   const desconto =
     props.desconto ??
     quote?.desconto ??
     quote?.totalDiscount ??
     quote?.discount ??
-    100;
+    0;
 
   const valorTotal =
     props.valorTotal ??
     quote?.valorTotal ??
     quote?.grandTotal ??
-    (subtotal - (desconto || 0) + (quote?.shippingCost || quote?.shipping || 0) || 15238.42);
+    (subtotal - (desconto || 0) + (quote?.shippingCost || quote?.shipping || 0));
 
   const observacoes =
     props.observacoes ??
@@ -218,39 +206,17 @@ export const QuotePrintView: React.FC<QuotePrintViewProps> = (props) => {
       {/* LAYOUT MOBILE (visível apenas abaixo de 640px / sm:hidden) */}
       {/* ========================================================= */}
       <div className="block sm:hidden w-full bg-white min-h-screen p-3 text-slate-800 print:hidden box-border overflow-x-hidden">
-        {/* Cabeçalho Empresa */}
-        <div className="border-b border-slate-200 pb-4 mb-4">
-          {empresa.logoUrl ? (
-            <img
-              src={empresa.logoUrl}
-              alt={empresa.nome || "Empresa"}
-              className="h-12 w-auto object-contain mb-2"
-            />
-          ) : (
-            <h1 className="text-xl font-bold text-slate-900 leading-none">
-              {empresa.nome || "Usicorte Metais"}
-            </h1>
-          )}
-          {empresa.cnpj && <p className="text-xs text-slate-500 mt-1">CNPJ: {empresa.cnpj}</p>}
-          {empresa.telefone && <p className="text-xs text-slate-500">Tel: {empresa.telefone}</p>}
-          {empresa.email && <p className="text-xs text-slate-500">Email: {empresa.email}</p>}
-        </div>
-
-        {/* Informações do Orçamento */}
-        <div className="bg-slate-50 p-3 rounded-lg mb-4 border border-slate-200">
-          <div className="flex justify-between items-center mb-1">
-            <span className="text-xs text-slate-500 uppercase tracking-wider font-semibold">Orçamento</span>
-            <span className="text-sm font-bold text-slate-900">#{numeroOrcamento}</span>
-          </div>
-          <div className="flex justify-between items-center text-xs text-slate-600">
-            <span>Emissão: {dataEmissao}</span>
-            {validade && <span>Validade: {validade}</span>}
-          </div>
-        </div>
+        {/* Header Centralizado da Empresa */}
+        <CompanyHeader 
+          documentType="Orçamento / Proposta"
+          documentNumber={numeroOrcamento}
+          documentDate={dataEmissao}
+          compact={true}
+        />
 
         {/* Dados do Cliente (Coluna Única) */}
-        <div className="mb-5">
-          <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Dados do Cliente</h2>
+        <div className="mb-4">
+          <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Dados do Cliente</h2>
           <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-1 text-xs">
             <p className="font-bold text-slate-800 text-sm">{cliente.nome}</p>
             {cliente.documento && <p className="text-slate-600">CPF/CNPJ: {cliente.documento}</p>}
@@ -261,17 +227,17 @@ export const QuotePrintView: React.FC<QuotePrintViewProps> = (props) => {
         </div>
 
         {/* Lista de Itens (Cards) */}
-        <div className="mb-5">
-          <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Itens do Orçamento</h2>
+        <div className="mb-4">
+          <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Itens do Orçamento ({itens.length})</h2>
           <div className="space-y-3">
             {itens.map((item, index) => (
               <div
                 key={item.id || index}
-                className="bg-white border border-slate-200 rounded-lg p-3 shadow-sm space-y-2"
+                className="bg-white border border-slate-200 rounded-lg p-3 shadow-xs space-y-2 text-xs"
               >
-                <div className="border-b border-slate-100 pb-2">
-                  <span className="text-xs text-slate-400 block">Material</span>
-                  <span className="font-semibold text-slate-800 text-sm">{item.material}</span>
+                <div className="border-b border-slate-100 pb-1.5 flex justify-between items-center">
+                  <span className="text-[10px] text-slate-400 uppercase font-bold">Produto / Material</span>
+                  <span className="font-bold text-slate-800 text-sm">{item.material}</span>
                 </div>
 
                 {item.drawingImage && (
@@ -286,32 +252,32 @@ export const QuotePrintView: React.FC<QuotePrintViewProps> = (props) => {
 
                 {item.medidas && (
                   <div>
-                    <span className="text-xs text-slate-400 block">Medidas</span>
-                    <span className="text-xs text-slate-700 break-all">{item.medidas}</span>
+                    <span className="text-[10px] text-slate-400 uppercase font-bold block">Medidas</span>
+                    <span className="font-mono text-slate-700 break-all">{item.medidas}</span>
                   </div>
                 )}
 
                 {item.descricao && (
                   <div>
-                    <span className="text-xs text-slate-400 block">Descrição</span>
-                    <span className="text-xs text-slate-700 break-words">{item.descricao}</span>
+                    <span className="text-[10px] text-slate-400 uppercase font-bold block">Descrição</span>
+                    <span className="text-slate-700 break-words">{item.descricao}</span>
                   </div>
                 )}
 
                 {item.informacoes && item.informacoes !== "-" && (
                   <div>
-                    <span className="text-xs text-slate-400 block">Informações</span>
-                    <span className="text-xs text-slate-700 break-words italic">{item.informacoes}</span>
+                    <span className="text-[10px] text-slate-400 uppercase font-bold block">Informações</span>
+                    <span className="text-slate-600 italic break-words">{item.informacoes}</span>
                   </div>
                 )}
 
                 <div className="pt-2 border-t border-slate-100 flex justify-between items-center text-xs">
                   <div>
-                    <span className="text-slate-500">Qtd: {item.quantidade}</span>
-                    <span className="text-slate-400 mx-1 font-light">|</span>
+                    <span className="text-slate-500">Qtd: <strong>{item.quantidade}</strong></span>
+                    <span className="text-slate-300 mx-1.5">|</span>
                     <span className="text-slate-500">Unit: {formatCurrency(item.valorUnitario || 0)}</span>
                   </div>
-                  <div className="font-bold text-slate-900 text-sm">
+                  <div className="font-bold text-slate-900 font-mono text-sm">
                     {formatCurrency(item.valorTotal || 0)}
                   </div>
                 </div>
@@ -321,20 +287,20 @@ export const QuotePrintView: React.FC<QuotePrintViewProps> = (props) => {
         </div>
 
         {/* Totais (100% largura) */}
-        <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-2 mb-4">
-          <div className="flex justify-between text-xs text-slate-600">
-            <span>Subtotal</span>
-            <span>{formatCurrency(subtotal)}</span>
+        <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 space-y-1.5 mb-4 text-xs">
+          <div className="flex justify-between text-slate-600">
+            <span>Subtotal:</span>
+            <span className="font-mono">{formatCurrency(subtotal)}</span>
           </div>
           {desconto > 0 && (
-            <div className="flex justify-between text-xs text-emerald-600 font-medium">
-              <span>Desconto</span>
-              <span>- {formatCurrency(desconto)}</span>
+            <div className="flex justify-between text-emerald-600 font-medium">
+              <span>Desconto:</span>
+              <span className="font-mono">- {formatCurrency(desconto)}</span>
             </div>
           )}
-          <div className="pt-2 border-t border-slate-200 flex justify-between items-center">
-            <span className="font-bold text-slate-800 text-sm">Total</span>
-            <span className="font-bold text-slate-900 text-lg">{formatCurrency(valorTotal)}</span>
+          <div className="pt-2 border-t border-slate-200 flex justify-between items-center font-bold text-slate-900 text-sm">
+            <span>Total:</span>
+            <span className="text-lg font-mono text-blue-900">{formatCurrency(valorTotal)}</span>
           </div>
         </div>
 
@@ -353,63 +319,49 @@ export const QuotePrintView: React.FC<QuotePrintViewProps> = (props) => {
       <div className="hidden sm:flex justify-center bg-slate-100 p-6 print:p-0 print:bg-white print:block">
         <div className="w-full max-w-[794px] bg-white rounded-xl shadow-2xl p-8 print:shadow-none print:rounded-none print:p-0 print:max-w-none text-slate-800">
           
-          {/* Cabeçalho Desktop */}
-          <div className="flex justify-between items-start border-b border-slate-200 pb-6 mb-6">
-            <div>
-              {empresa.logoUrl ? (
-                <img src={empresa.logoUrl} alt={empresa.nome || "Empresa"} className="h-16 w-auto object-contain mb-3" />
-              ) : (
-                <h1 className="text-2xl font-bold text-slate-900 mb-1">{empresa.nome || "Usicorte Metais"}</h1>
-              )}
-              {empresa.cnpj && <p className="text-sm text-slate-500">CNPJ: {empresa.cnpj}</p>}
-              {empresa.endereco && <p className="text-sm text-slate-500">{empresa.endereco}</p>}
-              <p className="text-sm text-slate-500">
-                {[empresa.telefone, empresa.email].filter(Boolean).join(" | ")}
-              </p>
-            </div>
-
-            <div className="text-right">
-              <h2 className="text-2xl font-extrabold text-slate-900 tracking-tight">ORÇAMENTO</h2>
-              <p className="text-lg font-bold text-slate-600 mb-2">#{numeroOrcamento}</p>
-              <p className="text-xs text-slate-500">Data: {dataEmissao}</p>
-              {validade && <p className="text-xs text-slate-500">Validade: {validade}</p>}
-            </div>
-          </div>
+          {/* Header Centralizado da Empresa com Logo à Esquerda */}
+          <CompanyHeader 
+            documentType="Orçamento / Proposta Comercial"
+            documentNumber={numeroOrcamento}
+            documentDate={dataEmissao}
+            showBorder={true}
+          />
 
           {/* Cliente Desktop */}
-          <div className="bg-slate-50 rounded-lg p-4 mb-6 border border-slate-100">
-            <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Cliente</h3>
-            <div className="grid grid-cols-2 gap-4 text-sm">
+          <div className="bg-slate-50 rounded-lg p-3.5 mb-5 border border-slate-200">
+            <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Dados do Cliente</h3>
+            <div className="grid grid-cols-2 gap-4 text-xs">
               <div>
-                <p className="font-bold text-slate-800">{cliente.nome}</p>
-                {cliente.documento && <p className="text-slate-600 text-xs mt-1">CPF/CNPJ: {cliente.documento}</p>}
+                <p className="font-bold text-slate-900 text-sm">{cliente.nome}</p>
+                {cliente.documento && <p className="text-slate-600 mt-0.5 font-mono">CPF/CNPJ: {cliente.documento}</p>}
+                {cliente.endereco && <p className="text-slate-600 mt-0.5">{cliente.endereco}</p>}
               </div>
               <div className="text-right">
-                {cliente.telefone && <p className="text-slate-600 text-xs">Tel: {cliente.telefone}</p>}
-                {cliente.email && <p className="text-slate-600 text-xs">Email: {cliente.email}</p>}
-                {cliente.endereco && <p className="text-slate-600 text-xs mt-1">{cliente.endereco}</p>}
+                {cliente.telefone && <p className="text-slate-600">Tel: {cliente.telefone}</p>}
+                {cliente.email && <p className="text-slate-600">Email: {cliente.email}</p>}
+                <p className="text-slate-500 mt-1">Validade: <strong>{validade}</strong></p>
               </div>
             </div>
           </div>
 
           {/* Tabela Desktop & Impressão (7 Colunas Exatas) */}
-          <table className="w-full text-left border-collapse mb-6">
+          <table className="w-full text-left border-collapse mb-6 text-xs" border={1} cellPadding={5}>
             <thead>
-              <tr className="border-b-2 border-slate-300 text-slate-700 text-xs font-bold uppercase tracking-wider bg-slate-50">
-                <th className="py-2.5 px-2 text-left">PRODUTO / MATERIAL</th>
-                <th className="py-2.5 px-2 text-center">MEDIDAS</th>
-                <th className="py-2.5 px-2 text-left">DESCRIÇÃO</th>
-                <th className="py-2.5 px-2 text-left">INFORMAÇÕES</th>
-                <th className="py-2.5 px-2 text-right">UNITÁRIO</th>
-                <th className="py-2.5 px-2 text-center w-14">QTD</th>
-                <th className="py-2.5 px-2 text-right">SUBTOTAL</th>
+              <tr className="bg-slate-100 text-slate-900 font-bold uppercase text-[10.5px] border-b border-black">
+                <th className="p-2 text-left">PRODUTO / MATERIAL</th>
+                <th className="p-2 text-center">MEDIDAS</th>
+                <th className="p-2 text-left">DESCRIÇÃO</th>
+                <th className="p-2 text-left">INFORMAÇÕES</th>
+                <th className="p-2 text-right">UNITÁRIO</th>
+                <th className="p-2 text-center w-12">QTD</th>
+                <th className="p-2 text-right">SUBTOTAL</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-200 text-xs sm:text-sm">
+            <tbody className="divide-y divide-slate-200">
               {itens.map((item, index) => (
-                <tr key={item.id || index} className="align-top hover:bg-slate-50/50">
-                  <td className="py-2.5 px-2">
-                    <p className="font-semibold text-slate-900">{item.material || "—"}</p>
+                <tr key={item.id || index} className="align-top hover:bg-slate-50">
+                  <td className="p-2 font-bold text-slate-900">
+                    <p>{item.material || "—"}</p>
                     {item.drawingImage && (
                       <img
                         src={item.drawingImage}
@@ -418,22 +370,22 @@ export const QuotePrintView: React.FC<QuotePrintViewProps> = (props) => {
                       />
                     )}
                   </td>
-                  <td className="py-2.5 px-2 text-center font-mono text-xs text-slate-700">
+                  <td className="p-2 text-center font-mono text-[11px] text-slate-800">
                     {item.medidas || "—"}
                   </td>
-                  <td className="py-2.5 px-2 text-slate-800 text-xs">
+                  <td className="p-2 text-slate-800">
                     {item.descricao || "—"}
                   </td>
-                  <td className="py-2.5 px-2 text-xs text-slate-600 italic">
+                  <td className="p-2 text-slate-600 italic text-[11px]">
                     {item.informacoes && item.informacoes !== "-" ? item.informacoes : "—"}
                   </td>
-                  <td className="py-2.5 px-2 text-right text-slate-800 font-mono text-xs">
+                  <td className="p-2 text-right text-slate-800 font-mono">
                     {formatCurrency(item.valorUnitario || 0)}
                   </td>
-                  <td className="py-2.5 px-2 text-center font-bold text-slate-800 font-mono text-xs">
+                  <td className="p-2 text-center font-bold text-slate-900 font-mono">
                     {item.quantidade}
                   </td>
-                  <td className="py-2.5 px-2 text-right font-bold text-slate-900 font-mono text-xs">
+                  <td className="p-2 text-right font-bold text-slate-950 font-mono">
                     {formatCurrency(item.valorTotal || 0)}
                   </td>
                 </tr>
@@ -443,31 +395,31 @@ export const QuotePrintView: React.FC<QuotePrintViewProps> = (props) => {
 
           {/* Totais Desktop */}
           <div className="flex justify-end mb-6">
-            <div className="w-64 space-y-2">
-              <div className="flex justify-between text-sm text-slate-600">
+            <div className="w-64 space-y-1.5 text-xs">
+              <div className="flex justify-between text-slate-600">
                 <span>Subtotal:</span>
-                <span>{formatCurrency(subtotal)}</span>
+                <span className="font-mono">{formatCurrency(subtotal)}</span>
               </div>
               {desconto > 0 && (
-                <div className="flex justify-between text-sm text-emerald-600">
+                <div className="flex justify-between text-emerald-600 font-medium">
                   <span>Desconto:</span>
-                  <span>- {formatCurrency(desconto)}</span>
+                  <span className="font-mono">- {formatCurrency(desconto)}</span>
                 </div>
               )}
-              <div className="flex justify-between text-base font-bold text-slate-900 pt-2 border-t border-slate-200">
-                <span>Total:</span>
-                <span>{formatCurrency(valorTotal)}</span>
+              <div className="flex justify-between text-base font-black text-slate-950 pt-2 border-t border-black">
+                <span>VALOR TOTAL:</span>
+                <span className="font-mono text-blue-900">{formatCurrency(valorTotal)}</span>
               </div>
             </div>
           </div>
 
           {/* Observações Desktop */}
           {observacoes && (
-            <div className="border-t border-slate-200 pt-4">
-              <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+            <div className="border-t border-slate-300 pt-3 text-xs">
+              <h4 className="font-bold text-slate-700 uppercase tracking-wider mb-1 text-[10px]">
                 Observações
               </h4>
-              <p className="text-xs text-slate-600 whitespace-pre-line leading-relaxed">{observacoes}</p>
+              <p className="text-slate-600 whitespace-pre-line leading-relaxed">{observacoes}</p>
             </div>
           )}
 

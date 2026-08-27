@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Quote, QuoteItem, Client } from '../types';
 import Logo from './Logo';
+import CompanyHeader from './CompanyHeader';
 import { QuotePrintView } from './QuotePrintView';
 import EtiquetaDesenho from './EtiquetaDesenho';
 import { fileToDxfImage, isDxfFile, renderDxfToDataUrl } from '../utils/dxfRenderer';
@@ -1456,19 +1457,12 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
         }`}
         style={{ minHeight: '800px' }}
       >
-        {/* Header */}
-        <div className="border-b-2 border-black pb-3 mb-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-          <div>
-            <div className="logo-impressao mb-2" style={{ width: '180px' }}>
-              <Logo variant="light" className="w-[180px] h-auto" />
-            </div>
-            <p className="m-0 text-xs font-semibold text-slate-600 tracking-wide uppercase">Relatório / Proposta Comercial</p>
-          </div>
-          <div className="text-left sm:text-right text-xs space-y-0.5 w-full sm:w-auto border-t sm:border-t-0 pt-2 sm:pt-0 border-slate-200">
-            <div><strong>PROPOSTA Nº:</strong> <span className="rel-numero font-mono font-bold text-blue-800">{displayQuote.quoteNumber || '00124'}</span></div>
-            <div><strong>DATA:</strong> <span className="rel-data font-mono">{displayQuote.date || new Date().toLocaleDateString('pt-BR')}</span></div>
-          </div>
-        </div>
+        {/* Header Centralizado da Empresa */}
+        <CompanyHeader 
+          documentType="Relatório / Proposta Comercial"
+          documentNumber={displayQuote.quoteNumber || '00124'}
+          documentDate={displayQuote.date || new Date().toLocaleDateString('pt-BR')}
+        />
 
         {/* Client box */}
         <div className="bg-slate-100 border border-slate-300 p-3 rounded-md mb-4 text-xs flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
@@ -1644,21 +1638,18 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
               }}
             >
               <div>
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-black pb-2 mb-3 gap-2">
-                  <div className="flex items-center gap-3">
-                    <div className="logo-impressao" style={{ width: '130px' }}>
-                      <Logo variant="light" className="w-[130px] h-auto" />
-                    </div>
-                    <span className="text-xs px-2 py-0.5 bg-blue-100 text-blue-800 rounded font-bold">VIA DO CLIENTE</span>
-                  </div>
-                  <span className="text-xs">
-                    <strong>PEDIDO Nº:</strong> <span className="rel-numero font-mono font-bold">{displayQuote.quoteNumber || '00124'}</span>
-                  </span>
-                </div>
+                {/* Header Centralizado da Empresa (Via do Cliente) */}
+                <CompanyHeader 
+                  tag="VIA DO CLIENTE"
+                  tagColor="blue"
+                  documentNumber={displayQuote.quoteNumber || '00124'}
+                  documentDate={displayQuote.date || new Date().toLocaleDateString('pt-BR')}
+                  compact={true}
+                />
 
                 <div className="text-xs mb-3 text-slate-700 flex flex-col sm:flex-row justify-between gap-1">
                   <div><strong>Cliente:</strong> <span className="lbl-cliente-nome font-bold uppercase">{selectedClientName || displayQuote.clientName}</span></div>
-                  <div><strong>Data:</strong> <span className="rel-data font-mono">{displayQuote.date || new Date().toLocaleDateString('pt-BR')}</span></div>
+                  <div><strong>Condições:</strong> <span className="font-semibold">{displayQuote.paymentTerms || 'À Vista / Pix'}</span></div>
                 </div>
 
                 {/* Mobile Cards Via 1 */}
@@ -1735,15 +1726,14 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
               style={{ minHeight: isMultiPage ? 'auto' : '380px' }}
             >
               <div>
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-black pb-2 mb-3 gap-2">
-                  <div>
-                    <strong className="text-sm tracking-tight text-slate-900 font-black">USICORTE METAIS</strong>
-                    <span className="text-xs ml-2 px-2 py-0.5 bg-amber-100 text-amber-900 rounded font-bold">VIA DA EMPRESA / PRODUÇÃO</span>
-                  </div>
-                  <span className="text-xs">
-                    <strong>PEDIDO Nº:</strong> <span className="rel-numero font-mono font-bold">{displayQuote.quoteNumber || '00124'}</span>
-                  </span>
-                </div>
+                {/* Header Centralizado da Empresa (Via da Empresa / Produção) */}
+                <CompanyHeader 
+                  tag="VIA DA EMPRESA / PRODUÇÃO"
+                  tagColor="amber"
+                  documentNumber={displayQuote.quoteNumber || '00124'}
+                  documentDate={displayQuote.date || new Date().toLocaleDateString('pt-BR')}
+                  compact={true}
+                />
 
                 <div className="text-xs mb-3 text-slate-700 flex flex-col sm:flex-row justify-between gap-1">
                   <div><strong>Cliente:</strong> <span className="lbl-cliente-nome font-bold uppercase">{selectedClientName || displayQuote.clientName}</span></div>
@@ -1830,12 +1820,20 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
                 : 'hidden'
             }`}
           >
-            {/* Cabeçalho Original */}
-            <div className="etiqueta-header text-center pb-2 mb-3">
-              <h2 className="font-extrabold text-xl tracking-wider uppercase leading-tight">USICORTE METAIS</h2>
-              <p className="text-xs font-bold text-gray-800 mt-0.5">
-                PEDIDO Nº: <span className="font-mono font-black text-blue-900 rel-numero">{displayQuote.quoteNumber || displayQuote.id || 'COT-2026-9663'}</span>
+            {/* Cabeçalho da Empresa */}
+            <div className="etiqueta-header text-center pb-2 mb-3 border-b border-black">
+              <h2 className="font-black text-sm tracking-wide uppercase leading-tight text-slate-950 font-sans">
+                L.M BANZATTO METAIS - ME
+              </h2>
+              <p className="text-[10px] font-bold text-slate-900 leading-tight mt-0.5 font-sans">
+                SOB CNPJ: 25.038.430/0001-23
               </p>
+              <p className="text-[8.5px] font-semibold text-slate-800 leading-tight mt-0.5 font-sans">
+                FONE:(14) 3203-1742 / (14) 99880-9362 / (14) 99819-6873 / (14) 99925-7633 /
+              </p>
+              <div className="text-xs font-bold text-slate-900 mt-1 pt-1 border-t border-slate-200">
+                PEDIDO Nº: <span className="font-mono font-black text-blue-900 rel-numero">{displayQuote.quoteNumber || displayQuote.id || 'COT-2026-9663'}</span>
+              </div>
             </div>
 
             {/* Conteúdo: Dados + Desenho */}

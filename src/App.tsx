@@ -24,7 +24,18 @@ import { Users, FileCode } from 'lucide-react';
 export type ScreenType = 'home' | 'clientes' | 'produtos' | 'orcamento' | 'ordem_servico' | 'vendas' | 'relatorios' | 'estoque' | 'financeiro' | 'php';
 
 export default function App() {
-  const { clients, activeClient, setActiveClient, handleSaveClient, handleDeleteClient, handleExportClients } = useClients();
+  const { 
+    clients, 
+    activeClient, 
+    setActiveClient, 
+    handleSaveClient, 
+    handleDeleteClient, 
+    handleExportClients,
+    refreshClients,
+    isLoading,
+    isSaving,
+    isDbSynced 
+  } = useClients();
   const currentTime = useClock();
 
   const [currentScreen, setCurrentScreen] = useState<ScreenType>('home');
@@ -121,10 +132,24 @@ export default function App() {
 
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
                 <div className="lg:col-span-8">
-                  <ClientForm activeClient={activeClient} onSave={handleSaveClient} onDelete={handleDeleteClient} onClear={() => setActiveClient(null)} />
+                  <ClientForm 
+                    activeClient={activeClient} 
+                    onSave={handleSaveClient} 
+                    onDelete={handleDeleteClient} 
+                    onClear={() => setActiveClient(null)} 
+                    isSaving={isSaving}
+                  />
                 </div>
                 <div className="lg:col-span-4">
-                  <ClientList clients={clients} activeClientId={activeClient?.id} onSelectClient={(c) => setActiveClient(c)} onExportClients={handleExportClients} />
+                  <ClientList 
+                    clients={clients} 
+                    activeClientId={activeClient?.id} 
+                    onSelectClient={(c) => setActiveClient(c)} 
+                    onExportClients={handleExportClients} 
+                    onRefresh={refreshClients}
+                    isLoading={isLoading}
+                    isDbSynced={isDbSynced}
+                  />
                 </div>
               </div>
             </div>

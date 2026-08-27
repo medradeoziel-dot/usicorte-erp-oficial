@@ -27,23 +27,24 @@ import { motion, AnimatePresence } from 'motion/react';
 
 interface ClientFormProps {
   activeClient: Client | null;
-  onSave: (client: Client) => void;
-  onDelete: (id: string) => void;
+  onSave: (client: Client) => Promise<{ success: boolean; error?: any; client?: Client }> | void;
+  onDelete: (id: string) => Promise<{ success: boolean; error?: any }> | void;
   onClear: () => void;
+  isSaving?: boolean;
 }
 
-export default function ClientForm({ activeClient, onSave, onDelete, onClear }: ClientFormProps) {
-  // Local form states
+export default function ClientForm({ activeClient, onSave, onDelete, onClear, isSaving = false }: ClientFormProps) {
+  // Local form states - Todos os 15 campos
   const [type, setType] = useState<'CNPJ' | 'CPF'>('CNPJ');
   const [document, setDocument] = useState('');
   const [name, setName] = useState('');
   const [fantasyName, setFantasyName] = useState('');
+  const [situation, setSituation] = useState('ATIVA');
   const [cep, setCep] = useState('');
   const [street, setStreet] = useState('');
   const [neighborhood, setNeighborhood] = useState('');
   const [city, setCity] = useState('');
   const [state, setState] = useState('');
-  const [situation, setSituation] = useState('ATIVA');
   const [contactPerson, setContactPerson] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
@@ -59,26 +60,40 @@ export default function ClientForm({ activeClient, onSave, onDelete, onClear }: 
   // Loading states
   const [isSearchingCnpj, setIsSearchingCnpj] = useState(false);
   const [isSearchingCep, setIsSearchingCep] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Load active client data for editing
+  // Load active client data for editing (carrega todos os 15 campos)
   useEffect(() => {
     if (activeClient) {
-      setType(activeClient.type);
-      setDocument(activeClient.type === 'CNPJ' ? formatCNPJ(activeClient.document) : formatCPF(activeClient.document));
-      setName(activeClient.name);
-      setFantasyName(activeClient.fantasyName || '');
-      setCep(formatCEP(activeClient.cep));
-      setStreet(activeClient.street);
-      setNeighborhood(activeClient.neighborhood);
-      setCity(activeClient.city);
-      setState(activeClient.state);
-      setSituation(activeClient.situation);
-      setContactPerson(activeClient.contactPerson || '');
-      setPhone(formatPhone(activeClient.phone));
-      setEmail(activeClient.email);
-      setEnabled(activeClient.enabled);
-      setRegistrationDate(activeClient.registrationDate);
-      showStatus('Cliente carregado para edição!', 'info');
+      const rawType = activeClient.type || activeClient.tipo;
+      const cleanDoc = (activeClient.document || activeClient.documento || '').replace(/\D/g, '');
+      const resolvedType: 'CNPJ' | 'CPF' = (rawType === 'CPF' || rawType === 'CNPJ') 
+        ? rawType 
+        : (cleanDoc.length > 11 ? 'CNPJ' : 'CPF');
+
+      setType(resolvedType);
+      setDocument(resolvedType === 'CNPJ' ? formatCNPJ(cleanDoc) : formatCPF(cleanDoc));
+      setName(activeClient.name || activeClient.nome || '');
+      setFantasyName(activeClient.fantasyName || activeClient.nome_fantasia || '');
+      setSituation(activeClient.situation || activeClient.situacao || 'ATIVA');
+      setCep(formatCEP(activeClient.cep || ''));
+      setStreet(activeClient.street || activeClient.endereco || '');
+      setNeighborhood(activeClient.neighborhood || activeClient.bairro || '');
+      setCity(activeClient.city || activeClient.cidade || '');
+      setState((activeClient.state || activeClient.uf || '').toUpperCase());
+      setContactPerson(activeClient.contactPerson || activeClient.contato || '');
+      setPhone(formatPhone(activeClient.phone || activeClient.telefone || ''));
+      setEmail(activeClient.email || '');
+      setEnabled(activeClient.enabled !== undefined ? activeClient.enabled : (activeClient.habilitado !== undefined ? activeClient.habilitado : true));
+      
+      const rawRegDate = activeClient.registrationDate || activeClient.data_cadastro;
+      if (rawRegDate) {
+        setRegistrationDate(rawRegDate);
+      } else {
+        setRegistrationDate(new Date().toISOString().split('T')[0]);
+      }
+
+      showStatus('Cliente carregado do Supabase para edição!', 'info');
     } else {
       handleClear();
     }
@@ -96,7 +111,7 @@ export default function ClientForm({ activeClient, onSave, onDelete, onClear }: 
     setStatus({ message, type });
     setTimeout(() => {
       setStatus(prev => prev.message === message ? { message: '', type: null } : prev);
-    }, 5000);
+    }, 6000);
   };
 
   const handleDocumentChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -128,13 +143,13 @@ export default function ClientForm({ activeClient, onSave, onDelete, onClear }: 
         setStreet(data.logradouro || '');
         setNeighborhood(data.bairro || '');
         setCity(data.localidade || '');
-        setState(data.uf || '');
+        setState((data.uf || '').toUpperCase());
         showStatus('Endereço auto-preenchido via CEP!', 'success');
       } else {
-        showStatus('CEP não encontrado.', 'error');
+        showStatus('CEP não encontrado na base dos Correios.', 'error');
       }
     } catch (err) {
-      showStatus('Erro ao buscar CEP.', 'error');
+      showStatus('Erro ao consultar CEP.', 'error');
     } finally {
       setIsSearchingCep(false);
     }
@@ -144,7 +159,7 @@ export default function ClientForm({ activeClient, onSave, onDelete, onClear }: 
   const fetchCnpjDetails = async () => {
     const cleanCnpj = document.replace(/\D/g, '');
     if (cleanCnpj.length !== 14) {
-      showStatus('Por favor, digite um CNPJ com 14 dígitos.', 'error');
+      showStatus('Por favor, digite um CNPJ válido com 14 dígitos.', 'error');
       return;
     }
 
@@ -168,7 +183,7 @@ export default function ClientForm({ activeClient, onSave, onDelete, onClear }: 
       setStreet(data.logradouro || '');
       setNeighborhood(data.bairro || '');
       setCity(data.municipio || '');
-      setState(data.uf || '');
+      setState((data.uf || '').toUpperCase());
       setEmail(data.email || '');
       
       if (data.ddd_telefone_1) {
@@ -183,7 +198,7 @@ export default function ClientForm({ activeClient, onSave, onDelete, onClear }: 
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     const cleanDoc = document.replace(/\D/g, '');
@@ -191,40 +206,74 @@ export default function ClientForm({ activeClient, onSave, onDelete, onClear }: 
     // Validate Document
     if (type === 'CNPJ') {
       if (!validateCNPJ(cleanDoc)) {
-        showStatus('CNPJ inválido!', 'error');
+        showStatus('CNPJ inválido! Verifique os dígitos informados.', 'error');
         return;
       }
     } else {
       if (!validateCPF(cleanDoc)) {
-        showStatus('CPF inválido!', 'error');
+        showStatus('CPF inválido! Verifique os dígitos informados.', 'error');
         return;
       }
     }
 
+    if (!name.trim()) {
+      showStatus('Por favor, informe o Nome ou Razão Social.', 'error');
+      return;
+    }
+
+    setIsSubmitting(true);
+    showStatus('Salvando cliente diretamente na tabela "clientes" do Supabase...', 'info');
+
+    // Monta o objeto completo com todos os 15 campos
     const clientData: Client = {
-      id: activeClient?.id || Math.random().toString(36).substr(2, 9),
+      id: activeClient?.id || '',
       type,
       document: cleanDoc,
-      name,
-      fantasyName: type === 'CNPJ' ? fantasyName : '',
+      name: name.trim(),
+      fantasyName: fantasyName.trim(),
+      situation: (situation || 'ATIVA').toUpperCase().trim(),
       cep: cep.replace(/\D/g, ''),
-      street,
-      neighborhood,
-      city,
-      state,
-      situation,
-      contactPerson,
+      street: street.trim(),
+      neighborhood: neighborhood.trim(),
+      city: city.trim(),
+      state: state.trim().toUpperCase(),
+      contactPerson: contactPerson.trim(),
       phone: phone.replace(/\D/g, ''),
-      email,
+      email: email.trim(),
       enabled,
-      registrationDate: registrationDate || new Date().toISOString().split('T')[0]
+      registrationDate: registrationDate || new Date().toISOString().split('T')[0],
+      // Aliases em português para persistência direta
+      tipo: type,
+      documento: cleanDoc,
+      nome: name.trim(),
+      nome_fantasia: fantasyName.trim(),
+      situacao: (situation || 'ATIVA').toUpperCase().trim(),
+      endereco: street.trim(),
+      bairro: neighborhood.trim(),
+      cidade: city.trim(),
+      uf: state.trim().toUpperCase(),
+      contato: contactPerson.trim(),
+      telefone: phone.replace(/\D/g, ''),
+      habilitado: enabled,
+      data_cadastro: registrationDate || new Date().toISOString().split('T')[0],
     };
 
-    onSave(clientData);
-    showStatus(activeClient ? 'Cliente atualizado com sucesso!' : 'Novo cliente cadastrado!', 'success');
-    
-    if (!activeClient) {
-      handleClear();
+    try {
+      const result = await onSave(clientData);
+      showStatus(
+        activeClient 
+          ? 'Cliente atualizado com sucesso no banco de dados Supabase!' 
+          : 'Novo cliente cadastrado com sucesso no Supabase!', 
+        'success'
+      );
+      
+      if (!activeClient) {
+        handleClear();
+      }
+    } catch (err: any) {
+      showStatus(`Erro ao salvar no banco Supabase: ${err?.message || 'Falha na conexão'}`, 'error');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -232,12 +281,12 @@ export default function ClientForm({ activeClient, onSave, onDelete, onClear }: 
     setDocument('');
     setName('');
     setFantasyName('');
+    setSituation('ATIVA');
     setCep('');
     setStreet('');
     setNeighborhood('');
     setCity('');
     setState('');
-    setSituation('ATIVA');
     setContactPerson('');
     setPhone('');
     setEmail('');
@@ -246,11 +295,18 @@ export default function ClientForm({ activeClient, onSave, onDelete, onClear }: 
     onClear();
   };
 
-  const handleDelete = () => {
-    if (activeClient && window.confirm('Deseja realmente excluir este cliente?')) {
-      onDelete(activeClient.id);
-      handleClear();
-      showStatus('Cliente excluído.', 'info');
+  const handleDelete = async () => {
+    if (activeClient && window.confirm(`Deseja realmente excluir o cliente "${activeClient.name}" da tabela do Supabase?`)) {
+      setIsSubmitting(true);
+      try {
+        await onDelete(activeClient.id);
+        handleClear();
+        showStatus('Cliente excluído da tabela clientes do Supabase.', 'info');
+      } catch (e: any) {
+        showStatus(`Erro ao excluir: ${e?.message || 'Falha'}`, 'error');
+      } finally {
+        setIsSubmitting(false);
+      }
     }
   };
 
@@ -377,41 +433,34 @@ export default function ClientForm({ activeClient, onSave, onDelete, onClear }: 
 
           </div>
 
-          {/* Row 2 (Visible only if type is CNPJ): Nome Fantasia & Situation */}
-          <AnimatePresence mode="popLayout">
-            {type === 'CNPJ' && (
-              <motion.div 
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-                exit={{ opacity: 0, height: 0 }}
-                className="grid grid-cols-1 md:grid-cols-12 gap-4 overflow-hidden"
-              >
-                {/* Trade / Fantasy Name */}
-                <div className="md:col-span-8 flex flex-col gap-1.5">
-                  <label className="text-xs font-bold text-slate-600">Nome Fantasia</label>
-                  <input
-                    type="text"
-                    value={fantasyName}
-                    onChange={(e) => setFantasyName(e.target.value)}
-                    placeholder="Nome Fantasia / Comercial"
-                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200/80 rounded-xl text-sm outline-none hover:border-slate-300 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 focus:bg-white transition-all text-slate-800"
-                  />
-                </div>
+          {/* Row 2: Nome Fantasia & Situação Cadastral */}
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+            {/* Trade / Fantasy Name */}
+            <div className="md:col-span-8 flex flex-col gap-1.5">
+              <label className="text-xs font-bold text-slate-600">
+                {type === 'CNPJ' ? 'Nome Fantasia' : 'Nome Fantasia / Apelido'}
+              </label>
+              <input
+                type="text"
+                value={fantasyName}
+                onChange={(e) => setFantasyName(e.target.value)}
+                placeholder={type === 'CNPJ' ? 'Nome Fantasia / Comercial' : 'Nome Fantasia ou Apelido (opcional)'}
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200/80 rounded-xl text-sm outline-none hover:border-slate-300 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 focus:bg-white transition-all text-slate-800"
+              />
+            </div>
 
-                {/* Situation */}
-                <div className="md:col-span-4 flex flex-col gap-1.5">
-                  <label className="text-xs font-bold text-slate-600">Situação Cadastral</label>
-                  <input
-                    type="text"
-                    value={situation}
-                    onChange={(e) => setSituation(e.target.value)}
-                    placeholder="ATIVA, INATIVA, BAIXADA"
-                    className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200/80 rounded-xl text-sm outline-none hover:border-slate-300 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 focus:bg-white transition-all font-semibold text-emerald-600 uppercase"
-                  />
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+            {/* Situation */}
+            <div className="md:col-span-4 flex flex-col gap-1.5">
+              <label className="text-xs font-bold text-slate-600">Situação Cadastral</label>
+              <input
+                type="text"
+                value={situation}
+                onChange={(e) => setSituation(e.target.value)}
+                placeholder="ATIVA, INATIVA, BAIXADA"
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200/80 rounded-xl text-sm outline-none hover:border-slate-300 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 focus:bg-white transition-all font-semibold text-emerald-600 uppercase"
+              />
+            </div>
+          </div>
 
           {/* Row 3: CEP and Street Address */}
           <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
@@ -619,10 +668,20 @@ export default function ClientForm({ activeClient, onSave, onDelete, onClear }: 
             {/* Save Client Button */}
             <button
               type="submit"
-              className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-md shadow-indigo-200/80 hover:shadow-indigo-300/80 shrink-0"
+              disabled={isSubmitting || isSaving}
+              className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-md shadow-indigo-200/80 hover:shadow-indigo-300/80 shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <PlusCircle className="w-3.5 h-3.5" />
-              {activeClient ? 'Salvar Edição' : 'Salvar Registro'}
+              {isSubmitting || isSaving ? (
+                <>
+                  <span className="block h-3.5 w-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                  <span>Gravando no Supabase...</span>
+                </>
+              ) : (
+                <>
+                  <PlusCircle className="w-3.5 h-3.5" />
+                  <span>{activeClient ? 'Salvar Edição no Supabase' : 'Salvar Cliente no Supabase'}</span>
+                </>
+              )}
             </button>
           </div>
         </div>

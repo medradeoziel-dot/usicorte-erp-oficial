@@ -21,15 +21,24 @@ const isUuid = (v?: string | null): v is string => !!v && UUID_RE.test(v.trim())
 
 export interface SupabaseCliente {
   id?: string;
+  tipo?: 'CNPJ' | 'CPF' | string;
+  documento?: string;
   nome: string;
-  empresa?: string;
+  nome_fantasia?: string;
+  situacao?: string;
+  cep?: string;
+  endereco?: string;
+  bairro?: string;
+  cidade?: string;
+  uf?: string;
   contato?: string;
   telefone?: string;
-  "e-mail"?: string;        // coluna real tem hífen
   email?: string;
-  documento?: string;
-  endereco?: string;
-  "observações"?: string;   // coluna real tem acento
+  "e-mail"?: string;
+  habilitado?: boolean;
+  data_cadastro?: string;
+  empresa?: string;
+  "observações"?: string;
   observacoes?: string;
   criado_por?: string;
   created_by?: string;
@@ -365,37 +374,84 @@ export async function deleteUsuarioDb(identificador: {
    ========================================================================= */
 
 export function mapSupabaseToClient(c: any): Client {
-  const isCnpj = (c.documento || '').replace(/\D/g, '').length > 11;
+  const cleanDoc = (c.documento || c.document || '').replace(/\D/g, '');
+  const isCnpj = cleanDoc.length > 11 || c.tipo === 'CNPJ' || c.type === 'CNPJ';
+  const rawType = c.tipo || c.type;
+  const clientType: 'CNPJ' | 'CPF' = (rawType === 'CPF' || rawType === 'CNPJ') ? rawType : (isCnpj ? 'CNPJ' : 'CPF');
+
+  // Trata a data de cadastro para formato ISO YYYY-MM-DD
+  let regDate = c.data_cadastro || c.registration_date || c.registrationDate;
+  if (!regDate && (c.criado_em || c.created_at)) {
+    try {
+      const dt = new Date(c.criado_em || c.created_at);
+      if (!isNaN(dt.getTime())) {
+        regDate = dt.toISOString().split('T')[0];
+      }
+    } catch (e) {
+      regDate = new Date().toISOString().split('T')[0];
+    }
+  }
+  if (!regDate) {
+    regDate = new Date().toISOString().split('T')[0];
+  }
+
   return {
-    id: c.id || String(Date.now()),
-    type: isCnpj ? 'CNPJ' : 'CPF',
-    document: c.documento || '',
-    name: c.nome || c.empresa || 'Cliente sem nome',
-    fantasyName: c.empresa || '',
-    contactPerson: c.contato || '',
-    phone: c.telefone || '',
+    id: c.id ? String(c.id) : String(Date.now()),
+    type: clientType,
+    document: c.documento || c.document || '',
+    name: c.nome || c.name || c.razao_social || c.empresa || 'Cliente sem nome',
+    fantasyName: c.nome_fantasia || c.fantasy_name || c.fantasyName || c.empresa || '',
+    situation: c.situacao || c.situation || 'ATIVA',
+    cep: c.cep || '',
+    street: c.endereco || c.street || c.logradouro || '',
+    neighborhood: c.bairro || c.neighborhood || '',
+    city: c.cidade || c.city || c.municipio || '',
+    state: (c.uf || c.state || c.estado || '').toUpperCase(),
+    contactPerson: c.contato || c.contact_person || c.contactPerson || '',
+    phone: c.telefone || c.phone || c.ddd_telefone_1 || '',
     email: c.email || c['e-mail'] || '',
-    cep: '',
-    street: c.endereco || '',
-    neighborhood: '',
-    city: '',
-    state: '',
-    situation: 'Ativa',
-    enabled: true,
-    registrationDate: c.criado_em || c.created_at
-      ? new Date(c.criado_em || c.created_at).toLocaleDateString('pt-BR')
-      : new Date().toLocaleDateString('pt-BR'),
+    enabled: c.habilitado !== undefined ? Boolean(c.habilitado) : (c.enabled !== undefined ? Boolean(c.enabled) : true),
+    registrationDate: regDate,
+    // Aliases para máxima compatibilidade
+    tipo: clientType,
+    documento: c.documento || c.document || '',
+    nome: c.nome || c.name || c.razao_social || c.empresa || 'Cliente sem nome',
+    nome_fantasia: c.nome_fantasia || c.fantasy_name || c.fantasyName || c.empresa || '',
+    situacao: c.situacao || c.situation || 'ATIVA',
+    endereco: c.endereco || c.street || c.logradouro || '',
+    bairro: c.bairro || c.neighborhood || '',
+    cidade: c.cidade || c.city || c.municipio || '',
+    uf: (c.uf || c.state || c.estado || '').toUpperCase(),
+    contato: c.contato || c.contact_person || c.contactPerson || '',
+    telefone: c.telefone || c.phone || c.ddd_telefone_1 || '',
+    habilitado: c.habilitado !== undefined ? Boolean(c.habilitado) : (c.enabled !== undefined ? Boolean(c.enabled) : true),
+    data_cadastro: regDate,
   };
 }
 
 export function mapClientToSupabase(c: any): Record<string, any> {
-  // Retorna payload limpo contendo apenas as colunas válidas da tabela
+  const cleanDoc = (c.document || c.documento || '').replace(/\D/g, '');
+  const cleanCep = (c.cep || '').replace(/\D/g, '');
+  const cleanPhone = (c.phone || c.telefone || '').replace(/\D/g, '');
+  const rawDate = c.registrationDate || c.data_cadastro || new Date().toISOString().split('T')[0];
+
   return {
-    nome: c.nome || c.name || c.razao_social || c.companyName || '',
-    empresa: c.empresa || c.fantasyName || c.name || '',
-    contato: c.contato || c.contactPerson || '',
-    telefone: c.telefone || c.phone || '',
-    email: c.email || c['e-mail'] || ''
+    tipo: c.type || c.tipo || (cleanDoc.length > 11 ? 'CNPJ' : 'CPF'),
+    documento: cleanDoc,
+    nome: c.name || c.nome || c.razao_social || '',
+    nome_fantasia: c.fantasyName || c.nome_fantasia || c.empresa || '',
+    situacao: (c.situation || c.situacao || 'ATIVA').toUpperCase(),
+    cep: cleanCep,
+    endereco: c.street || c.endereco || c.logradouro || '',
+    bairro: c.neighborhood || c.bairro || '',
+    cidade: c.city || c.cidade || c.municipio || '',
+    uf: (c.state || c.uf || '').toUpperCase(),
+    contato: c.contactPerson || c.contato || '',
+    telefone: cleanPhone,
+    email: c.email || c['e-mail'] || '',
+    habilitado: c.enabled !== undefined ? Boolean(c.enabled) : (c.habilitado !== undefined ? Boolean(c.habilitado) : true),
+    data_cadastro: rawDate,
+    empresa: c.fantasyName || c.nome_fantasia || c.empresa || c.name || c.nome || ''
   };
 }
 
@@ -406,13 +462,6 @@ export async function fetchClientesDb(searchQuery?: string): Promise<Client[]> {
       .select('*')
       .order('nome', { ascending: true });
 
-    if (searchQuery && searchQuery.trim()) {
-      const cleanTerm = searchQuery.trim();
-      query = query.or(
-        `nome.ilike.%${cleanTerm}%,empresa.ilike.%${cleanTerm}%,documento.ilike.%${cleanTerm}%,email.ilike.%${cleanTerm}%`
-      );
-    }
-
     const { data, error } = await query;
 
     if (error) {
@@ -421,7 +470,20 @@ export async function fetchClientesDb(searchQuery?: string): Promise<Client[]> {
     }
 
     if (data && data.length > 0) {
-      return data.map(mapSupabaseToClient);
+      const mapped = data.map(mapSupabaseToClient);
+      if (searchQuery && searchQuery.trim()) {
+        const term = searchQuery.trim().toLowerCase();
+        return mapped.filter(c => 
+          c.name.toLowerCase().includes(term) ||
+          (c.fantasyName && c.fantasyName.toLowerCase().includes(term)) ||
+          c.document.includes(term) ||
+          c.email.toLowerCase().includes(term) ||
+          c.city.toLowerCase().includes(term) ||
+          c.phone.includes(term) ||
+          (c.contactPerson && c.contactPerson.toLowerCase().includes(term))
+        );
+      }
+      return mapped;
     }
     return [];
   } catch (err) {
@@ -453,34 +515,109 @@ export async function fetchClienteById(id: string): Promise<Client | null> {
 
 export async function saveClienteDb(client: Client | any): Promise<{ data: Client | null; error: any }> {
   try {
-    const payload = {
-      nome: client.nome || client.name || client.razao_social || '',
-      empresa: client.empresa || client.fantasyName || '',
-      contato: client.contato || client.contactPerson || '',
-      telefone: client.telefone || client.phone || '',
-      email: client.email || ''
-    };
+    const payload = mapClientToSupabase(client);
 
-    if (isUuid(client.id)) {
+    // 1. Caso seja UPDATE por UUID existente
+    if (client.id && isUuid(client.id)) {
       const { data, error } = await db
         .from('clientes')
         .update(payload)
         .eq('id', client.id)
         .select()
         .single();
-      if (error) { console.error('UPDATE clientes falhou:', error); return { data: null, error }; }
-      return { data: mapSupabaseToClient(data), error: null };
+
+      if (!error && data) {
+        return { data: mapSupabaseToClient(data), error: null };
+      }
+
+      // Fallback em caso de colunas extras ou divergência de schema
+      if (error) {
+        console.warn('UPDATE clientes com payload completo falhou, tentando payload simplificado:', error.message);
+        const minimalPayload: Record<string, any> = {
+          nome: payload.nome,
+          empresa: payload.empresa || payload.nome_fantasia || payload.nome,
+          contato: payload.contato,
+          telefone: payload.telefone,
+          email: payload.email,
+          documento: payload.documento,
+          endereco: payload.endereco
+        };
+        const { data: fbData, error: fbError } = await db
+          .from('clientes')
+          .update(minimalPayload)
+          .eq('id', client.id)
+          .select()
+          .single();
+
+        if (fbError) {
+          console.error('UPDATE clientes falhou definitivamente:', fbError);
+          return { data: null, error: fbError };
+        }
+        return { data: mapSupabaseToClient(fbData), error: null };
+      }
     }
 
-    // Ao criar um NOVO cliente: sem propriedade 'id', o Supabase gera o UUID automaticamente
+    // 2. Caso seja NOVO cliente, verifica se já existe registro com o mesmo documento para atualizar
+    if (payload.documento && payload.documento.length >= 11) {
+      const { data: existing } = await db
+        .from('clientes')
+        .select('id')
+        .eq('documento', payload.documento)
+        .maybeSingle();
+
+      if (existing?.id) {
+        const { data: updated, error: updateErr } = await db
+          .from('clientes')
+          .update(payload)
+          .eq('id', existing.id)
+          .select()
+          .single();
+
+        if (!updateErr && updated) {
+          return { data: mapSupabaseToClient(updated), error: null };
+        }
+      }
+    }
+
+    // 3. Insere novo registro na tabela 'clientes' do Supabase
     const { data, error } = await db
       .from('clientes')
       .insert(payload)
       .select()
       .single();
-    if (error) { console.error('INSERT clientes falhou:', error); return { data: null, error }; }
+
+    if (!error && data) {
+      return { data: mapSupabaseToClient(data), error: null };
+    }
+
+    // Fallback de insert com colunas compatíveis
+    if (error) {
+      console.warn('INSERT clientes com payload completo retornou erro, tentando payload simplificado:', error.message);
+      const minimalPayload: Record<string, any> = {
+        nome: payload.nome,
+        empresa: payload.empresa || payload.nome_fantasia || payload.nome,
+        contato: payload.contato,
+        telefone: payload.telefone,
+        email: payload.email,
+        documento: payload.documento,
+        endereco: payload.endereco
+      };
+      const { data: fbData, error: fbError } = await db
+        .from('clientes')
+        .insert(minimalPayload)
+        .select()
+        .single();
+
+      if (fbError) {
+        console.error('INSERT clientes falhou definitivamente:', fbError);
+        return { data: null, error: fbError };
+      }
+      return { data: mapSupabaseToClient(fbData), error: null };
+    }
+
     return { data: mapSupabaseToClient(data), error: null };
   } catch (err) {
+    console.error('Erro geral em saveClienteDb:', err);
     return { data: null, error: err };
   }
 }

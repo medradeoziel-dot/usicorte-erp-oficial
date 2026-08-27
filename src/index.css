@@ -149,6 +149,24 @@
     break-after: page !important;
   }
 
+  /* Header Centralizado da Empresa (L.M BANZATTO METAIS - ME) */
+  .company-header-centralizado {
+    display: block !important;
+    width: 100% !important;
+    margin-bottom: 2.5mm !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    color: #000 !important;
+  }
+
+  .company-header-centralizado h1 {
+    color: #000 !important;
+  }
+
+  .company-header-centralizado p {
+    color: #111 !important;
+  }
+
   /* Paginação e Repetição de Cabeçalho em Tabelas */
   table {
     border-collapse: collapse !important;

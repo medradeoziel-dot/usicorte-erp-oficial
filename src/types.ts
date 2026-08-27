@@ -1,20 +1,34 @@
 export interface Client {
-  id: string; // Unique ID (for local storage)
+  id: string; // Unique ID (UUID do Supabase ou gerado)
   type: 'CNPJ' | 'CPF';
-  document: string; // CNPJ or CPF formatted
-  name: string; // Razão Social or Client Name
-  fantasyName?: string; // Nome Fantasia (CNPJ only)
+  document: string; // CNPJ ou CPF
+  name: string; // Razão Social ou Nome do Cliente
+  fantasyName?: string; // Nome Fantasia
+  situation: string; // Situação (ATIVA, INATIVA, etc.)
   cep: string;
-  street: string;
-  neighborhood: string;
-  city: string;
-  state: string;
-  situation: string; // Ativa, Inativa, etc.
-  contactPerson?: string;
-  phone: string;
-  email: string;
-  enabled: boolean;
-  registrationDate: string;
+  street: string; // Endereço / Logradouro / Rua
+  neighborhood: string; // Bairro
+  city: string; // Cidade
+  state: string; // UF
+  contactPerson?: string; // Contato / Representante
+  phone: string; // Telefone
+  email: string; // E-mail
+  enabled: boolean; // Habilitado
+  registrationDate: string; // Data de Cadastro (YYYY-MM-DD)
+  // Aliases opcionais em português para interoperabilidade direta com o Supabase
+  tipo?: 'CNPJ' | 'CPF' | string;
+  documento?: string;
+  nome?: string;
+  nome_fantasia?: string;
+  situacao?: string;
+  endereco?: string;
+  bairro?: string;
+  cidade?: string;
+  uf?: string;
+  contato?: string;
+  telefone?: string;
+  habilitado?: boolean;
+  data_cadastro?: string;
 }
 
 export interface QuoteItem {
