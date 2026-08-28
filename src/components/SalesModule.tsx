@@ -106,7 +106,7 @@ export default function SalesModule({
   quoteToEdit,
   onClearQuoteToEdit
 }: SalesModuleProps) {
-  // Helper de geração do próximo número de cotação sequencial (Base inicial: COT-2026-0020 dando sequência a COT-2026-0019)
+  // Helper de geração do próximo número de cotação sequencial (Base inicial: COT-2026-000020 dando sequência a COT-2026-000019)
   const generateNextQuoteNumber = (quotesList?: Quote[]): string => {
     const year = new Date().getFullYear();
     let quotes: any[] = [];
@@ -120,12 +120,12 @@ export default function SalesModule({
       }
     }
 
-    // A numeração sequencial inicial parte do 19 (para a próxima sugerida ser COT-2026-0020)
+    // A numeração sequencial inicial parte do 19 (para a próxima sugerida ser COT-2026-000020)
     let max = 19;
 
     quotes.forEach((q: any) => {
       const raw = String(q.quoteNumber || q.numero || q.id || "").trim();
-      // Casamento com o padrão COT-YYYY-XXXX
+      // Casamento com o padrão COT-YYYY-XXXXXX
       const matchYear = raw.match(/COT-(\d{4})-(\d+)/i);
       if (matchYear) {
         const qYear = parseInt(matchYear[1], 10);
@@ -134,7 +134,7 @@ export default function SalesModule({
           max = num;
         }
       } else {
-        // Casamento com formato sem ano explícito (ex: COT-0025)
+        // Casamento com formato sem ano explícito (ex: COT-000025)
         const matchSimple = raw.match(/COT-(\d+)/i);
         if (matchSimple) {
           const num = parseInt(matchSimple[1], 10);
@@ -146,7 +146,7 @@ export default function SalesModule({
     });
 
     const nextSeq = max + 1;
-    return `COT-${year}-${String(nextSeq).padStart(4, "0")}`;
+    return `COT-${year}-${String(nextSeq).padStart(6, "0")}`;
   };
 
   const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNumber());
@@ -365,8 +365,9 @@ export default function SalesModule({
 
           // Atualiza a numeração sugerida se o usuário ainda não tiver customizado o campo
           setQuoteNumber(prev => {
-            const defaultInitial = `COT-${new Date().getFullYear()}-0020`;
-            if (!prev || prev === defaultInitial || prev.startsWith(`COT-${new Date().getFullYear()}-`)) {
+            const defaultInitial = `COT-${new Date().getFullYear()}-000020`;
+            const oldInitial4Digits = `COT-${new Date().getFullYear()}-0020`;
+            if (!prev || prev === defaultInitial || prev === oldInitial4Digits || prev.startsWith(`COT-${new Date().getFullYear()}-`)) {
               return generateNextQuoteNumber(combined);
             }
             return prev;
@@ -1790,7 +1791,7 @@ export default function SalesModule({
                 type="text"
                 value={quoteNumber}
                 onChange={(e) => setQuoteNumber(e.target.value.toUpperCase())}
-                placeholder="COT-2026-0020"
+                placeholder="COT-2026-000020"
                 title="Número da Cotação (pode ser alterado para qualquer valor ou formato que desejar)"
                 className="w-full bg-transparent text-xs font-mono font-black text-indigo-700 outline-none focus:text-indigo-950"
               />
