@@ -799,6 +799,27 @@ export async function fetchCotacoesDb(filtroCliente?: string, filtroStatus?: str
       return [];
     }
 
+    if (data && Array.isArray(data)) {
+      // Deleta do Supabase se existirem registros legados
+      const invalid = data.filter((c: any) => {
+        const num = String(c.numero || c.id || '');
+        return num.includes('021935') || num.includes('21935');
+      });
+      if (invalid.length > 0) {
+        invalid.forEach(async (inv: any) => {
+          if (inv.id) {
+            await db.from('cotacao_itens').delete().eq('cotacao_id', inv.id);
+            await db.from('cotacoes').delete().eq('id', inv.id);
+          }
+        });
+      }
+
+      return (data as SupabaseCotacao[]).filter((c: any) => {
+        const num = String(c.numero || c.id || '');
+        return !num.includes('021935') && !num.includes('21935');
+      });
+    }
+
     return (data as SupabaseCotacao[]) || [];
   } catch (err) {
     console.error("Erro na busca de cotações:", err);

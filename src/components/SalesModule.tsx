@@ -106,11 +106,11 @@ export default function SalesModule({
   quoteToEdit,
   onClearQuoteToEdit
 }: SalesModuleProps) {
-  // Helper de geração do próximo número de cotação sequencial (Base inicial: COT-2026-000020 dando sequência a COT-2026-000019)
+  // Geração determinística do próximo número de cotação sequencial (Início estrito: COT-2026-000020)
   const generateNextQuoteNumber = (quotesList?: Quote[]): string => {
     const year = new Date().getFullYear();
     let quotes: any[] = [];
-    if (quotesList && Array.isArray(quotesList) && quotesList.length > 0) {
+    if (quotesList && Array.isArray(quotesList)) {
       quotes = quotesList;
     } else {
       try {
@@ -120,36 +120,29 @@ export default function SalesModule({
       }
     }
 
-    // A numeração sequencial inicial parte do 19 (para a próxima sugerida ser COT-2026-000020)
-    let max = 19;
+    // Se não houver cotações válidas para o ano, inicia estritamente em 19 para a próxima ser 20 (COT-YYYY-000020)
+    let maxSequential = 19;
 
     quotes.forEach((q: any) => {
       const raw = String(q.quoteNumber || q.numero || q.id || "").trim();
-      // Casamento com o padrão COT-YYYY-XXXXXX
-      const matchYear = raw.match(/COT-(\d{4})-(\d+)/i);
+      if (raw.includes('021935') || raw.includes('21935')) return;
+
+      const matchYear = raw.match(/^COT-(\d{4})-(\d{6})$/i);
       if (matchYear) {
         const qYear = parseInt(matchYear[1], 10);
-        const num = parseInt(matchYear[2], 10);
-        if (qYear === year && !isNaN(num) && num > max) {
-          max = num;
-        }
-      } else {
-        // Casamento com formato sem ano explícito (ex: COT-000025)
-        const matchSimple = raw.match(/COT-(\d+)/i);
-        if (matchSimple) {
-          const num = parseInt(matchSimple[1], 10);
-          if (!isNaN(num) && num > max) {
-            max = num;
-          }
+        const seq = parseInt(matchYear[2], 10);
+        // Aceita sequenciais legítimos a partir de 20 e menores que 10000
+        if (qYear === year && !isNaN(seq) && seq !== 21935 && seq > maxSequential && seq < 10000) {
+          maxSequential = seq;
         }
       }
     });
 
-    const nextSeq = max + 1;
-    return `COT-${year}-${String(nextSeq).padStart(6, "0")}`;
+    const nextNumber = maxSequential + 1;
+    return `COT-${year}-${String(nextNumber).padStart(6, "0")}`;
   };
 
-  const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNumber());
+  const [numeroCotacao, setNumeroCotacao] = useState<string>('COT-2026-000020');
   const [selectedClientId, setSelectedClientId] = useState<string>('');
   const [clientName, setClientName] = useState<string>('');
   const [clientDocument, setClientDocument] = useState<string>('');
@@ -243,6 +236,21 @@ export default function SalesModule({
     };
   }, []);
 
+  // Limpeza de Storage para chaves antigas ou com cache residual ao carregar
+  useEffect(() => {
+    try {
+      const keysToCheck = ['s_orcamentos', 'cotacao_atual', 'numeroCotacao', 'quoteNumber', 'lastQuoteNumber', 'ultimoNumero'];
+      keysToCheck.forEach(key => {
+        const val = localStorage.getItem(key);
+        if (val && (val.includes('021935') || val.includes('21935'))) {
+          localStorage.removeItem(key);
+        }
+      });
+    } catch (e) {
+      console.warn('Erro ao limpar cache:', e);
+    }
+  }, []);
+
   // Load saved quotes on mount (LocalStorage + Supabase)
   useEffect(() => {
     async function loadQuotes() {
@@ -250,11 +258,21 @@ export default function SalesModule({
       const saved = localStorage.getItem('s_orcamentos');
       if (saved) {
         try {
-          localQuotes = JSON.parse(saved);
-          if (Array.isArray(localQuotes)) {
+          let parsedQuotes = JSON.parse(saved);
+          if (Array.isArray(parsedQuotes)) {
+            // Sanitiza registros legados
+            const cleanedQuotes = parsedQuotes.filter((q: any) => {
+              const str = String(q.quoteNumber || q.numero || q.id || '');
+              return !str.includes('021935') && !str.includes('21935');
+            });
+            if (cleanedQuotes.length !== parsedQuotes.length) {
+              localStorage.setItem('s_orcamentos', JSON.stringify(cleanedQuotes));
+              parsedQuotes = cleanedQuotes;
+            }
+
             // Deduplica e sanitiza o localQuotes inicial
             const localMap = new Map<string, Quote>();
-            localQuotes.forEach(lq => {
+            parsedQuotes.forEach((lq: any) => {
               const key = String(lq.quoteNumber || lq.id || '').trim().toLowerCase();
               if (key && !localMap.has(key)) {
                 localMap.set(key, {
@@ -278,7 +296,12 @@ export default function SalesModule({
         const dbQuotes = await fetchCotacoesDb();
         if (dbQuotes && dbQuotes.length > 0) {
           // Mapeia cotações vindas do Supabase com validação e fallback seguro de data
-          const mappedDbQuotes: Quote[] = dbQuotes.map(q => {
+          const mappedDbQuotes: Quote[] = dbQuotes
+            .filter(q => {
+              const num = String(q.numero || q.id || '');
+              return !num.includes('021935') && !num.includes('21935');
+            })
+            .map(q => {
             const safeDateIso = getSafeISODate(q.data || q.created_at);
             const safeCreatedAt = q.created_at && !isNaN(new Date(q.created_at).getTime())
               ? new Date(q.created_at).toISOString()
@@ -362,16 +385,6 @@ export default function SalesModule({
           const combined = Array.from(quotesMap.values());
           setSavedQuotes(combined);
           localStorage.setItem('s_orcamentos', JSON.stringify(combined));
-
-          // Atualiza a numeração sugerida se o usuário ainda não tiver customizado o campo
-          setQuoteNumber(prev => {
-            const defaultInitial = `COT-${new Date().getFullYear()}-000020`;
-            const oldInitial4Digits = `COT-${new Date().getFullYear()}-0020`;
-            if (!prev || prev === defaultInitial || prev === oldInitial4Digits || prev.startsWith(`COT-${new Date().getFullYear()}-`)) {
-              return generateNextQuoteNumber(combined);
-            }
-            return prev;
-          });
         }
       } catch (err) {
         console.warn('Banco Supabase em modo cotações offline:', err);
@@ -1429,8 +1442,8 @@ export default function SalesModule({
     }
 
     const currentQuoteObject: Quote = {
-      id: quoteNumber,
-      quoteNumber: quoteNumber,
+      id: numeroCotacao,
+      quoteNumber: numeroCotacao,
       clientId: selectedClientId || undefined,
       clientName: clientName.trim() || 'Cliente Balcão (UsiCorte)',
       clientDocument: clientDocument.trim(),
@@ -1456,8 +1469,8 @@ export default function SalesModule({
     };
 
     const existsIndex = savedQuotes.findIndex(
-      q => (q.quoteNumber && q.quoteNumber.trim().toLowerCase() === quoteNumber.trim().toLowerCase()) ||
-           (q.id && (q.id === quoteNumber || (currentQuoteObject.id && q.id === currentQuoteObject.id)))
+      q => (q.quoteNumber && q.quoteNumber.trim().toLowerCase() === numeroCotacao.trim().toLowerCase()) ||
+           (q.id && (q.id === numeroCotacao || (currentQuoteObject.id && q.id === currentQuoteObject.id)))
     );
     let updatedQuotes: Quote[];
 
@@ -1487,12 +1500,12 @@ export default function SalesModule({
     saveCotacaoDb(currentQuoteObject).then(res => {
       if (res.error) {
         console.warn('Cotação salva localmente; aviso no Supabase:', res.error);
-        setSuccessMessage(existsIndex >= 0 ? `Orçamento ${quoteNumber} atualizado no histórico (local)!` : `Orçamento ${quoteNumber} salvo no histórico (local)!`);
+        setSuccessMessage(existsIndex >= 0 ? `Orçamento ${numeroCotacao} atualizado no histórico (local)!` : `Orçamento ${numeroCotacao} salvo no histórico (local)!`);
       } else {
-        setSuccessMessage(existsIndex >= 0 ? `Orçamento ${quoteNumber} atualizado com sucesso e sincronizado! ⚡` : `Orçamento ${quoteNumber} salvo com sucesso e sincronizado! ⚡`);
+        setSuccessMessage(existsIndex >= 0 ? `Orçamento ${numeroCotacao} atualizado com sucesso e sincronizado! ⚡` : `Orçamento ${numeroCotacao} salvo com sucesso e sincronizado! ⚡`);
       }
     }).catch(() => {
-      setSuccessMessage(existsIndex >= 0 ? `Orçamento ${quoteNumber} atualizado com sucesso!` : `Orçamento ${quoteNumber} salvo com sucesso!`);
+      setSuccessMessage(existsIndex >= 0 ? `Orçamento ${numeroCotacao} atualizado com sucesso!` : `Orçamento ${numeroCotacao} salvo com sucesso!`);
     });
 
     setTimeout(() => setSuccessMessage(null), 3500);
@@ -1508,8 +1521,8 @@ export default function SalesModule({
     }
 
     const currentQuoteObject: Quote = {
-      id: quoteNumber,
-      quoteNumber: quoteNumber,
+      id: numeroCotacao,
+      quoteNumber: numeroCotacao,
       clientId: selectedClientId || undefined,
       clientName: clientName.trim() || 'Cliente Balcão (UsiCorte)',
       clientDocument: clientDocument.trim(),
@@ -1535,8 +1548,8 @@ export default function SalesModule({
     };
 
     const existsIndex = savedQuotes.findIndex(
-      q => (q.quoteNumber && q.quoteNumber.trim().toLowerCase() === quoteNumber.trim().toLowerCase()) ||
-           (q.id && (q.id === quoteNumber || (currentQuoteObject.id && q.id === currentQuoteObject.id)))
+      q => (q.quoteNumber && q.quoteNumber.trim().toLowerCase() === numeroCotacao.trim().toLowerCase()) ||
+           (q.id && (q.id === numeroCotacao || (currentQuoteObject.id && q.id === currentQuoteObject.id)))
     );
     let updatedQuotes: Quote[];
 
@@ -1556,14 +1569,14 @@ export default function SalesModule({
 
     saveCotacaoDb(currentQuoteObject).catch(() => {});
 
-    setSuccessMessage(`✅ Cotação ${quoteNumber} APROVADA! ${baixaRes.itensBaixados} itens baixados no Estoque (${baixaRes.pesoTotalBaixadoKg} kg) e R$ ${formatCurrency(grandTotal)} lançado no Contas a Receber!`);
+    setSuccessMessage(`✅ Cotação ${numeroCotacao} APROVADA! ${baixaRes.itensBaixados} itens baixados no Estoque (${baixaRes.pesoTotalBaixadoKg} kg) e R$ ${formatCurrency(grandTotal)} lançado no Contas a Receber!`);
     setTimeout(() => setSuccessMessage(null), 5000);
   };
 
   // New clean quote
   const handleNewQuote = () => {
     const newId = generateNextQuoteNumber(savedQuotes);
-    setQuoteNumber(newId);
+    setNumeroCotacao(newId);
     setSelectedClientId('');
     setClientName('');
     setClientDocument('');
@@ -1587,7 +1600,7 @@ export default function SalesModule({
   // Load a quote from history modal / edit action
   const handleLoadQuoteFromHistory = (quote: Quote) => {
     const targetNum = quote.quoteNumber || quote.id || generateNextQuoteNumber();
-    setQuoteNumber(targetNum);
+    setNumeroCotacao(targetNum);
     setSelectedClientId(quote.clientId || '');
     setClientName(quote.clientName || 'Cliente Balcão (UsiCorte)');
     setClientDocument(quote.clientDocument || '');
@@ -1642,8 +1655,8 @@ export default function SalesModule({
 
   // Current quote object for print modal
   const currentQuoteForModal: Quote = {
-    id: quoteNumber,
-    quoteNumber: quoteNumber,
+    id: numeroCotacao,
+    quoteNumber: numeroCotacao,
     clientId: selectedClientId,
     clientName: clientName || 'Cliente Balcão',
     clientDocument: clientDocument,
@@ -1674,7 +1687,7 @@ export default function SalesModule({
       onQuoteChange(currentQuoteForModal);
     }
   }, [
-    quoteNumber,
+    numeroCotacao,
     selectedClientId,
     clientName,
     clientDocument,
@@ -1788,9 +1801,10 @@ export default function SalesModule({
               </div>
 
               <input
+                id="quote-number-input"
                 type="text"
-                value={quoteNumber}
-                onChange={(e) => setQuoteNumber(e.target.value.toUpperCase())}
+                value={numeroCotacao}
+                onChange={(e) => setNumeroCotacao(e.target.value)}
                 placeholder="COT-2026-000020"
                 title="Número da Cotação (pode ser alterado para qualquer valor ou formato que desejar)"
                 className="w-full bg-transparent text-xs font-mono font-black text-indigo-700 outline-none focus:text-indigo-950"
