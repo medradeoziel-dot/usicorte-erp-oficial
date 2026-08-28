@@ -106,25 +106,50 @@ export default function SalesModule({
   quoteToEdit,
   onClearQuoteToEdit
 }: SalesModuleProps) {
-  // Quote header state
-  const generateNextQuoteNumber = () => {
-  const year = new Date().getFullYear();
-  const saved = JSON.parse(localStorage.getItem("s_orcamentos") || "[]");
-
-  let max = 0;
-
-  saved.forEach((q: any) => {
-    const match = (q.quoteNumber || "").match(/COT-\d{4}-(\d+)/);
-    if (match) {
-      const num = parseInt(match[1], 10);
-      if (num > max) max = num;
+  // Helper de geração do próximo número de cotação sequencial (Base inicial: COT-2026-0020 dando sequência a COT-2026-0019)
+  const generateNextQuoteNumber = (quotesList?: Quote[]): string => {
+    const year = new Date().getFullYear();
+    let quotes: any[] = [];
+    if (quotesList && Array.isArray(quotesList) && quotesList.length > 0) {
+      quotes = quotesList;
+    } else {
+      try {
+        quotes = JSON.parse(localStorage.getItem("s_orcamentos") || "[]");
+      } catch {
+        quotes = [];
+      }
     }
-  });
 
-  return `COT-${year}-${String(max + 1).padStart(4, "0")}`;
-};
+    // A numeração sequencial inicial parte do 19 (para a próxima sugerida ser COT-2026-0020)
+    let max = 19;
 
-const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNumber());
+    quotes.forEach((q: any) => {
+      const raw = String(q.quoteNumber || q.numero || q.id || "").trim();
+      // Casamento com o padrão COT-YYYY-XXXX
+      const matchYear = raw.match(/COT-(\d{4})-(\d+)/i);
+      if (matchYear) {
+        const qYear = parseInt(matchYear[1], 10);
+        const num = parseInt(matchYear[2], 10);
+        if (qYear === year && !isNaN(num) && num > max) {
+          max = num;
+        }
+      } else {
+        // Casamento com formato sem ano explícito (ex: COT-0025)
+        const matchSimple = raw.match(/COT-(\d+)/i);
+        if (matchSimple) {
+          const num = parseInt(matchSimple[1], 10);
+          if (!isNaN(num) && num > max) {
+            max = num;
+          }
+        }
+      }
+    });
+
+    const nextSeq = max + 1;
+    return `COT-${year}-${String(nextSeq).padStart(4, "0")}`;
+  };
+
+  const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNumber());
   const [selectedClientId, setSelectedClientId] = useState<string>('');
   const [clientName, setClientName] = useState<string>('');
   const [clientDocument, setClientDocument] = useState<string>('');
@@ -136,7 +161,7 @@ const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNu
   const [quoteDate, setQuoteDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
   const [validityDays, setValidityDays] = useState<number>(10);
   const [paymentTerms, setPaymentTerms] = useState<string>('À Vista / Pix (3% Desc.)');
-  const [quoteStatus, setQuoteStatus] = useState<Quote['status']>('Rascunho');
+  const [quoteStatus, setQuoteStatus] = useState<Quote['status']>('Pendente');
   const [observations, setObservations] = useState<string>('Preços com impostos inclusos. Material sujeito a conferência no ato do recebimento.');
 
   // Adjustments (Discount & Shipping)
@@ -337,6 +362,15 @@ const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNu
           const combined = Array.from(quotesMap.values());
           setSavedQuotes(combined);
           localStorage.setItem('s_orcamentos', JSON.stringify(combined));
+
+          // Atualiza a numeração sugerida se o usuário ainda não tiver customizado o campo
+          setQuoteNumber(prev => {
+            const defaultInitial = `COT-${new Date().getFullYear()}-0020`;
+            if (!prev || prev === defaultInitial || prev.startsWith(`COT-${new Date().getFullYear()}-`)) {
+              return generateNextQuoteNumber(combined);
+            }
+            return prev;
+          });
         }
       } catch (err) {
         console.warn('Banco Supabase em modo cotações offline:', err);
@@ -1527,7 +1561,7 @@ const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNu
 
   // New clean quote
   const handleNewQuote = () => {
-    const newId = generateNextQuoteNumber();
+    const newId = generateNextQuoteNumber(savedQuotes);
     setQuoteNumber(newId);
     setSelectedClientId('');
     setClientName('');
@@ -1540,7 +1574,7 @@ const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNu
     setQuoteDate(new Date().toISOString().split('T')[0]);
     setValidityDays(10);
     setPaymentTerms('À Vista / Pix (3% Desc.)');
-    setQuoteStatus('Rascunho');
+    setQuoteStatus('Pendente');
     setItems([]);
     setDiscountAmount(0);
     setShippingAmount(0);
@@ -1564,7 +1598,7 @@ const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNu
     setQuoteDate(getSafeISODate(quote.date || quote.createdAt));
     setValidityDays(quote.validityDays || 10);
     setPaymentTerms(quote.paymentTerms || 'À Vista / Pix (3% Desc.)');
-    setQuoteStatus(quote.status || 'Rascunho');
+    setQuoteStatus(quote.status || 'Pendente');
     setItems(quote.items || []);
     setDiscountAmount(quote.discount || 0);
     setShippingAmount(quote.shipping || 0);
@@ -1742,28 +1776,47 @@ const [quoteNumber, setQuoteNumber] = useState<string>(() => generateNextQuoteNu
           </div>
 
           <div className="flex items-center gap-3">
-            <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg min-w-[180px]">
-  <label className="text-[10px] text-slate-400 font-bold block uppercase mb-1">
-    Cotação Nº
-  </label>
+            <div className="px-3 py-2 bg-slate-50 border border-slate-200 focus-within:border-indigo-500 focus-within:bg-white rounded-lg min-w-[200px] transition-all">
+              <div className="flex items-center justify-between gap-1 mb-1">
+                <label className="text-[10px] text-slate-500 font-bold block uppercase">
+                  Cotação Nº (Editável)
+                </label>
+                <span className="text-[9px] text-indigo-600 font-semibold bg-indigo-50 px-1 py-0.2 rounded" title="Sugerido automaticamente com base no histórico. Totalmente liberado para edição manual.">
+                  Auto / Manual
+                </span>
+              </div>
 
-  <input
-    type="text"
-    value={quoteNumber}
-    onChange={(e) => setQuoteNumber(e.target.value.toUpperCase())}
-    placeholder="COT-2026-0001"
-    className="w-full bg-transparent text-xs font-mono font-black text-indigo-700 outline-none"
-  />
-</div>
+              <input
+                type="text"
+                value={quoteNumber}
+                onChange={(e) => setQuoteNumber(e.target.value.toUpperCase())}
+                placeholder="COT-2026-0020"
+                title="Número da Cotação (pode ser alterado para qualquer valor ou formato que desejar)"
+                className="w-full bg-transparent text-xs font-mono font-black text-indigo-700 outline-none focus:text-indigo-950"
+              />
+            </div>
             <select
               value={quoteStatus}
               onChange={(e) => setQuoteStatus(e.target.value as Quote['status'])}
-              className="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 outline-hidden"
+              className={`px-3 py-2 border rounded-lg text-xs font-bold transition-all outline-hidden cursor-pointer shadow-xs ${
+                quoteStatus === 'Pendente'
+                  ? 'bg-blue-50 text-blue-700 border-blue-300 ring-1 ring-blue-500/20'
+                  : quoteStatus === 'Aprovado'
+                  ? 'bg-emerald-50 text-emerald-700 border-emerald-300 ring-1 ring-emerald-500/20'
+                  : quoteStatus === 'Rascunho'
+                  ? 'bg-amber-50 text-amber-700 border-amber-300 ring-1 ring-amber-500/20'
+                  : quoteStatus === 'Faturado'
+                  ? 'bg-purple-50 text-purple-700 border-purple-300 ring-1 ring-purple-500/20'
+                  : 'bg-rose-50 text-rose-700 border-rose-300 ring-1 ring-rose-500/20'
+              }`}
+              title="Status da Cotação"
             >
-              <option value="Rascunho">🟡 Rascunho</option>
               <option value="Pendente">🔵 Pendente</option>
               <option value="Aprovado">🟢 Aprovado</option>
+              <option value="Rascunho">🟡 Rascunho</option>
+              <option value="Faturado">🟣 Faturado</option>
               <option value="Rejeitado">🔴 Rejeitado</option>
+              <option value="Cancelado">⚪ Cancelado</option>
             </select>
           </div>
         </div>

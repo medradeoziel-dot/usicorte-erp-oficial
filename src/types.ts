@@ -98,7 +98,7 @@ export interface Quote {
   date: string;
   validityDays: number;
   paymentTerms: string;
-  status: 'Rascunho' | 'Enviado' | 'Aprovado' | 'Faturado' | 'Cancelado';
+  status: 'Pendente' | 'Rascunho' | 'Enviado' | 'Aprovado' | 'Faturado' | 'Cancelado' | 'Rejeitado';
   paymentStatus?: 'Pendente' | 'Pago';
   paymentDate?: string;
   paymentMethod?: string;

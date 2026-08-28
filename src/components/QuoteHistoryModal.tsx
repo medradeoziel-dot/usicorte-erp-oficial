@@ -73,10 +73,11 @@ export default function QuoteHistoryModal({
             <CheckCircle2 className="w-3 h-3" /> Aprovado
           </span>
         );
+      case 'Pendente':
       case 'Enviado':
         return (
           <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200 flex items-center gap-1">
-            <Clock className="w-3 h-3" /> Enviado
+            <Clock className="w-3 h-3" /> {status === 'Pendente' ? 'Pendente' : 'Enviado'}
           </span>
         );
       case 'Faturado':
@@ -86,14 +87,15 @@ export default function QuoteHistoryModal({
           </span>
         );
       case 'Cancelado':
+      case 'Rejeitado':
         return (
           <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-200 flex items-center gap-1">
-            <AlertCircle className="w-3 h-3" /> Cancelado
+            <AlertCircle className="w-3 h-3" /> {status}
           </span>
         );
       default:
         return (
-          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200 flex items-center gap-1">
+          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200 flex items-center gap-1">
             Rascunho
           </span>
         );
@@ -159,7 +161,7 @@ export default function QuoteHistoryModal({
           </div>
 
           <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto">
-            {['ALL', 'Rascunho', 'Enviado', 'Aprovado', 'Faturado'].map(status => (
+            {['ALL', 'Pendente', 'Aprovado', 'Rascunho', 'Enviado', 'Faturado'].map(status => (
               <button
                 key={status}
                 onClick={() => setFilterStatus(status)}
