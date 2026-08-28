@@ -3,7 +3,7 @@ import Logo from './Logo';
 import { Client, Quote } from '../types';
 import { ScreenType } from '../App';
 import { MATERIAL_PROFILES, formatCurrency, formatWeightKg } from '../utils/calculator';
-import { Calculator, ClipboardList, Users, Package, ShoppingCart, FileText, Scale, TrendingUp, Boxes, DollarSign } from 'lucide-react';
+import { Calculator, ClipboardList, Users, Package, ShoppingCart, FileText, Scale, TrendingUp, Boxes, DollarSign, Receipt } from 'lucide-react';
 import { getMateriaisEstoque, calcularFluxoCaixa } from '../services/inventoryFinanceService';
 
 interface DashboardViewProps {
@@ -82,6 +82,14 @@ export default function DashboardView({ clients, currentQuote, trocarTela, setIs
             <div className="p-2.5 bg-emerald-500/10 text-emerald-400 rounded-xl group-hover:bg-emerald-600 group-hover:text-white transition-colors border border-emerald-500/20"><ShoppingCart className="w-5 h-5" /></div>
             <div>
               <strong className="text-xs text-slate-100 block font-bold group-hover:text-emerald-400 transition-colors">Vendas & PDV</strong>
+              <span className="text-[10px] text-slate-400">Fechamento</span>
+            </div>
+          </div>
+
+          <div onClick={() => trocarTela('fechamento')} className="bg-slate-800/80 hover:bg-slate-800 border border-slate-700/80 hover:border-blue-500 p-4 rounded-2xl cursor-pointer transition-all duration-200 flex flex-col items-center text-center gap-2 group hover:-translate-y-1 hover:shadow-xl shadow-slate-950/50">
+            <div className="p-2.5 bg-blue-500/10 text-blue-400 rounded-xl group-hover:bg-blue-600 group-hover:text-white transition-colors border border-blue-500/20"><Receipt className="w-5 h-5" /></div>
+            <div>
+              <strong className="text-xs text-slate-100 block font-bold group-hover:text-blue-400 transition-colors">Extrato & Cobrança</strong>
               <span className="text-[10px] text-slate-400">Fechamento</span>
             </div>
           </div>

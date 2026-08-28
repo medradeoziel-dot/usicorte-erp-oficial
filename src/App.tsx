@@ -18,11 +18,12 @@ import LoginModule from './components/LoginModule';
 import DailyOSModule from './components/DailyOSModule';
 import InventoryFinanceModule from './components/InventoryFinanceModule';
 import CompanySettingsModule from './components/CompanySettingsModule';
+import FechamentoCotacoesModule from './components/FechamentoCotacoesModule';
 import UsicorteCalculatorModal from './components/UsicorteCalculatorModal';
 import { MaterialProfile } from './utils/calculator';
 import { Users, FileCode } from 'lucide-react';
 
-export type ScreenType = 'home' | 'clientes' | 'produtos' | 'orcamento' | 'ordem_servico' | 'vendas' | 'relatorios' | 'estoque' | 'financeiro' | 'empresa' | 'php';
+export type ScreenType = 'home' | 'clientes' | 'produtos' | 'orcamento' | 'ordem_servico' | 'vendas' | 'relatorios' | 'estoque' | 'financeiro' | 'fechamento' | 'empresa' | 'php';
 
 export default function App() {
   const { 
@@ -40,6 +41,7 @@ export default function App() {
   const currentTime = useClock();
 
   const [currentScreen, setCurrentScreen] = useState<ScreenType>('home');
+  const [reportsTab, setReportsTab] = useState<'propostas' | 'consulta'>('propostas');
   const [selectedMaterialForQuote, setSelectedMaterialForQuote] = useState<MaterialProfile | null>(null);
   const [currentQuote, setCurrentQuote] = useState<Quote>(INITIAL_QUOTE);
   const [quoteToEdit, setQuoteToEdit] = useState<Quote | null>(null);
@@ -50,8 +52,11 @@ export default function App() {
   const [isQuickCalcOpen, setIsQuickCalcOpen] = useState<boolean>(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
 
-  const trocarTela = (nomeTela: ScreenType) => {
+  const trocarTela = (nomeTela: ScreenType, tab?: 'propostas' | 'consulta') => {
     setCurrentScreen(nomeTela);
+    if (tab) {
+      setReportsTab(tab);
+    }
     setIsMobileSidebarOpen(false);
   };
 
@@ -97,6 +102,7 @@ export default function App() {
       <div className="flex flex-1 relative overflow-hidden">
         <Sidebar 
           currentScreen={currentScreen}
+          reportsTab={reportsTab}
           isMobileSidebarOpen={isMobileSidebarOpen}
           clientsCount={clients.length}
           setIsMobileSidebarOpen={setIsMobileSidebarOpen}
@@ -178,6 +184,8 @@ export default function App() {
               clients={clients} 
               onNavigateToQuote={() => trocarTela('orcamento')} 
               onEditQuote={handleEditQuote}
+              initialTab={reportsTab}
+              onTabChange={setReportsTab}
             />
           )}
 
@@ -185,6 +193,7 @@ export default function App() {
             <InventoryFinanceModule 
               initialTab="estoque" 
               onNavigateToQuote={() => trocarTela('orcamento')} 
+              onNavigateToFechamento={() => trocarTela('fechamento')}
             />
           )}
 
@@ -192,6 +201,15 @@ export default function App() {
             <InventoryFinanceModule 
               initialTab="financeiro" 
               onNavigateToQuote={() => trocarTela('orcamento')} 
+              onNavigateToFechamento={() => trocarTela('fechamento')}
+            />
+          )}
+
+          {currentScreen === 'fechamento' && (
+            <FechamentoCotacoesModule 
+              clients={clients}
+              onNavigateToFinanceiro={() => trocarTela('financeiro')}
+              onNavigateToQuote={() => trocarTela('orcamento')}
             />
           )}
 

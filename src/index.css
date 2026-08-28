@@ -88,6 +88,31 @@
   body.print-corte .secao-proposta-resumida { display: none !important; }
   body.print-corte .secao-corte { display: block !important; }
 
+  /* Modo Extrato de Cobrança: */
+  body.print-extrato .secao-etiqueta { display: none !important; }
+  body.print-extrato .secao-pedido { display: none !important; }
+  body.print-extrato .secao-proposta { display: none !important; }
+  body.print-extrato .secao-proposta-resumida { display: none !important; }
+  body.print-extrato .secao-corte { display: none !important; }
+  body.print-extrato .secao-extrato { display: block !important; }
+
+  /* Se não estiver em modo extrato, esconde secao-extrato na impressão de outros modos */
+  body:not(.print-extrato) .secao-extrato { display: none !important; }
+
+  /* ---------------------------------------------------
+     MODELO EXTRATO DE COBRANÇA A4
+     --------------------------------------------------- */
+  .secao-extrato {
+    width: 100% !important;
+    max-width: 100% !important;
+    color: #000 !important;
+    background: #fff !important;
+    padding: 0 !important;
+    margin: 0 auto !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+
   /* ---------------------------------------------------
      MODELO 1: PROPOSTA A4 INTEIRO
      --------------------------------------------------- */

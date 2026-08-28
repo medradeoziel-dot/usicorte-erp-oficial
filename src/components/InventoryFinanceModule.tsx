@@ -79,11 +79,13 @@ type FinanceSubTab = 'fluxo' | 'receber' | 'pagar' | 'novo_lancamento';
 interface InventoryFinanceModuleProps {
   initialTab?: ActiveTab;
   onNavigateToQuote?: () => void;
+  onNavigateToFechamento?: () => void;
 }
 
 export default function InventoryFinanceModule({
   initialTab = 'estoque',
-  onNavigateToQuote
+  onNavigateToQuote,
+  onNavigateToFechamento
 }: InventoryFinanceModuleProps) {
   // Navigation State
   const [activeTab, setActiveTab] = useState<ActiveTab>(initialTab);
@@ -626,6 +628,16 @@ export default function InventoryFinanceModule({
             <RefreshCw className="w-3.5 h-3.5" />
             <span>Atualizar</span>
           </button>
+          {onNavigateToFechamento && (
+            <button
+              onClick={onNavigateToFechamento}
+              className="px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600 text-blue-300 hover:text-white border border-blue-500/40 rounded-lg text-xs font-bold shadow-sm flex items-center gap-1.5 transition-all cursor-pointer"
+              title="Acessar Fechamento & Extrato de Cotações"
+            >
+              <Receipt className="w-3.5 h-3.5 text-blue-400 hover:text-white" />
+              <span>Fechamento & Extrato</span>
+            </button>
+          )}
           {onNavigateToQuote && (
             <button
               onClick={onNavigateToQuote}
@@ -827,6 +839,16 @@ export default function InventoryFinanceModule({
             </div>
 
             <div className="flex items-center gap-2">
+              {onNavigateToFechamento && (
+                <button
+                  onClick={onNavigateToFechamento}
+                  className="px-3.5 py-2 bg-blue-600/20 hover:bg-blue-600 text-blue-300 hover:text-white border border-blue-500/40 rounded-xl text-xs font-bold shadow-md flex items-center gap-1.5 transition-all cursor-pointer"
+                  title="Acessar Fechamento & Extrato de Cotações"
+                >
+                  <Receipt className="w-4 h-4 text-blue-400 group-hover:text-white" />
+                  <span>Fechamento & Extrato</span>
+                </button>
+              )}
               <button
                 onClick={handleOpenNewMaterialModal}
                 className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-600/20 flex items-center gap-1.5 transition-all cursor-pointer"
@@ -1155,17 +1177,30 @@ export default function InventoryFinanceModule({
               <span>Contas a Pagar ({lancamentos.filter(l => l.tipo === 'despesa').length})</span>
             </button>
 
-            <button
-              onClick={() => setFinanceSubTab('novo_lancamento')}
-              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ml-auto ${
-                financeSubTab === 'novo_lancamento'
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-                  : 'bg-slate-800 text-indigo-400 hover:text-white border border-indigo-500/30'
-              }`}
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>+ Novo Lançamento</span>
-            </button>
+            <div className="flex items-center gap-2 ml-auto">
+              {onNavigateToFechamento && (
+                <button
+                  onClick={onNavigateToFechamento}
+                  className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer bg-blue-600/20 hover:bg-blue-600 text-blue-300 hover:text-white border border-blue-500/40 shadow-sm"
+                  title="Acessar Fechamento & Extrato de Cotações"
+                >
+                  <Receipt className="w-3.5 h-3.5" />
+                  <span>Fechamento & Extrato</span>
+                </button>
+              )}
+
+              <button
+                onClick={() => setFinanceSubTab('novo_lancamento')}
+                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                  financeSubTab === 'novo_lancamento'
+                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
+                    : 'bg-slate-800 text-indigo-400 hover:text-white border border-indigo-500/30'
+                }`}
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>+ Novo Lançamento</span>
+              </button>
+            </div>
           </div>
 
           {/* Sub-Aba: Dashboard Fluxo de Caixa */}

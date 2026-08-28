@@ -3,6 +3,7 @@ import {
   RetalhoEstoque, 
   MovimentacaoEstoque, 
   LancamentoFinanceiro, 
+  FormaPagamentoFinanceiro,
   Quote, 
   OrdemServico 
 } from '../types';
@@ -822,3 +823,191 @@ export function obterAlertasReposicao(): MaterialEstoque[] {
   const materiais = getMateriaisEstoque();
   return materiais.filter(m => m.pesoTotalKg <= m.estoqueMinimoKg || m.quantidade <= m.estoqueMinimoQtd);
 }
+
+// ==========================================
+// FECHAMENTO & EXTRATO DE COTAÇÕES (COBRANÇA E BAIXA)
+// ==========================================
+
+export const STORAGE_KEY_STATUS_PAGAMENTO = 's_status_pagamento_cotacoes';
+
+export interface RegistroPagamentoCotacao {
+  status: 'Pendente' | 'Pago';
+  dataPagamento?: string;
+  formaPagamento?: FormaPagamentoFinanceiro;
+  observacoes?: string;
+  valorPago?: number;
+  baixadoEm?: string;
+  lancamentoId?: string;
+}
+
+export function getPagamentosCotacoesMap(): Record<string, RegistroPagamentoCotacao> {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY_STATUS_PAGAMENTO);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (parsed && typeof parsed === 'object') return parsed;
+    }
+  } catch (e) {
+    console.error('Erro ao ler pagamentos de cotações:', e);
+  }
+  return {};
+}
+
+export function salvarPagamentosCotacoesMap(map: Record<string, RegistroPagamentoCotacao>): void {
+  try {
+    localStorage.setItem(STORAGE_KEY_STATUS_PAGAMENTO, JSON.stringify(map));
+  } catch (e) {
+    console.error('Erro ao salvar pagamentos de cotações:', e);
+  }
+}
+
+export function getStatusPagamentoCotacao(idOuNumero: string): RegistroPagamentoCotacao {
+  if (!idOuNumero) return { status: 'Pendente' };
+  const map = getPagamentosCotacoesMap();
+  const key = idOuNumero.trim().toLowerCase();
+  
+  if (map[key]) return map[key];
+  if (map[idOuNumero]) return map[idOuNumero];
+  
+  return { status: 'Pendente' };
+}
+
+export interface DadosBaixaFechamento {
+  dataPagamento: string;
+  formaPagamento: FormaPagamentoFinanceiro;
+  observacoes?: string;
+  contaDestino?: string;
+}
+
+export function darBaixaMultiplasCotacoes(
+  cotacoes: { id?: string; numero: string; cliente: string; valor: number }[],
+  dados: DadosBaixaFechamento
+): { sucesso: boolean; lancamento: LancamentoFinanceiro | null; qtdBaixadas: number; valorTotal: number; mensagem: string } {
+  if (!cotacoes || cotacoes.length === 0) {
+    return {
+      sucesso: false,
+      lancamento: null,
+      qtdBaixadas: 0,
+      valorTotal: 0,
+      mensagem: 'Nenhuma cotação selecionada para dar baixa.'
+    };
+  }
+
+  const map = getPagamentosCotacoesMap();
+  const dataHoje = dados.dataPagamento || new Date().toISOString().split('T')[0];
+  let valorTotal = 0;
+  const listaNumeros: string[] = [];
+  const nomeCliente = cotacoes[0]?.cliente || 'Cliente';
+
+  // 1. Cria o Lançamento Financeiro de Receita consolidado
+  cotacoes.forEach(c => {
+    valorTotal += Number(c.valor) || 0;
+    if (c.numero) listaNumeros.push(c.numero);
+    else if (c.id) listaNumeros.push(c.id);
+  });
+
+  valorTotal = Number(valorTotal.toFixed(2));
+
+  const docRef = listaNumeros.length <= 4 
+    ? listaNumeros.join(', ') 
+    : `${listaNumeros.slice(0, 3).join(', ')} e +${listaNumeros.length - 3} cotações`;
+
+  const lancamentoId = `fin-fech-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
+  const novoLancamento: LancamentoFinanceiro = {
+    id: lancamentoId,
+    tipo: 'receita',
+    categoria: 'venda_cotacao',
+    descricao: `Fechamento de Cotações - ${nomeCliente} (${docRef})`,
+    clienteFornecedor: nomeCliente,
+    documentoRef: docRef,
+    valor: valorTotal,
+    dataVencimento: dataHoje,
+    dataCompetencia: dataHoje,
+    dataPagamento: dataHoje,
+    formaPagamento: dados.formaPagamento,
+    status: 'pago',
+    observacoes: `Baixa em lote de ${cotacoes.length} cotação(ões). Conta de Destino: ${dados.contaDestino || 'Caixa Central'}. Obs: ${dados.observacoes || 'Fechamento de faturamento consolidado'}`,
+    criadoEm: new Date().toISOString()
+  };
+
+  // 2. Salva no financeiro
+  const lancamentosAtuais = getLancamentosFinanceiros();
+  saveLancamentosFinanceiros([novoLancamento, ...lancamentosAtuais]);
+
+  // 3. Atualiza o status individual de cada cotação para 'Pago'
+  cotacoes.forEach(c => {
+    const registro: RegistroPagamentoCotacao = {
+      status: 'Pago',
+      dataPagamento: dataHoje,
+      formaPagamento: dados.formaPagamento,
+      observacoes: dados.observacoes,
+      valorPago: Number(c.valor) || 0,
+      baixadoEm: new Date().toISOString(),
+      lancamentoId: novoLancamento.id
+    };
+
+    if (c.numero) {
+      map[c.numero.trim().toLowerCase()] = registro;
+      map[c.numero] = registro;
+    }
+    if (c.id) {
+      map[c.id.trim().toLowerCase()] = registro;
+      map[c.id] = registro;
+    }
+  });
+
+  salvarPagamentosCotacoesMap(map);
+
+  // 4. Também atualiza as cotações salvas em s_orcamentos se existirem
+  try {
+    const saved = localStorage.getItem('s_orcamentos');
+    if (saved) {
+      const quotes: Quote[] = JSON.parse(saved);
+      let alterou = false;
+      const updatedQuotes = quotes.map(q => {
+        const achou = cotacoes.some(
+          c => (c.id && c.id === q.id) || 
+               (c.numero && q.quoteNumber && c.numero.trim().toLowerCase() === q.quoteNumber.trim().toLowerCase())
+        );
+        if (achou) {
+          alterou = true;
+          return {
+            ...q,
+            paymentStatus: 'Pago' as const,
+            paymentDate: dataHoje,
+            paymentMethod: dados.formaPagamento,
+            paymentNotes: dados.observacoes,
+            updatedAt: new Date().toISOString()
+          };
+        }
+        return q;
+      });
+      if (alterou) {
+        localStorage.setItem('s_orcamentos', JSON.stringify(updatedQuotes));
+      }
+    }
+  } catch (e) {
+    console.warn('Aviso ao sincronizar quotes locais:', e);
+  }
+
+  // 5. Tenta atualizar status no Supabase de forma assíncrona
+  cotacoes.forEach(async (c) => {
+    if (c.id) {
+      try {
+        await db.from('cotacoes').update({
+          status: 'aprovado',
+          updated_at: new Date().toISOString()
+        }).eq('id', c.id);
+      } catch (err) {}
+    }
+  });
+
+  return {
+    sucesso: true,
+    lancamento: novoLancamento,
+    qtdBaixadas: cotacoes.length,
+    valorTotal,
+    mensagem: `Baixa de ${cotacoes.length} cotação(ões) no valor total de R$ ${valorTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} realizada com sucesso! Lançamento de receita gerado no Financeiro.`
+  };
+}
+

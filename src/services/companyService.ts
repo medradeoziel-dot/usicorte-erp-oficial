@@ -25,10 +25,10 @@ export const DEFAULT_COMPANY_DATA: CompanyFiscalData = {
   countryCode: '1058 - BRASIL',
 
   // 3. Contato e Mídia
-  email: 'LUAN.USICORTE@GMAIL.COM',
+  email: 'financeirousicorte@gmail.com',
   website: 'WWW.USICORTEMETAIS.COM.BR',
-  phone: '(14) 3203-1742',
-  mobile: '(14) 99880-9362',
+  phone: '(14) 99880-9362',
+  mobile: '(14) 99819-6873',
   logoUrl: '',
 
   // 4. Responsável Legal
@@ -50,8 +50,8 @@ export const DEFAULT_COMPANY_DATA: CompanyFiscalData = {
   uf: 'SP',
   ibge_cidade: '3506003',
   codigo_pais: '1058',
-  telefone: '(14) 3203-1742',
-  celular: '(14) 99880-9362',
+  telefone: '(14) 99880-9362',
+  celular: '(14) 99819-6873',
   nome_responsavel: 'MARCOS MARTINS',
   documento_responsavel: '092.345.510/0001-94'
 };
@@ -153,6 +153,17 @@ export function getLocalCompanyData(): CompanyFiscalData {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
       const parsed = JSON.parse(saved);
+      if (parsed.email && (parsed.email.toLowerCase().includes('luan.usicorte') || parsed.email.toLowerCase().includes('financeiro.usicorte'))) {
+        parsed.email = DEFAULT_COMPANY_DATA.email;
+      }
+      if (parsed.phone && (parsed.phone.includes('3203-1742') || parsed.phone.includes('32031742'))) {
+        parsed.phone = DEFAULT_COMPANY_DATA.phone;
+        parsed.telefone = DEFAULT_COMPANY_DATA.telefone;
+      }
+      if (!parsed.mobile || parsed.mobile.includes('3203-1742')) {
+        parsed.mobile = DEFAULT_COMPANY_DATA.mobile;
+        parsed.celular = DEFAULT_COMPANY_DATA.celular;
+      }
       return { ...DEFAULT_COMPANY_DATA, ...parsed };
     }
   } catch (e) {

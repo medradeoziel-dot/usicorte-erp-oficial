@@ -552,7 +552,7 @@ export default function CompanySettingsModule({ onBackToDashboard }: CompanySett
                   type="email"
                   value={formData.email}
                   onChange={(e) => handleInputChange('email', e.target.value)}
-                  placeholder="LUAN.USICORTE@GMAIL.COM"
+                  placeholder="financeirousicorte@gmail.com"
                   className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm outline-none focus:border-blue-500 text-slate-100"
                   required
                 />
@@ -575,12 +575,12 @@ export default function CompanySettingsModule({ onBackToDashboard }: CompanySett
 
               {/* Telefone Fixo */}
               <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-semibold text-slate-300">Telefone Fixo Comercial *</label>
+                <label className="text-xs font-semibold text-slate-300">Telefone Comercial 1 *</label>
                 <input
                   type="text"
                   value={formatPhone(formData.phone)}
                   onChange={(e) => handleInputChange('phone', formatPhone(e.target.value))}
-                  placeholder="(14) 3203-1742"
+                  placeholder="(14) 99880-9362"
                   className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm outline-none focus:border-blue-500 text-slate-100 font-mono"
                   required
                 />
@@ -588,12 +588,12 @@ export default function CompanySettingsModule({ onBackToDashboard }: CompanySett
 
               {/* Celular / WhatsApp */}
               <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-semibold text-slate-300">Celular / WhatsApp Comercial</label>
+                <label className="text-xs font-semibold text-slate-300">Telefone / WhatsApp 2</label>
                 <input
                   type="text"
                   value={formatPhone(formData.mobile || '')}
                   onChange={(e) => handleInputChange('mobile', formatPhone(e.target.value))}
-                  placeholder="(14) 99880-9362"
+                  placeholder="(14) 99819-6873"
                   className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm outline-none focus:border-blue-500 text-slate-100 font-mono"
                 />
               </div>

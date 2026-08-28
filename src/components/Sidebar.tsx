@@ -9,26 +9,30 @@ import {
   ClipboardList, 
   ShoppingCart, 
   FileText, 
+  Search,
   FileCode, 
   Boxes,
   DollarSign,
   Building2,
   Scissors,
+  Receipt,
   X 
 } from 'lucide-react';
 import { getMateriaisEstoque } from '../services/inventoryFinanceService';
 
 interface SidebarProps {
   currentScreen: ScreenType;
+  reportsTab?: 'propostas' | 'consulta';
   isMobileSidebarOpen: boolean;
   clientsCount: number;
   setIsMobileSidebarOpen: (val: boolean) => void;
-  trocarTela: (screen: ScreenType) => void;
+  trocarTela: (screen: ScreenType, tab?: 'propostas' | 'consulta') => void;
   setIsQuickCalcOpen: (val: boolean) => void;
 }
 
 export default function Sidebar({
   currentScreen,
+  reportsTab = 'propostas',
   isMobileSidebarOpen,
   clientsCount,
   setIsMobileSidebarOpen,
@@ -160,16 +164,45 @@ export default function Sidebar({
           <span>Caixa & Financeiro</span>
         </button>
 
+        <button 
+          onClick={() => trocarTela('fechamento')}
+          className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer w-full text-left ${
+            currentScreen === 'fechamento' ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30 font-bold' : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+          }`}
+        >
+          <div className="flex items-center gap-3">
+            <Receipt className="w-4 h-4 shrink-0 text-blue-400" />
+            <span>Fechamento & Extrato</span>
+          </div>
+          <span className="text-[9px] bg-blue-500/20 text-blue-300 border border-blue-500/30 px-1 py-0.5 rounded font-mono font-bold">
+            Cobrança
+          </span>
+        </button>
+
         <div className="text-[10px] uppercase font-bold tracking-wider text-slate-400 px-3 pt-4 pb-1">Gestão & Fiscal</div>
 
         <button 
-          onClick={() => trocarTela('relatorios')}
+          onClick={() => trocarTela('relatorios', 'propostas')}
           className={`flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer w-full text-left ${
-            currentScreen === 'relatorios' ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30' : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+            currentScreen === 'relatorios' && reportsTab === 'propostas' 
+              ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30' 
+              : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
           }`}
         >
-          <FileText className="w-4 h-4 shrink-0" />
-          <span>Relatórios & Propostas</span>
+          <FileText className="w-4 h-4 shrink-0 text-blue-400" />
+          <span>📄 Emissão de Propostas & Etiquetas</span>
+        </button>
+
+        <button 
+          onClick={() => trocarTela('relatorios', 'consulta')}
+          className={`flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer w-full text-left ${
+            currentScreen === 'relatorios' && reportsTab === 'consulta' 
+              ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30' 
+              : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+          }`}
+        >
+          <Search className="w-4 h-4 shrink-0 text-emerald-400" />
+          <span>🔍 Consulta & Relatório Geral</span>
         </button>
 
         <button 

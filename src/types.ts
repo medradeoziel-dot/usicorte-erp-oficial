@@ -99,6 +99,10 @@ export interface Quote {
   validityDays: number;
   paymentTerms: string;
   status: 'Rascunho' | 'Enviado' | 'Aprovado' | 'Faturado' | 'Cancelado';
+  paymentStatus?: 'Pendente' | 'Pago';
+  paymentDate?: string;
+  paymentMethod?: string;
+  paymentNotes?: string;
   items: QuoteItem[];
   discount: number; // Desconto em R$
   discountAmount?: number;
@@ -227,6 +231,7 @@ export type TipoLancamento = 'receita' | 'despesa';
 
 export type CategoriaLancamento = 
   | 'venda_cotacao' 
+  | 'fechamento_cotacoes'
   | 'ordem_servico' 
   | 'compra_chapa' 
   | 'custo_operacional' 
@@ -288,10 +293,10 @@ export interface CompanyFiscalData {
   countryCode?: string; // Código País (1058 - BRASIL)
 
   // Contato e Mídia
-  email: string; // E-mail (LUAN.USICORTE@GMAIL.COM)
+  email: string; // E-mail (financeirousicorte@gmail.com)
   website?: string; // Website (WWW.USICORTEMETAIS.COM.BR)
-  phone: string; // Telefone ((14) 3203-1742)
-  mobile?: string; // Celular / WhatsApp ((14) 99880-9362)
+  phone: string; // Telefone ((14) 99880-9362)
+  mobile?: string; // Celular / WhatsApp ((14) 99819-6873)
   logoUrl?: string; // Upload da Logomarca da Empresa (Base64 ou URL)
 
   // Responsável Legal

@@ -113,7 +113,7 @@ export default function CompanyHeader({
               compact ? 'text-[8.5px] sm:text-[10px]' : 'text-[9.5px] sm:text-xs'
             }`}
           >
-            FONE: {activeCompany.phone || DEFAULT_COMPANY_DATA.phone} {activeCompany.mobile ? `/ ${activeCompany.mobile} WhatsApp` : ''} / {activeCompany.email || DEFAULT_COMPANY_DATA.email}
+            FONE: {activeCompany.phone || DEFAULT_COMPANY_DATA.phone}{activeCompany.mobile && activeCompany.mobile !== activeCompany.phone ? ` / ${activeCompany.mobile}` : ''} / {activeCompany.email || DEFAULT_COMPANY_DATA.email}
           </p>
         </div>
 

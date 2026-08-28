@@ -56,6 +56,8 @@ interface ReportsModuleProps {
   clients?: Client[];
   onNavigateToQuote?: () => void;
   onEditQuote?: (quote: Quote) => void;
+  initialTab?: 'propostas' | 'consulta';
+  onTabChange?: (tab: 'propostas' | 'consulta') => void;
 }
 
 export type StatusProposta = 'rascunho' | 'pendente' | 'aprovado' | 'rejeitado';
@@ -96,9 +98,29 @@ const STATUS_STYLES: Record<StatusProposta, string> = {
 // Sample technical blueprint drawing in base64 SVG
 const SAMPLE_DRAWING_BASE64 = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="100%" height="100%"><rect width="200" height="200" fill="%23f8fafc" stroke="%23cbd5e1" stroke-width="2"/><circle cx="100" cy="100" r="60" fill="none" stroke="%232563eb" stroke-width="2" stroke-dasharray="4,2"/><circle cx="100" cy="100" r="35" fill="%23dbeafe" stroke="%231e40af" stroke-width="2.5"/><line x1="20" y1="100" x2="180" y2="100" stroke="%23ef4444" stroke-width="1" stroke-dasharray="3,3"/><line x1="100" y1="20" x2="100" y2="180" stroke="%23ef4444" stroke-width="1" stroke-dasharray="3,3"/><circle cx="100" cy="100" r="3" fill="%23ef4444"/><text x="100" y="32" font-family="monospace" font-size="10" text-anchor="middle" font-weight="bold" fill="%231e293b">Ø 120 ±0.05</text><text x="100" y="104" font-family="monospace" font-size="9" text-anchor="middle" font-weight="bold" fill="%231e40af">Ø 70 mm</text><text x="100" y="188" font-family="sans-serif" font-size="8" text-anchor="middle" fill="%2364748b">CORTE / USINAGEM CNC</text></svg>`;
 
-export default function ReportsModule({ currentQuote, clients = [], onNavigateToQuote, onEditQuote }: ReportsModuleProps) {
+export default function ReportsModule({ 
+  currentQuote, 
+  clients = [], 
+  onNavigateToQuote, 
+  onEditQuote,
+  initialTab = 'propostas',
+  onTabChange
+}: ReportsModuleProps) {
   // Navigation tab: 'propostas' | 'consulta'
-  const [activeTab, setActiveTab] = useState<'propostas' | 'consulta'>('propostas');
+  const [activeTab, setActiveTab] = useState<'propostas' | 'consulta'>(initialTab);
+
+  const switchTab = (tab: 'propostas' | 'consulta') => {
+    setActiveTab(tab);
+    if (onTabChange) {
+      onTabChange(tab);
+    }
+  };
+
+  useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab]);
 
   // Cotação ativa específica (carregada do banco por ID/URL ou cotação atual)
   const [activeQuote, setActiveQuote] = useState<Quote>(currentQuote);
@@ -1957,7 +1979,7 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
                 SOB CNPJ: 25.038.430/0001-23
               </p>
               <p className="text-[5px] font-semibold text-slate-800 leading-tight mt-0.5 font-sans">
-                (14)3203-1742   (14)99880-9362   (14)99925-7633
+                (14) 99880-9362   (14) 99819-6873
               </p>
               <div className="text-xs font-bold text-slate-900 mt-1 pt-1 border-t border-slate-200">
                 PEDIDO Nº: <span className="font-mono font-black text-blue-900 rel-numero">{displayQuote.quoteNumber || displayQuote.id || 'COT-2026-9663'}</span>
@@ -2212,7 +2234,7 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
       <div className="btn-no-print flex items-center justify-between border-b border-slate-800 pb-3 gap-3 flex-wrap">
         <div className="flex items-center gap-2">
           <button
-            onClick={() => setActiveTab('propostas')}
+            onClick={() => switchTab('propostas')}
             className={`px-4 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 transition-all cursor-pointer ${
               activeTab === 'propostas'
                 ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30'
@@ -2224,7 +2246,7 @@ export default function ReportsModule({ currentQuote, clients = [], onNavigateTo
           </button>
 
           <button
-            onClick={() => setActiveTab('consulta')}
+            onClick={() => switchTab('consulta')}
             className={`px-4 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 transition-all cursor-pointer ${
               activeTab === 'consulta'
                 ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30'

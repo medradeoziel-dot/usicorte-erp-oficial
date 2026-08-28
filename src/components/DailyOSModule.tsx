@@ -210,7 +210,7 @@ export default function DailyOSModule({ clients, onNavigateToClients }: DailyOSM
         <div class="header" style="text-align: center; border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 15px;">
           <h1 style="font-size: 18px; font-weight: 900; text-transform: uppercase; margin: 0; color: #000;">L.M BANZATTO METAIS - ME</h1>
           <p style="font-size: 13px; font-weight: bold; margin: 3px 0 0 0; color: #111;">SOB CNPJ: 25.038.430/0001-23</p>
-          <p style="font-size: 11px; font-weight: 600; margin: 3px 0 0 0; color: #333;">FONE:(14) 3203-1742 Fixo / (14) 99880-9362 Luan - Proprietário / (14) 99819-6873 / (14) 99925-7633 /</p>
+          <p style="font-size: 11px; font-weight: 600; margin: 3px 0 0 0; color: #333;">FONE: (14) 99880-9362 / (14) 99819-6873 / financeirousicorte@gmail.com</p>
           <div class="logo-sub" style="font-size: 13px; font-weight: bold; color: #1e3a8a; margin-top: 8px; text-transform: uppercase;">ORDEM DE SERVIÇO DIÁRIA #${os.id}</div>
         </div>
 
