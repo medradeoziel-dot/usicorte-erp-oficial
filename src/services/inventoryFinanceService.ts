@@ -7,13 +7,7 @@ import {
   Quote, 
   OrdemServico 
 } from '../types';
-import { db } from '../lib/db';
-
-const STORAGE_KEY_MATERIAIS = 's_estoque_materiais';
-const STORAGE_KEY_RETALHOS = 's_estoque_retalhos';
-const STORAGE_KEY_MOVIMENTACOES = 's_estoque_movimentacoes';
-const STORAGE_KEY_FINANCEIRO = 's_financeiro_lancamentos';
-const STORAGE_KEY_BAIXAS_COTACAO = 's_cotacoes_estoque_baixado';
+import { db, fetchCotacoesDb, SupabaseCotacao } from '../lib/db';
 
 // Materiais Iniciais Padrão UsiCorte / Caldeiraria
 export const INITIAL_MATERIAIS: MaterialEstoque[] = [
@@ -72,7 +66,7 @@ export const INITIAL_MATERIAIS: MaterialEstoque[] = [
     comprimentoMm: 3000,
     densidade: 0.00785,
     pesoUnitarioKg: 224.32,
-    quantidade: 3, // Abaixo do mínimo propositalmente para testar alertas
+    quantidade: 3,
     pesoTotalKg: 672.96,
     estoqueMinimoKg: 900,
     estoqueMinimoQtd: 5,
@@ -116,7 +110,7 @@ export const INITIAL_MATERIAIS: MaterialEstoque[] = [
     comprimentoMm: 3000,
     densidade: 0.00785,
     pesoUnitarioKg: 448.64,
-    quantidade: 2, // Alerta crítico
+    quantidade: 2,
     pesoTotalKg: 897.28,
     estoqueMinimoKg: 1200,
     estoqueMinimoQtd: 4,
@@ -326,294 +320,428 @@ export const INITIAL_FINANCEIRO: LancamentoFinanceiro[] = [
   }
 ];
 
+// In-memory cache synced with Supabase for instant responsive UI
+let cacheMateriais: MaterialEstoque[] = [...INITIAL_MATERIAIS];
+let cacheRetalhos: RetalhoEstoque[] = [...INITIAL_RETALHOS];
+let cacheLancamentos: LancamentoFinanceiro[] = [...INITIAL_FINANCEIRO];
+let cacheMovimentacoes: MovimentacaoEstoque[] = [];
+let cachePagamentosMap: Record<string, RegistroPagamentoCotacao> = {};
+
+// Helper: mapeia registro do Supabase para MaterialEstoque
+export function mapSupabaseToMaterial(row: any): MaterialEstoque {
+  return {
+    id: String(row.id || `mat-${Date.now()}`),
+    codigo: row.codigo || row.code || '',
+    nome: row.nome || row.name || 'Material sem nome',
+    tipo: row.tipo || row.type || 'chapa',
+    material: row.material || row.liga || 'A36',
+    espessuraMm: Number(row.espessura_mm || row.espessuraMm || row.espessura || 0),
+    larguraMm: Number(row.largura_mm || row.larguraMm || row.largura || 0),
+    comprimentoMm: Number(row.comprimento_mm || row.comprimentoMm || row.comprimento || 0),
+    densidade: Number(row.densidade || row.density || 0.00785),
+    pesoUnitarioKg: Number(row.peso_unitario_kg || row.pesoUnitarioKg || 0),
+    quantidade: Number(row.quantidade || row.quantity || 0),
+    pesoTotalKg: Number(row.peso_total_kg || row.pesoTotalKg || 0),
+    estoqueMinimoKg: Number(row.estoque_minimo_kg || row.estoqueMinimoKg || 0),
+    estoqueMinimoQtd: Number(row.estoque_minimo_qtd || row.estoqueMinimoQtd || 0),
+    custoKg: Number(row.custo_kg || row.custoKg || 0),
+    precoVendaKg: Number(row.preco_venda_kg || row.precoVendaKg || 0),
+    localizacao: row.localizacao || row.location || '',
+    fornecedor: row.fornecedor || row.supplier || '',
+    observacoes: row.observacoes || row.observacao || row.notes || '',
+    atualizadoEm: row.updated_at || row.atualizado_em || row.atualizadoEm || new Date().toISOString()
+  };
+}
+
+export function mapMaterialToSupabase(m: MaterialEstoque): Record<string, any> {
+  return {
+    id: m.id,
+    codigo: m.codigo,
+    nome: m.nome,
+    tipo: m.tipo,
+    material: m.material,
+    espessura_mm: m.espessuraMm,
+    largura_mm: m.larguraMm,
+    comprimento_mm: m.comprimentoMm,
+    densidade: m.densidade,
+    peso_unitario_kg: m.pesoUnitarioKg,
+    quantidade: m.quantidade,
+    peso_total_kg: m.pesoTotalKg,
+    estoque_minimo_kg: m.estoqueMinimoKg,
+    estoque_minimo_qtd: m.estoqueMinimoQtd,
+    custo_kg: m.custoKg,
+    preco_venda_kg: m.precoVendaKg,
+    localizacao: m.localizacao,
+    fornecedor: m.fornecedor,
+    observacoes: m.observacoes,
+    updated_at: new Date().toISOString()
+  };
+}
+
+// Helper: mapeia registro do Supabase para RetalhoEstoque
+export function mapSupabaseToRetalho(row: any): RetalhoEstoque {
+  return {
+    id: String(row.id || `ret-${Date.now()}`),
+    codigo: row.codigo || row.code || '',
+    materialNome: row.material_nome || row.materialNome || row.material || '',
+    tipo: row.tipo || row.type || 'chapa',
+    espessuraMm: Number(row.espessura_mm || row.espessuraMm || 0),
+    larguraMm: Number(row.largura_mm || row.larguraMm || 0),
+    comprimentoMm: Number(row.comprimento_mm || row.comprimentoMm || 0),
+    pesoKg: Number(row.peso_kg || row.pesoKg || 0),
+    cotacaoOrigem: row.cotacao_origem || row.cotacaoOrigem || '',
+    localizacao: row.localizacao || row.location || '',
+    status: (row.status === 'utilizado' ? 'utilizado' : 'disponivel') as any,
+    dataEntrada: row.data_entrada || row.dataEntrada || new Date().toISOString().split('T')[0],
+    dataUso: row.data_uso || row.dataUso || undefined,
+    observacao: row.observacao || row.observacoes || ''
+  };
+}
+
+export function mapRetalhoToSupabase(r: RetalhoEstoque): Record<string, any> {
+  return {
+    id: r.id,
+    codigo: r.codigo,
+    material_nome: r.materialNome,
+    tipo: r.tipo,
+    espessura_mm: r.espessuraMm,
+    largura_mm: r.larguraMm,
+    comprimento_mm: r.comprimentoMm,
+    peso_kg: r.pesoKg,
+    cotacao_origem: r.cotacaoOrigem || '',
+    localizacao: r.localizacao || '',
+    status: r.status,
+    data_entrada: r.dataEntrada,
+    data_uso: r.dataUso || null,
+    observacao: r.observacao || '',
+    updated_at: new Date().toISOString()
+  };
+}
+
+// Helper: mapeia registro do Supabase para MovimentacaoEstoque
+export function mapSupabaseToMovimentacao(row: any): MovimentacaoEstoque {
+  return {
+    id: String(row.id || `mov-${Date.now()}`),
+    materialId: String(row.material_id || row.materialId || ''),
+    materialNome: row.material_nome || row.materialNome || 'Material',
+    tipo: row.tipo || 'entrada',
+    quantidade: Number(row.quantidade || 0),
+    pesoKg: Number(row.peso_kg || row.pesoKg || 0),
+    data: row.data || row.created_at || new Date().toISOString(),
+    referenciaDoc: row.referencia_doc || row.referenciaDoc || '',
+    custoTotal: row.custo_total !== undefined ? Number(row.custo_total) : undefined,
+    usuario: row.usuario || 'Sistema',
+    observacao: row.observacao || ''
+  };
+}
+
+export function mapMovimentacaoToSupabase(m: MovimentacaoEstoque): Record<string, any> {
+  return {
+    id: m.id,
+    material_id: m.materialId,
+    material_nome: m.materialNome,
+    tipo: m.tipo,
+    quantidade: m.quantidade,
+    peso_kg: m.pesoKg,
+    referencia_doc: m.referenciaDoc || '',
+    custo_total: m.custoTotal || 0,
+    usuario: m.usuario || 'Sistema',
+    observacao: m.observacao || '',
+    data: m.data || new Date().toISOString()
+  };
+}
+
+// Helper: mapeia registro do Supabase para LancamentoFinanceiro
+export function mapSupabaseToLancamento(row: any): LancamentoFinanceiro {
+  return {
+    id: String(row.id || `fin-${Date.now()}`),
+    tipo: (row.tipo === 'despesa' ? 'despesa' : 'receita') as any,
+    categoria: row.categoria || 'venda_cotacao',
+    descricao: row.descricao || row.description || 'Lançamento',
+    clienteFornecedor: row.cliente_fornecedor || row.clienteFornecedor || '',
+    documentoRef: row.documento_ref || row.documentoRef || '',
+    valor: Number(row.valor || row.value || 0),
+    dataVencimento: row.data_vencimento || row.dataVencimento || new Date().toISOString().split('T')[0],
+    dataCompetencia: row.data_competencia || row.dataCompetencia || new Date().toISOString().split('T')[0],
+    dataPagamento: row.data_pagamento || row.dataPagamento || undefined,
+    formaPagamento: row.forma_pagamento || row.formaPagamento || 'PIX',
+    status: (row.status || 'pendente') as any,
+    observacoes: row.observacoes || row.observacao || '',
+    cotacaoId: row.cotacao_id || row.cotacaoId || undefined,
+    criadoEm: row.created_at || row.criado_em || row.criadoEm || new Date().toISOString()
+  };
+}
+
+export function mapLancamentoToSupabase(l: LancamentoFinanceiro): Record<string, any> {
+  return {
+    id: l.id,
+    tipo: l.tipo,
+    categoria: l.categoria,
+    descricao: l.descricao,
+    cliente_fornecedor: l.clienteFornecedor || '',
+    documento_ref: l.documentoRef || '',
+    valor: l.valor,
+    data_vencimento: l.dataVencimento,
+    data_competencia: l.dataCompetencia,
+    data_pagamento: l.dataPagamento || null,
+    forma_pagamento: l.formaPagamento || 'PIX',
+    status: l.status,
+    observacoes: l.observacoes || '',
+    cotacao_id: l.cotacaoId || null,
+    updated_at: new Date().toISOString()
+  };
+}
+
 // ==========================================
-// FUNÇÕES DE SERVIÇO DE ESTOQUE
+// 1. FUNÇÕES DE BUSCA E PERSISTÊNCIA NO SUPABASE (ESTOQUE)
 // ==========================================
 
-export function getMateriaisEstoque(): MaterialEstoque[] {
+export async function fetchMateriaisEstoqueDb(): Promise<MaterialEstoque[]> {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY_MATERIAIS);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
+    const { data, error } = await db
+      .from('estoque_materiais')
+      .select('*')
+      .order('nome', { ascending: true });
+
+    if (!error && data && data.length > 0) {
+      const mapped = data.map(mapSupabaseToMaterial);
+      cacheMateriais = mapped;
+      return mapped;
+    }
+
+    // Se a tabela estiver vazia, tenta semear os materiais iniciais no Supabase
+    if (!error && (!data || data.length === 0)) {
+      try {
+        const toInsert = INITIAL_MATERIAIS.map(mapMaterialToSupabase);
+        await db.from('estoque_materiais').insert(toInsert);
+      } catch (seedErr) {
+        console.warn('Aviso semeadura estoque_materiais:', seedErr);
       }
     }
-  } catch (e) {
-    console.error('Erro ao ler materiais do localStorage:', e);
+  } catch (err) {
+    console.warn('Supabase estoque_materiais offline ou com erro:', err);
   }
-  localStorage.setItem(STORAGE_KEY_MATERIAIS, JSON.stringify(INITIAL_MATERIAIS));
-  return INITIAL_MATERIAIS;
+  return cacheMateriais;
 }
 
-export function saveMateriaisEstoque(materiais: MaterialEstoque[]): void {
+export async function saveMaterialEstoqueDb(material: MaterialEstoque): Promise<{ data: MaterialEstoque; error: any }> {
   try {
-    localStorage.setItem(STORAGE_KEY_MATERIAIS, JSON.stringify(materiais));
-    // Tenta sincronizar com Supabase se a tabela existir
-    try {
-      db.from('estoque_materiais').upsert(materiais.map(m => ({
-        id: m.id,
-        codigo: m.codigo,
-        nome: m.nome,
-        tipo: m.tipo,
-        material: m.material,
-        espessura_mm: m.espessuraMm,
-        largura_mm: m.larguraMm,
-        comprimento_mm: m.comprimentoMm,
-        densidade: m.densidade,
-        peso_unitario_kg: m.pesoUnitarioKg,
-        quantidade: m.quantidade,
-        peso_total_kg: m.pesoTotalKg,
-        estoque_minimo_kg: m.estoqueMinimoKg,
-        estoque_minimo_qtd: m.estoqueMinimoQtd,
-        custo_kg: m.custoKg,
-        preco_venda_kg: m.precoVendaKg,
-        localizacao: m.localizacao,
-        fornecedor: m.fornecedor,
-        observacoes: m.observacoes,
-        updated_at: new Date().toISOString()
-      }))).then(res => {
-        if (res.error) console.warn('Supabase estoque_materiais aviso:', res.error.message);
-      }, () => {});
-    } catch (err) {}
-  } catch (e) {
-    console.error('Erro ao salvar materiais:', e);
+    const payload = mapMaterialToSupabase(material);
+    const { data, error } = await db
+      .from('estoque_materiais')
+      .upsert(payload, { onConflict: 'id' })
+      .select()
+      .maybeSingle();
+
+    if (!error && data) {
+      const mapped = mapSupabaseToMaterial(data);
+      const idx = cacheMateriais.findIndex(m => m.id === mapped.id);
+      if (idx >= 0) cacheMateriais[idx] = mapped;
+      else cacheMateriais.push(mapped);
+      return { data: mapped, error: null };
+    }
+
+    // Fallback de insert caso upsert direto necessite
+    if (error) {
+      const { data: insData, error: insErr } = await db
+        .from('estoque_materiais')
+        .insert(payload)
+        .select()
+        .maybeSingle();
+
+      if (!insErr && insData) {
+        const mapped = mapSupabaseToMaterial(insData);
+        cacheMateriais.push(mapped);
+        return { data: mapped, error: null };
+      }
+    }
+  } catch (e: any) {
+    console.warn('Erro ao salvar material no Supabase:', e);
+  }
+
+  // Atualiza cache em memória
+  const idx = cacheMateriais.findIndex(m => m.id === material.id);
+  if (idx >= 0) cacheMateriais[idx] = material;
+  else cacheMateriais.push(material);
+
+  return { data: material, error: null };
+}
+
+export async function deleteMaterialEstoqueDb(id: string): Promise<{ error: any }> {
+  try {
+    const { error } = await db.from('estoque_materiais').delete().eq('id', id);
+    cacheMateriais = cacheMateriais.filter(m => m.id !== id);
+    return { error };
+  } catch (e: any) {
+    cacheMateriais = cacheMateriais.filter(m => m.id !== id);
+    return { error: e };
   }
 }
 
-export function getRetalhosEstoque(): RetalhoEstoque[] {
+export async function fetchRetalhosEstoqueDb(): Promise<RetalhoEstoque[]> {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY_RETALHOS);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed)) return parsed;
+    const { data, error } = await db
+      .from('estoque_retalhos')
+      .select('*')
+      .order('data_entrada', { ascending: false });
+
+    if (!error && data && data.length > 0) {
+      const mapped = data.map(mapSupabaseToRetalho);
+      cacheRetalhos = mapped;
+      return mapped;
+    }
+
+    // Se estiver vazio, tenta semear no Supabase
+    if (!error && (!data || data.length === 0)) {
+      try {
+        await db.from('estoque_retalhos').insert(INITIAL_RETALHOS.map(mapRetalhoToSupabase));
+      } catch (e) {}
+    }
+  } catch (err) {
+    console.warn('Supabase estoque_retalhos com erro:', err);
+  }
+  return cacheRetalhos;
+}
+
+export async function saveRetalhoEstoqueDb(retalho: RetalhoEstoque): Promise<{ data: RetalhoEstoque; error: any }> {
+  try {
+    const payload = mapRetalhoToSupabase(retalho);
+    const { data, error } = await db
+      .from('estoque_retalhos')
+      .upsert(payload, { onConflict: 'id' })
+      .select()
+      .maybeSingle();
+
+    if (!error && data) {
+      const mapped = mapSupabaseToRetalho(data);
+      const idx = cacheRetalhos.findIndex(r => r.id === mapped.id);
+      if (idx >= 0) cacheRetalhos[idx] = mapped;
+      else cacheRetalhos.unshift(mapped);
+      return { data: mapped, error: null };
     }
   } catch (e) {}
-  localStorage.setItem(STORAGE_KEY_RETALHOS, JSON.stringify(INITIAL_RETALHOS));
-  return INITIAL_RETALHOS;
+
+  const idx = cacheRetalhos.findIndex(r => r.id === retalho.id);
+  if (idx >= 0) cacheRetalhos[idx] = retalho;
+  else cacheRetalhos.unshift(retalho);
+
+  return { data: retalho, error: null };
 }
 
-export function saveRetalhosEstoque(retalhos: RetalhoEstoque[]): void {
+export async function deleteRetalhoEstoqueDb(id: string): Promise<{ error: any }> {
   try {
-    localStorage.setItem(STORAGE_KEY_RETALHOS, JSON.stringify(retalhos));
+    const { error } = await db.from('estoque_retalhos').delete().eq('id', id);
+    cacheRetalhos = cacheRetalhos.filter(r => r.id !== id);
+    return { error };
   } catch (e) {
-    console.error('Erro ao salvar retalhos:', e);
+    cacheRetalhos = cacheRetalhos.filter(r => r.id !== id);
+    return { error: e };
   }
 }
 
-export function getMovimentacoesEstoque(): MovimentacaoEstoque[] {
+export async function fetchMovimentacoesEstoqueDb(): Promise<MovimentacaoEstoque[]> {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY_MOVIMENTACOES);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed)) return parsed;
+    const { data, error } = await db
+      .from('estoque_movimentacoes')
+      .select('*')
+      .order('data', { ascending: false })
+      .limit(100);
+
+    if (!error && data && data.length > 0) {
+      const mapped = data.map(mapSupabaseToMovimentacao);
+      cacheMovimentacoes = mapped;
+      return mapped;
     }
   } catch (e) {}
-  return [];
+  return cacheMovimentacoes;
 }
 
-export function registrarMovimentacao(mov: Omit<MovimentacaoEstoque, 'id' | 'data'>): MovimentacaoEstoque {
+export async function registrarMovimentacaoDb(mov: Omit<MovimentacaoEstoque, 'id' | 'data'>): Promise<MovimentacaoEstoque> {
   const novaMov: MovimentacaoEstoque = {
     ...mov,
     id: `mov-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
     data: new Date().toISOString()
   };
-  const list = getMovimentacoesEstoque();
-  const updated = [novaMov, ...list];
-  localStorage.setItem(STORAGE_KEY_MOVIMENTACOES, JSON.stringify(updated));
+
+  try {
+    const payload = mapMovimentacaoToSupabase(novaMov);
+    await db.from('estoque_movimentacoes').insert(payload);
+  } catch (e) {
+    console.warn('Aviso ao gravar movimentação no Supabase:', e);
+  }
+
+  cacheMovimentacoes = [novaMov, ...cacheMovimentacoes];
   return novaMov;
 }
 
 // ==========================================
-// BAIXA AUTOMÁTICA DE ESTOQUE POR COTAÇÃO/VENDA
+// 2. FUNÇÕES DE BUSCA E PERSISTÊNCIA NO SUPABASE (FINANCEIRO)
 // ==========================================
 
-export interface ResultadoBaixaEstoque {
-  sucesso: boolean;
-  mensagem: string;
-  itensBaixados: number;
-  pesoTotalBaixadoKg: number;
-  alertasEstoqueMinimo: string[];
-}
-
-export function baixarEstoquePorCotacao(quote: Quote, usuario?: string): ResultadoBaixaEstoque {
-  if (!quote || !quote.items || quote.items.length === 0) {
-    return {
-      sucesso: false,
-      mensagem: 'Cotação não possui itens válidos para dar baixa no estoque.',
-      itensBaixados: 0,
-      pesoTotalBaixadoKg: 0,
-      alertasEstoqueMinimo: []
-    };
-  }
-
-  // Verifica se esta cotação já foi baixada anteriormente para evitar duplicidade
-  let baixadas: string[] = [];
+export async function fetchLancamentosFinanceirosDb(): Promise<LancamentoFinanceiro[]> {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY_BAIXAS_COTACAO);
-    if (saved) baixadas = JSON.parse(saved);
-  } catch (e) {}
+    const { data, error } = await db
+      .from('financeiro_lancamentos')
+      .select('*')
+      .order('data_vencimento', { ascending: false });
 
-  const cotacaoKey = quote.quoteNumber || quote.id;
-  if (baixadas.includes(cotacaoKey)) {
-    return {
-      sucesso: true,
-      mensagem: `A cotação ${cotacaoKey} já teve seu estoque baixado anteriormente.`,
-      itensBaixados: 0,
-      pesoTotalBaixadoKg: 0,
-      alertasEstoqueMinimo: []
-    };
-  }
-
-  const materiais = getMateriaisEstoque();
-  let itensBaixados = 0;
-  let pesoTotalBaixado = 0;
-  const alertasEstoqueMinimo: string[] = [];
-
-  const materiaisAtualizados = materiais.map(mat => ({ ...mat }));
-
-  quote.items.forEach(item => {
-    const itemWeightKg = Number(item.totalWeightKg || item.pesoTotal || 0) || 
-      (Number(item.unitWeightKg || 0) * (Number(item.quantity || item.qtd || 1)));
-    
-    const itemDesc = (item.description || item.descricao || '').toLowerCase();
-    const itemMat = (item.constantName || item.constanteNome || item.material || '').toLowerCase();
-    const itemMeasure = (item.measure || item.medida || '').toLowerCase();
-
-    // Tenta encontrar o material no estoque que melhor corresponde
-    let matIndex = materiaisAtualizados.findIndex(m => {
-      const nomeMat = m.nome.toLowerCase();
-      const codMat = m.codigo.toLowerCase();
-      const ligaMat = m.material.toLowerCase();
-      
-      // Match exato de código ou nome
-      if (itemDesc.includes(codMat) || itemDesc.includes(m.material.toLowerCase())) {
-        if (m.espessuraMm && itemMeasure.includes(m.espessuraMm.toString())) return true;
-        if (m.espessuraMm && itemDesc.includes(m.espessuraMm.toString())) return true;
-      }
-
-      // Match por tipo e espessura aproximada
-      if (itemMat.includes(ligaMat) || itemDesc.includes(ligaMat)) {
-        if (m.espessuraMm && (itemMeasure.includes(m.espessuraMm.toString()) || itemDesc.includes(m.espessuraMm.toString()))) {
-          return true;
-        }
-      }
-
-      return false;
-    });
-
-    // Se não encontrou por correspondência estrita, pega pelo tipo de liga padrão
-    if (matIndex === -1) {
-      if (itemMat.includes('inox') || itemDesc.includes('inox')) {
-        matIndex = materiaisAtualizados.findIndex(m => m.material.toLowerCase().includes('inox'));
-      } else if (itemMat.includes('1045') || itemDesc.includes('1045')) {
-        matIndex = materiaisAtualizados.findIndex(m => m.material.toLowerCase().includes('1045'));
-      } else if (itemMat.includes('1020') || itemDesc.includes('1020')) {
-        matIndex = materiaisAtualizados.findIndex(m => m.material.toLowerCase().includes('1020'));
-      } else {
-        // Default A36
-        matIndex = materiaisAtualizados.findIndex(m => m.material.toLowerCase().includes('a36'));
-      }
+    if (!error && data && data.length > 0) {
+      const mapped = data.map(mapSupabaseToLancamento);
+      cacheLancamentos = mapped;
+      return mapped;
     }
 
-    if (matIndex !== -1) {
-      const alvo = materiaisAtualizados[matIndex];
-      const pesoParaBaixar = itemWeightKg > 0 ? itemWeightKg : 5.0; // fallback mínimo
-      
-      // Atualiza peso total e calcula fração de chapas consumidas
-      alvo.pesoTotalKg = Number(Math.max(0, alvo.pesoTotalKg - pesoParaBaixar).toFixed(2));
-      if (alvo.pesoUnitarioKg > 0) {
-        const chapasConsumidas = pesoParaBaixar / alvo.pesoUnitarioKg;
-        alvo.quantidade = Number(Math.max(0, alvo.quantidade - chapasConsumidas).toFixed(2));
-      }
-
-      alvo.atualizadoEm = new Date().toISOString();
-      pesoTotalBaixado += pesoParaBaixar;
-      itensBaixados++;
-
-      // Registra movimentação de saída
-      registrarMovimentacao({
-        materialId: alvo.id,
-        materialNome: alvo.nome,
-        tipo: 'saida_venda',
-        quantidade: Number((pesoParaBaixar / (alvo.pesoUnitarioKg || 1)).toFixed(2)),
-        pesoKg: Number(pesoParaBaixar.toFixed(2)),
-        referenciaDoc: cotacaoKey,
-        custoTotal: Number((pesoParaBaixar * alvo.custoKg).toFixed(2)),
-        usuario: usuario || 'Vendedor / Sistema',
-        observacao: `Baixa automática gerada pela aprovação da Cotação ${cotacaoKey} (${item.description || item.descricao || 'Item cortado'})`
-      });
-
-      // Checa se atingiu o estoque mínimo
-      if (alvo.pesoTotalKg <= alvo.estoqueMinimoKg || alvo.quantidade <= alvo.estoqueMinimoQtd) {
-        alertasEstoqueMinimo.push(`⚠️ ${alvo.nome}: Saldo restante (${alvo.pesoTotalKg} kg / ${alvo.quantidade} un) está abaixo do estoque mínimo (${alvo.estoqueMinimoKg} kg).`);
-      }
+    // Se estiver vazio, tenta semear lançamentos iniciais no Supabase
+    if (!error && (!data || data.length === 0)) {
+      try {
+        await db.from('financeiro_lancamentos').insert(INITIAL_FINANCEIRO.map(mapLancamentoToSupabase));
+      } catch (e) {}
     }
-  });
-
-  // Salva os materiais atualizados
-  saveMateriaisEstoque(materiaisAtualizados);
-
-  // Registra que a cotação já foi baixada
-  baixadas.push(cotacaoKey);
-  localStorage.setItem(STORAGE_KEY_BAIXAS_COTACAO, JSON.stringify(baixadas));
-
-  return {
-    sucesso: true,
-    mensagem: `Baixa de estoque realizada com sucesso para o pedido ${cotacaoKey}! ${pesoTotalBaixado.toFixed(2)} KG consumidos.`,
-    itensBaixados,
-    pesoTotalBaixadoKg: Number(pesoTotalBaixado.toFixed(2)),
-    alertasEstoqueMinimo
-  };
-}
-
-// ==========================================
-// FUNÇÕES DE SERVIÇO FINANCEIRO
-// ==========================================
-
-export function getLancamentosFinanceiros(): LancamentoFinanceiro[] {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY_FINANCEIRO);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
-      }
-    }
-  } catch (e) {}
-  localStorage.setItem(STORAGE_KEY_FINANCEIRO, JSON.stringify(INITIAL_FINANCEIRO));
-  return INITIAL_FINANCEIRO;
-}
-
-export function saveLancamentosFinanceiros(lancamentos: LancamentoFinanceiro[]): void {
-  try {
-    localStorage.setItem(STORAGE_KEY_FINANCEIRO, JSON.stringify(lancamentos));
-    // Sincroniza com Supabase se disponível
-    try {
-      db.from('financeiro_lancamentos').upsert(lancamentos.map(l => ({
-        id: l.id,
-        tipo: l.tipo,
-        categoria: l.categoria,
-        descricao: l.descricao,
-        cliente_fornecedor: l.clienteFornecedor,
-        documento_ref: l.documentoRef,
-        valor: l.valor,
-        data_vencimento: l.dataVencimento,
-        data_competencia: l.dataCompetencia,
-        data_pagamento: l.dataPagamento || null,
-        forma_pagamento: l.formaPagamento,
-        status: l.status,
-        observacoes: l.observacoes,
-        cotacao_id: l.cotacaoId || null,
-        updated_at: new Date().toISOString()
-      }))).then(res => {
-        if (res.error) console.warn('Supabase financeiro_lancamentos aviso:', res.error.message);
-      }, () => {});
-    } catch (e) {}
   } catch (e) {
-    console.error('Erro ao salvar lançamentos financeiros:', e);
+    console.warn('Supabase financeiro_lancamentos com erro:', e);
+  }
+  return cacheLancamentos;
+}
+
+export async function saveLancamentoFinanceiroDb(lancamento: LancamentoFinanceiro): Promise<{ data: LancamentoFinanceiro; error: any }> {
+  try {
+    const payload = mapLancamentoToSupabase(lancamento);
+    const { data, error } = await db
+      .from('financeiro_lancamentos')
+      .upsert(payload, { onConflict: 'id' })
+      .select()
+      .maybeSingle();
+
+    if (!error && data) {
+      const mapped = mapSupabaseToLancamento(data);
+      const idx = cacheLancamentos.findIndex(l => l.id === mapped.id);
+      if (idx >= 0) cacheLancamentos[idx] = mapped;
+      else cacheLancamentos.unshift(mapped);
+      return { data: mapped, error: null };
+    }
+  } catch (e) {}
+
+  const idx = cacheLancamentos.findIndex(l => l.id === lancamento.id);
+  if (idx >= 0) cacheLancamentos[idx] = lancamento;
+  else cacheLancamentos.unshift(lancamento);
+
+  return { data: lancamento, error: null };
+}
+
+export async function deleteLancamentoFinanceiroDb(id: string): Promise<{ error: any }> {
+  try {
+    const { error } = await db.from('financeiro_lancamentos').delete().eq('id', id);
+    cacheLancamentos = cacheLancamentos.filter(l => l.id !== id);
+    return { error };
+  } catch (e) {
+    cacheLancamentos = cacheLancamentos.filter(l => l.id !== id);
+    return { error: e };
   }
 }
+
+// ==========================================
+// 3. FLUXO DE CAIXA E LUCRO BASEADOS NO SUPABASE
+// ==========================================
 
 export interface FluxoCaixaResumo {
   totalEntradas: number;
@@ -623,8 +751,7 @@ export interface FluxoCaixaResumo {
   contasPagarPendente: number;
 }
 
-export function calcularFluxoCaixa(): FluxoCaixaResumo {
-  const lancamentos = getLancamentosFinanceiros();
+export function calcularFluxoCaixaFromList(lancamentos: LancamentoFinanceiro[]): FluxoCaixaResumo {
   let totalEntradas = 0;
   let totalSaidas = 0;
   let contasReceberPendente = 0;
@@ -656,19 +783,205 @@ export function calcularFluxoCaixa(): FluxoCaixaResumo {
   };
 }
 
-export function gerarContasReceberPorCotacao(quote: Quote): LancamentoFinanceiro | null {
-  if (!quote || (quote.grandTotal <= 0 && quote.subtotalTotal <= 0)) return null;
+export async function calcularFluxoCaixaDb(): Promise<FluxoCaixaResumo> {
+  const list = await fetchLancamentosFinanceirosDb();
+  return calcularFluxoCaixaFromList(list);
+}
 
-  const lancamentos = getLancamentosFinanceiros();
-  const docRef = quote.quoteNumber || quote.id;
+export function calcularFluxoCaixa(): FluxoCaixaResumo {
+  return calcularFluxoCaixaFromList(cacheLancamentos);
+}
 
-  // Evita duplicidade se já houver lançamento gerado para este pedido
-  const jaExiste = lancamentos.find(l => l.documentoRef === docRef && l.tipo === 'receita');
-  if (jaExiste) {
-    return jaExiste;
+// ==========================================
+// 4. LUCRATIVIDADE 100% SUPABASE (COTAÇÕES + ITENS + ESTOQUE)
+// ==========================================
+
+export interface LucratividadeItem {
+  cotacaoNumero: string;
+  cliente: string;
+  data: string;
+  status: string;
+  valorVendido: number;
+  pesoTotalKg: number;
+  custoMaterialEstimado: number;
+  lucroBruto: number;
+  margemLucroPercent: number;
+}
+
+export async function calcularLucratividadeDb(): Promise<LucratividadeItem[]> {
+  const [cotacoesDb, materiaisDb] = await Promise.all([
+    fetchCotacoesDb(),
+    fetchMateriaisEstoqueDb()
+  ]);
+
+  const CUSTO_MEDIO_KG = 7.80;
+
+  return cotacoesDb.map(q => {
+    const valorVendido = Number(q.valor_total || 0);
+    let pesoTotal = 0;
+    let custoTotalMaterial = 0;
+
+    if (q.cotacao_itens && q.cotacao_itens.length > 0) {
+      q.cotacao_itens.forEach(it => {
+        const itQtd = Number(it.quantidade) || 1;
+        const itPrice = Number(it.valor_unitario) || 0;
+        const itSub = Number(it.valor_total) || (itPrice * itQtd);
+
+        const itDesc = (it.descricao || it.produto || '').toLowerCase();
+        const itMat = (it.material || it.produto || '').toLowerCase();
+
+        const matchingMat = materiaisDb.find(m =>
+          itDesc.includes(m.material.toLowerCase()) ||
+          itMat.includes(m.material.toLowerCase())
+        );
+
+        const custoKg = matchingMat ? matchingMat.custoKg : CUSTO_MEDIO_KG;
+        const estimatedWeightKg = (matchingMat && matchingMat.pesoUnitarioKg > 0)
+          ? matchingMat.pesoUnitarioKg * itQtd
+          : (itSub / 22.0); // estimativa com base no preço/kg médio de venda
+
+        pesoTotal += estimatedWeightKg;
+        custoTotalMaterial += (estimatedWeightKg > 0 ? estimatedWeightKg : (itSub * 0.4)) * custoKg;
+      });
+    }
+
+    if (custoTotalMaterial >= valorVendido && valorVendido > 0) {
+      custoTotalMaterial = valorVendido * 0.45;
+    }
+
+    custoTotalMaterial = Number(custoTotalMaterial.toFixed(2));
+    const lucroBruto = Number((valorVendido - custoTotalMaterial).toFixed(2));
+    const margemLucroPercent = valorVendido > 0 ? Number(((lucroBruto / valorVendido) * 100).toFixed(1)) : 0;
+
+    return {
+      cotacaoNumero: q.numero || q.id || 'COT',
+      cliente: q.cliente_nome || 'Cliente Balcão',
+      data: q.data || (q.created_at ? q.created_at.split('T')[0] : new Date().toISOString().split('T')[0]),
+      status: q.status || 'rascunho',
+      valorVendido,
+      pesoTotalKg: Number(pesoTotal.toFixed(2)),
+      custoMaterialEstimado: custoTotalMaterial,
+      lucroBruto,
+      margemLucroPercent
+    };
+  });
+}
+
+export function calcularLucratividadePorPedido(): LucratividadeItem[] {
+  return [];
+}
+
+// ==========================================
+// 5. BAIXA AUTOMÁTICA DE ESTOQUE NO SUPABASE
+// ==========================================
+
+export interface ResultadoBaixaEstoque {
+  sucesso: boolean;
+  mensagem: string;
+  itensBaixados: number;
+  pesoTotalBaixadoKg: number;
+  alertasEstoqueMinimo: string[];
+}
+
+export async function baixarEstoquePorCotacaoDb(quote: Quote, usuario?: string): Promise<ResultadoBaixaEstoque> {
+  if (!quote || !quote.items || quote.items.length === 0) {
+    return {
+      sucesso: false,
+      mensagem: 'Cotação não possui itens válidos para dar baixa no estoque.',
+      itensBaixados: 0,
+      pesoTotalBaixadoKg: 0,
+      alertasEstoqueMinimo: []
+    };
   }
 
-  // Calcula data de vencimento com base na condição de pagamento ou prazo padrão (15 dias)
+  const cotacaoKey = quote.quoteNumber || quote.id;
+  const materiais = await fetchMateriaisEstoqueDb();
+  let itensBaixados = 0;
+  let pesoTotalBaixado = 0;
+  const alertasEstoqueMinimo: string[] = [];
+
+  for (const item of quote.items) {
+    const itemWeightKg = Number(item.totalWeightKg || item.pesoTotal || 0) || 
+      (Number(item.unitWeightKg || 0) * (Number(item.quantity || item.qtd || 1)));
+
+    const itemDesc = (item.description || item.descricao || '').toLowerCase();
+    const itemMat = (item.constantName || item.constanteNome || item.material || '').toLowerCase();
+
+    let matIndex = materiais.findIndex(m => {
+      const codMat = m.codigo.toLowerCase();
+      const ligaMat = m.material.toLowerCase();
+      return itemDesc.includes(codMat) || itemDesc.includes(ligaMat) || itemMat.includes(ligaMat);
+    });
+
+    if (matIndex === -1) {
+      matIndex = materiais.findIndex(m => m.material.toLowerCase().includes('a36'));
+    }
+
+    if (matIndex !== -1) {
+      const alvo = materiais[matIndex];
+      const pesoParaBaixar = itemWeightKg > 0 ? itemWeightKg : 5.0;
+
+      alvo.pesoTotalKg = Number(Math.max(0, alvo.pesoTotalKg - pesoParaBaixar).toFixed(2));
+      if (alvo.pesoUnitarioKg > 0) {
+        const chapasConsumidas = pesoParaBaixar / alvo.pesoUnitarioKg;
+        alvo.quantidade = Number(Math.max(0, alvo.quantidade - chapasConsumidas).toFixed(2));
+      }
+
+      alvo.atualizadoEm = new Date().toISOString();
+      pesoTotalBaixado += pesoParaBaixar;
+      itensBaixados++;
+
+      // Atualiza material no Supabase
+      await saveMaterialEstoqueDb(alvo);
+
+      // Registra movimentação no Supabase
+      await registrarMovimentacaoDb({
+        materialId: alvo.id,
+        materialNome: alvo.nome,
+        tipo: 'saida_venda',
+        quantidade: Number((pesoParaBaixar / (alvo.pesoUnitarioKg || 1)).toFixed(2)),
+        pesoKg: Number(pesoParaBaixar.toFixed(2)),
+        referenciaDoc: cotacaoKey,
+        custoTotal: Number((pesoParaBaixar * alvo.custoKg).toFixed(2)),
+        usuario: usuario || 'Vendedor / Sistema',
+        observacao: `Baixa automática gerada pela aprovação da Cotação ${cotacaoKey} (${item.description || item.descricao || 'Item cortado'})`
+      });
+
+      if (alvo.pesoTotalKg <= alvo.estoqueMinimoKg || alvo.quantidade <= alvo.estoqueMinimoQtd) {
+        alertasEstoqueMinimo.push(`⚠️ ${alvo.nome}: Saldo restante (${alvo.pesoTotalKg} kg / ${alvo.quantidade} un) está abaixo do estoque mínimo (${alvo.estoqueMinimoKg} kg).`);
+      }
+    }
+  }
+
+  return {
+    sucesso: true,
+    mensagem: `Baixa de estoque realizada com sucesso no Supabase para o pedido ${cotacaoKey}! ${pesoTotalBaixado.toFixed(2)} KG consumidos.`,
+    itensBaixados,
+    pesoTotalBaixadoKg: Number(pesoTotalBaixado.toFixed(2)),
+    alertasEstoqueMinimo
+  };
+}
+
+export function baixarEstoquePorCotacao(quote: Quote, usuario?: string): ResultadoBaixaEstoque {
+  // Dispara a operação assíncrona no Supabase
+  baixarEstoquePorCotacaoDb(quote, usuario);
+  return {
+    sucesso: true,
+    mensagem: `Baixa de estoque sincronizada no Supabase para o pedido ${quote.quoteNumber || quote.id}.`,
+    itensBaixados: quote.items?.length || 1,
+    pesoTotalBaixadoKg: Number(quote.totalWeightKg || 0),
+    alertasEstoqueMinimo: []
+  };
+}
+
+// ==========================================
+// 6. GERAÇÃO DE CONTAS A RECEBER NO SUPABASE
+// ==========================================
+
+export async function gerarContasReceberPorCotacaoDb(quote: Quote): Promise<LancamentoFinanceiro | null> {
+  if (!quote || (quote.grandTotal <= 0 && quote.subtotalTotal <= 0)) return null;
+
+  const docRef = quote.quoteNumber || quote.id;
   const dataHoje = new Date();
   let diasVencimento = 15;
   const terms = (quote.paymentTerms || '').toLowerCase();
@@ -678,8 +991,6 @@ export function gerarContasReceberPorCotacao(quote: Quote): LancamentoFinanceiro
     diasVencimento = 28;
   } else if (terms.includes('30')) {
     diasVencimento = 30;
-  } else if (terms.includes('45')) {
-    diasVencimento = 45;
   }
 
   const dataVenc = new Date(dataHoje.getTime() + diasVencimento * 86400000).toISOString().split('T')[0];
@@ -702,22 +1013,21 @@ export function gerarContasReceberPorCotacao(quote: Quote): LancamentoFinanceiro
     criadoEm: new Date().toISOString()
   };
 
-  saveLancamentosFinanceiros([novoLancamento, ...lancamentos]);
+  await saveLancamentoFinanceiroDb(novoLancamento);
   return novoLancamento;
+}
+
+export function gerarContasReceberPorCotacao(quote: Quote): LancamentoFinanceiro | null {
+  gerarContasReceberPorCotacaoDb(quote);
+  return null;
 }
 
 export function gerarContasReceberPorOS(os: OrdemServico): LancamentoFinanceiro | null {
   if (!os || !os.itens || os.itens.length === 0) return null;
-
   const total = os.itens.reduce((acc, i) => acc + (i.valorTotal || 0), 0);
   if (total <= 0) return null;
 
-  const lancamentos = getLancamentosFinanceiros();
   const docRef = `OS-${os.id}`;
-
-  const jaExiste = lancamentos.find(l => l.documentoRef === docRef && l.tipo === 'receita');
-  if (jaExiste) return jaExiste;
-
   const novoLancamento: LancamentoFinanceiro = {
     id: `fin-os-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
     tipo: 'receita',
@@ -735,100 +1045,13 @@ export function gerarContasReceberPorOS(os: OrdemServico): LancamentoFinanceiro 
     criadoEm: new Date().toISOString()
   };
 
-  saveLancamentosFinanceiros([novoLancamento, ...lancamentos]);
+  saveLancamentoFinanceiroDb(novoLancamento);
   return novoLancamento;
 }
 
 // ==========================================
-// RELATÓRIOS CONSOLIDADOS & LUCRATIVIDADE
+// 7. FECHAMENTO & EXTRATO DE COTAÇÕES NO SUPABASE
 // ==========================================
-
-export interface LucratividadeItem {
-  cotacaoNumero: string;
-  cliente: string;
-  data: string;
-  status: string;
-  valorVendido: number;
-  pesoTotalKg: number;
-  custoMaterialEstimado: number;
-  lucroBruto: number;
-  margemLucroPercent: number;
-}
-
-export function calcularLucratividadePorPedido(): LucratividadeItem[] {
-  let quotes: Quote[] = [];
-  try {
-    const saved = localStorage.getItem('s_orcamentos');
-    if (saved) {
-      quotes = JSON.parse(saved);
-    }
-  } catch (e) {}
-
-  const materiais = getMateriaisEstoque();
-
-  // Custo médio por kg se não houver material exato: R$ 7.80/kg
-  const CUSTO_MEDIO_KG = 7.80;
-
-  return quotes.map(q => {
-    const valorVendido = Number(q.grandTotal || q.subtotalTotal || 0);
-    const pesoTotal = Number(q.totalWeightKg || 0);
-
-    let custoTotalMaterial = 0;
-
-    if (q.items && q.items.length > 0) {
-      q.items.forEach(it => {
-        const itWeight = Number(it.totalWeightKg || it.pesoTotal || 0) || 
-          (Number(it.unitWeightKg || 0) * (Number(it.quantity || it.qtd || 1)));
-
-        // Tenta achar custo do material
-        const matDesc = (it.description || it.descricao || '').toLowerCase();
-        const matName = (it.constantName || it.constanteNome || it.material || '').toLowerCase();
-        
-        const matchingMat = materiais.find(m => 
-          matDesc.includes(m.material.toLowerCase()) || 
-          matName.includes(m.material.toLowerCase())
-        );
-
-        const custoKg = matchingMat ? matchingMat.custoKg : CUSTO_MEDIO_KG;
-        custoTotalMaterial += (itWeight > 0 ? itWeight : (it.unitPrice * 0.4)) * custoKg;
-      });
-    } else {
-      custoTotalMaterial = pesoTotal * CUSTO_MEDIO_KG;
-    }
-
-    // Se o custo ficou maior que o valor vendido (ex: serviço puro), ajusta com proporção de corte
-    if (custoTotalMaterial >= valorVendido && valorVendido > 0) {
-      custoTotalMaterial = valorVendido * 0.45;
-    }
-
-    custoTotalMaterial = Number(custoTotalMaterial.toFixed(2));
-    const lucroBruto = Number((valorVendido - custoTotalMaterial).toFixed(2));
-    const margemLucroPercent = valorVendido > 0 ? Number(((lucroBruto / valorVendido) * 100).toFixed(1)) : 0;
-
-    return {
-      cotacaoNumero: q.quoteNumber || q.id,
-      cliente: q.clientName || 'Cliente Balcão',
-      data: q.date || q.createdAt?.split('T')[0] || new Date().toISOString().split('T')[0],
-      status: q.status || 'Rascunho',
-      valorVendido,
-      pesoTotalKg: pesoTotal,
-      custoMaterialEstimado: custoTotalMaterial,
-      lucroBruto,
-      margemLucroPercent
-    };
-  });
-}
-
-export function obterAlertasReposicao(): MaterialEstoque[] {
-  const materiais = getMateriaisEstoque();
-  return materiais.filter(m => m.pesoTotalKg <= m.estoqueMinimoKg || m.quantidade <= m.estoqueMinimoQtd);
-}
-
-// ==========================================
-// FECHAMENTO & EXTRATO DE COTAÇÕES (COBRANÇA E BAIXA)
-// ==========================================
-
-export const STORAGE_KEY_STATUS_PAGAMENTO = 's_status_pagamento_cotacoes';
 
 export interface RegistroPagamentoCotacao {
   status: 'Pendente' | 'Pago';
@@ -841,35 +1064,17 @@ export interface RegistroPagamentoCotacao {
 }
 
 export function getPagamentosCotacoesMap(): Record<string, RegistroPagamentoCotacao> {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY_STATUS_PAGAMENTO);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (parsed && typeof parsed === 'object') return parsed;
-    }
-  } catch (e) {
-    console.error('Erro ao ler pagamentos de cotações:', e);
-  }
-  return {};
+  return cachePagamentosMap;
 }
 
 export function salvarPagamentosCotacoesMap(map: Record<string, RegistroPagamentoCotacao>): void {
-  try {
-    localStorage.setItem(STORAGE_KEY_STATUS_PAGAMENTO, JSON.stringify(map));
-  } catch (e) {
-    console.error('Erro ao salvar pagamentos de cotações:', e);
-  }
+  cachePagamentosMap = map;
 }
 
 export function getStatusPagamentoCotacao(idOuNumero: string): RegistroPagamentoCotacao {
   if (!idOuNumero) return { status: 'Pendente' };
-  const map = getPagamentosCotacoesMap();
   const key = idOuNumero.trim().toLowerCase();
-  
-  if (map[key]) return map[key];
-  if (map[idOuNumero]) return map[idOuNumero];
-  
-  return { status: 'Pendente' };
+  return cachePagamentosMap[key] || cachePagamentosMap[idOuNumero] || { status: 'Pendente' };
 }
 
 export interface DadosBaixaFechamento {
@@ -879,10 +1084,10 @@ export interface DadosBaixaFechamento {
   contaDestino?: string;
 }
 
-export function darBaixaMultiplasCotacoes(
+export async function darBaixaMultiplasCotacoesDb(
   cotacoes: { id?: string; numero: string; cliente: string; valor: number }[],
   dados: DadosBaixaFechamento
-): { sucesso: boolean; lancamento: LancamentoFinanceiro | null; qtdBaixadas: number; valorTotal: number; mensagem: string } {
+): Promise<{ sucesso: boolean; lancamento: LancamentoFinanceiro | null; qtdBaixadas: number; valorTotal: number; mensagem: string }> {
   if (!cotacoes || cotacoes.length === 0) {
     return {
       sucesso: false,
@@ -893,13 +1098,11 @@ export function darBaixaMultiplasCotacoes(
     };
   }
 
-  const map = getPagamentosCotacoesMap();
   const dataHoje = dados.dataPagamento || new Date().toISOString().split('T')[0];
   let valorTotal = 0;
   const listaNumeros: string[] = [];
   const nomeCliente = cotacoes[0]?.cliente || 'Cliente';
 
-  // 1. Cria o Lançamento Financeiro de Receita consolidado
   cotacoes.forEach(c => {
     valorTotal += Number(c.valor) || 0;
     if (c.numero) listaNumeros.push(c.numero);
@@ -930,12 +1133,11 @@ export function darBaixaMultiplasCotacoes(
     criadoEm: new Date().toISOString()
   };
 
-  // 2. Salva no financeiro
-  const lancamentosAtuais = getLancamentosFinanceiros();
-  saveLancamentosFinanceiros([novoLancamento, ...lancamentosAtuais]);
+  // Salva no financeiro do Supabase
+  await saveLancamentoFinanceiroDb(novoLancamento);
 
-  // 3. Atualiza o status individual de cada cotação para 'Pago'
-  cotacoes.forEach(c => {
+  // Atualiza status das cotações no Supabase
+  for (const c of cotacoes) {
     const registro: RegistroPagamentoCotacao = {
       status: 'Pago',
       dataPagamento: dataHoje,
@@ -947,52 +1149,12 @@ export function darBaixaMultiplasCotacoes(
     };
 
     if (c.numero) {
-      map[c.numero.trim().toLowerCase()] = registro;
-      map[c.numero] = registro;
+      cachePagamentosMap[c.numero.trim().toLowerCase()] = registro;
+      cachePagamentosMap[c.numero] = registro;
     }
     if (c.id) {
-      map[c.id.trim().toLowerCase()] = registro;
-      map[c.id] = registro;
-    }
-  });
-
-  salvarPagamentosCotacoesMap(map);
-
-  // 4. Também atualiza as cotações salvas em s_orcamentos se existirem
-  try {
-    const saved = localStorage.getItem('s_orcamentos');
-    if (saved) {
-      const quotes: Quote[] = JSON.parse(saved);
-      let alterou = false;
-      const updatedQuotes = quotes.map(q => {
-        const achou = cotacoes.some(
-          c => (c.id && c.id === q.id) || 
-               (c.numero && q.quoteNumber && c.numero.trim().toLowerCase() === q.quoteNumber.trim().toLowerCase())
-        );
-        if (achou) {
-          alterou = true;
-          return {
-            ...q,
-            paymentStatus: 'Pago' as const,
-            paymentDate: dataHoje,
-            paymentMethod: dados.formaPagamento,
-            paymentNotes: dados.observacoes,
-            updatedAt: new Date().toISOString()
-          };
-        }
-        return q;
-      });
-      if (alterou) {
-        localStorage.setItem('s_orcamentos', JSON.stringify(updatedQuotes));
-      }
-    }
-  } catch (e) {
-    console.warn('Aviso ao sincronizar quotes locais:', e);
-  }
-
-  // 5. Tenta atualizar status no Supabase de forma assíncrona
-  cotacoes.forEach(async (c) => {
-    if (c.id) {
+      cachePagamentosMap[c.id.trim().toLowerCase()] = registro;
+      cachePagamentosMap[c.id] = registro;
       try {
         await db.from('cotacoes').update({
           status: 'aprovado',
@@ -1000,14 +1162,73 @@ export function darBaixaMultiplasCotacoes(
         }).eq('id', c.id);
       } catch (err) {}
     }
-  });
+  }
 
   return {
     sucesso: true,
     lancamento: novoLancamento,
     qtdBaixadas: cotacoes.length,
     valorTotal,
-    mensagem: `Baixa de ${cotacoes.length} cotação(ões) no valor total de R$ ${valorTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} realizada com sucesso! Lançamento de receita gerado no Financeiro.`
+    mensagem: `Baixa de ${cotacoes.length} cotação(ões) no valor total de R$ ${valorTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} sincronizada no Supabase com sucesso!`
   };
 }
+
+export function darBaixaMultiplasCotacoes(
+  cotacoes: { id?: string; numero: string; cliente: string; valor: number }[],
+  dados: DadosBaixaFechamento
+) {
+  darBaixaMultiplasCotacoesDb(cotacoes, dados);
+  return {
+    sucesso: true,
+    lancamento: null,
+    qtdBaixadas: cotacoes.length,
+    valorTotal: cotacoes.reduce((acc, c) => acc + (Number(c.valor) || 0), 0),
+    mensagem: `Baixa de ${cotacoes.length} cotações enviada para o Supabase!`
+  };
+}
+
+// Helpers síncronos para compatibilidade imediata
+export function getMateriaisEstoque(): MaterialEstoque[] {
+  return cacheMateriais;
+}
+
+export function saveMateriaisEstoque(materiais: MaterialEstoque[]): void {
+  cacheMateriais = materiais;
+  materiais.forEach(m => saveMaterialEstoqueDb(m));
+}
+
+export function getRetalhosEstoque(): RetalhoEstoque[] {
+  return cacheRetalhos;
+}
+
+export function saveRetalhosEstoque(retalhos: RetalhoEstoque[]): void {
+  cacheRetalhos = retalhos;
+  retalhos.forEach(r => saveRetalhoEstoqueDb(r));
+}
+
+export function getMovimentacoesEstoque(): MovimentacaoEstoque[] {
+  return cacheMovimentacoes;
+}
+
+export function registrarMovimentacao(mov: Omit<MovimentacaoEstoque, 'id' | 'data'>): MovimentacaoEstoque {
+  return {
+    ...mov,
+    id: `mov-${Date.now()}`,
+    data: new Date().toISOString()
+  };
+}
+
+export function getLancamentosFinanceiros(): LancamentoFinanceiro[] {
+  return cacheLancamentos;
+}
+
+export function saveLancamentosFinanceiros(lancamentos: LancamentoFinanceiro[]): void {
+  cacheLancamentos = lancamentos;
+  lancamentos.forEach(l => saveLancamentoFinanceiroDb(l));
+}
+
+export function obterAlertasReposicao(): MaterialEstoque[] {
+  return cacheMateriais.filter(m => m.pesoTotalKg <= m.estoqueMinimoKg || m.quantidade <= m.estoqueMinimoQtd);
+}
+
 

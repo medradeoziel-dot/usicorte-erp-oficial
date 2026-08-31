@@ -4,7 +4,7 @@ import { fetchCotacoesDb, SupabaseCotacao } from '../lib/db';
 import { formatCurrency, formatSafeDate } from '../utils/calculator';
 import { 
   getPagamentosCotacoesMap, 
-  darBaixaMultiplasCotacoes,
+  darBaixaMultiplasCotacoesDb,
   salvarPagamentosCotacoesMap,
   RegistroPagamentoCotacao
 } from '../services/inventoryFinanceService';
@@ -412,7 +412,7 @@ export default function FechamentoCotacoesModule({
   };
 
   // Ação: Confirmar Baixa em Lote e Integração Financeira
-  const handleConfirmarBaixa = () => {
+  const handleConfirmarBaixa = async () => {
     if (selectedQuotes.length === 0) return;
     setIsSubmittingBaixa(true);
 
@@ -424,7 +424,7 @@ export default function FechamentoCotacoesModule({
         valor: q.valor
       }));
 
-      const res = darBaixaMultiplasCotacoes(cotacoesParaBaixar, {
+      const res = await darBaixaMultiplasCotacoesDb(cotacoesParaBaixar, {
         dataPagamento: dataPagamentoBaixa,
         formaPagamento: formaPagamentoBaixa,
         contaDestino: contaDestinoBaixa,
@@ -439,7 +439,7 @@ export default function FechamentoCotacoesModule({
         });
 
         // Recarrega os dados e mantém seleções
-        loadQuotesData();
+        await loadQuotesData();
         setIsBaixaModalOpen(false);
       } else {
         alert(res.mensagem || 'Não foi possível concluir a baixa.');
