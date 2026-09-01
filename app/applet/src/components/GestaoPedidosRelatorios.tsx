@@ -452,12 +452,14 @@ export default function GestaoPedidosRelatorios() {
 
               {/* MODELO 5: ETIQUETAS */}
               {modeloAtivo === 'etiqueta' && (
-                <div className="grid grid-cols-2 gap-[12mm]">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 print:gap-8 print:block mb-6">
                   {itensParaImprimir.map((item) => (
                     <div 
                       key={item.idVer} 
-                      className="etiqueta-card border-2 border-black rounded-xl flex flex-col justify-between"
+                      className="border-2 border-black rounded-xl p-4 sm:p-6 relative flex flex-col justify-between shadow-sm print:shadow-none print:mb-8 print:break-inside-avoid etiqueta-card"
                       style={{
+                        width: '100%',
+                        minHeight: '360px',
                         padding: '8px',
                         marginBottom: '12mm',
                         breakInside: 'avoid',

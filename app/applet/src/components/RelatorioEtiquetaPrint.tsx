@@ -34,20 +34,12 @@ export default function RelatorioEtiquetaPrint({ cliente, numeroPedido, itens }:
       </div>
 
       {/* Grade de Etiquetas (1 coluna no mobile, 2 colunas no desktop) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-[12mm]">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 print:gap-8 print:block mb-6">
         {itens.map((item, index) => (
           <div
             key={item.idVer || index}
-            className="etiqueta-card border-2 border-slate-900 rounded-xl bg-white relative flex flex-col justify-between shadow-sm print:shadow-none"
-            style={{ 
-              width: '100%', 
-              minHeight: '340px',
-              padding: '8px',
-              marginBottom: '12mm',
-              breakInside: 'avoid',
-              pageBreakInside: 'avoid',
-              boxSizing: 'border-box'
-            }}
+            className="border-2 border-slate-900 rounded-xl bg-white p-4 sm:p-6 relative flex flex-col justify-between shadow-sm print:shadow-none print:mb-8 print:break-inside-avoid etiqueta-card"
+            style={{ width: '100%', minHeight: '360px', boxSizing: 'border-box' }}
           >
             {/* Topo da Etiqueta */}
             <div className="text-center mb-2 pb-1.5 border-b border-slate-300">
