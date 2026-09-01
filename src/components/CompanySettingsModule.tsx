@@ -17,7 +17,11 @@ import {
   HelpCircle,
   FileCode,
   Landmark,
-  Trash2
+  Trash2,
+  Hash,
+  Sparkles,
+  ArrowRight,
+  ListOrdered
 } from 'lucide-react';
 import { CompanyFiscalData } from '../types';
 import { 
@@ -694,6 +698,118 @@ export default function CompanySettingsModule({ onBackToDashboard }: CompanySett
                 <div className="text-[10px] text-slate-400">{formData.street}, {formData.number} - {formData.neighborhood}, {formData.city}/{formData.state}</div>
                 <div className="text-[10px] text-slate-400 font-mono">FONE: {formData.phone} | {formData.email}</div>
               </div>
+            </div>
+          </div>
+        </div>
+
+        {/* SEÇÃO 5: CONFIGURAÇÃO DE NUMERAÇÃO DE COTAÇÕES / PEDIDOS */}
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-800/80 gap-2">
+            <div className="flex items-center gap-2">
+              <div className="p-1.5 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-lg">
+                <Hash className="w-4 h-4" />
+              </div>
+              <div>
+                <h2 className="text-sm font-bold text-slate-200">5. Configuração de Numeração de Cotações / Pedidos</h2>
+                <p className="text-[11px] text-slate-400">Controle a numeração sequencial inicial e o prefixo oficial gerado pelo sistema.</p>
+              </div>
+            </div>
+            <span className="text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-2.5 py-1 rounded-full flex items-center gap-1.5 w-fit">
+              <Sparkles className="w-3 h-3" /> Sequencial Automático (+1)
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
+            {/* Campo Numérico: Próximo Número Sequencial */}
+            <div className="md:col-span-6 flex flex-col gap-1.5">
+              <label className="text-xs font-semibold text-slate-300 flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <ListOrdered className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>Próximo Número Sequencial *</span>
+                </span>
+                <span className="text-[10px] text-slate-500 font-mono">Ex: 021934 ou 50000</span>
+              </label>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                value={formData.nextQuoteSequential !== undefined ? formData.nextQuoteSequential : (formData.proximo_numero_cotacao ?? 20)}
+                onChange={(e) => {
+                  const val = parseInt(e.target.value, 10);
+                  const validVal = isNaN(val) || val < 1 ? 1 : val;
+                  setFormData(prev => ({
+                    ...prev,
+                    nextQuoteSequential: validVal,
+                    proximo_numero_cotacao: validVal
+                  }));
+                }}
+                placeholder="21934"
+                className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm outline-none focus:border-indigo-500 text-indigo-300 font-mono font-bold text-base"
+                required
+              />
+              <span className="text-[11px] text-slate-400">
+                Se você quiser iniciar uma nova fase no número <strong>50000</strong>, basta digitar <strong>50000</strong> e salvar. A cada nova cotação gravada, esse número avança automaticamente (+1).
+              </span>
+            </div>
+
+            {/* Campo de Texto Opcional: Prefixo Personalizado */}
+            <div className="md:col-span-6 flex flex-col gap-1.5">
+              <label className="text-xs font-semibold text-slate-300 flex items-center justify-between">
+                <span>Prefixo Personalizado (Opcional)</span>
+                <span className="text-[10px] text-slate-500 font-mono">Ex: COT-2026-</span>
+              </label>
+              <input
+                type="text"
+                value={formData.quotePrefix ?? formData.prefixo_cotacao ?? `COT-${new Date().getFullYear()}-`}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setFormData(prev => ({
+                    ...prev,
+                    quotePrefix: val,
+                    prefixo_cotacao: val
+                  }));
+                }}
+                placeholder={`COT-${new Date().getFullYear()}-`}
+                className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm outline-none focus:border-indigo-500 text-slate-100 font-mono font-bold"
+              />
+              <span className="text-[11px] text-slate-400">
+                Prefixo adicionado antes do número sequencial (ex: <code>COT-2026-</code>).
+              </span>
+            </div>
+
+            {/* Card Demonstrativo do Funcionamento e Prévia em Tempo Real */}
+            <div className="md:col-span-12 p-4 bg-slate-950 border border-slate-800 rounded-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                  <span>Prévia da Sequência de Orçamentos:</span>
+                </div>
+                <div className="text-[11px] text-slate-400">
+                  Os novos orçamentos seguirão estritamente o formato e o número definidos acima.
+                </div>
+              </div>
+
+              {(() => {
+                const currentSeq = Number(formData.nextQuoteSequential ?? formData.proximo_numero_cotacao ?? 20);
+                const rawPrefix = formData.quotePrefix ?? formData.prefixo_cotacao ?? `COT-${new Date().getFullYear()}-`;
+                const next1 = `${rawPrefix}${String(currentSeq).padStart(6, '0')}`;
+                const next2 = `${rawPrefix}${String(currentSeq + 1).padStart(6, '0')}`;
+
+                return (
+                  <div className="flex flex-wrap items-center gap-2 font-mono text-xs">
+                    <div className="px-3 py-1.5 bg-indigo-950/70 border border-indigo-600/40 text-indigo-300 rounded-lg font-black flex flex-col">
+                      <span className="text-[9px] font-sans text-indigo-400 uppercase font-semibold">Próximo Orçamento</span>
+                      <span>{next1}</span>
+                    </div>
+
+                    <ArrowRight className="w-4 h-4 text-slate-600" />
+
+                    <div className="px-3 py-1.5 bg-slate-900 border border-slate-800 text-slate-400 rounded-lg flex flex-col">
+                      <span className="text-[9px] font-sans text-slate-500 uppercase font-semibold">Orçamento Seguinte</span>
+                      <span>{next2}</span>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           </div>
         </div>

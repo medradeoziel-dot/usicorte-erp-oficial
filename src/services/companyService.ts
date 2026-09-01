@@ -35,6 +35,12 @@ export const DEFAULT_COMPANY_DATA: CompanyFiscalData = {
   legalRepresentativeName: 'MARCOS MARTINS',
   legalRepresentativeDoc: '092.345.510/0001-94',
 
+  // 5. Numeração Sequencial de Cotações / Pedidos
+  nextQuoteSequential: 20,
+  quotePrefix: 'COT-2026-',
+  proximo_numero_cotacao: 20,
+  prefixo_cotacao: 'COT-2026-',
+
   // Aliases
   tipo_pessoa: 'Jurídica',
   razao_social: 'L. M. BANZATTO METAIS',
@@ -91,6 +97,14 @@ export function mapSupabaseToCompany(row: any): CompanyFiscalData {
     legalRepresentativeName: row.nome_responsavel || row.legal_representative_name || row.legalRepresentativeName || DEFAULT_COMPANY_DATA.legalRepresentativeName,
     legalRepresentativeDoc: row.documento_responsavel || row.legal_representative_doc || row.legalRepresentativeDoc || DEFAULT_COMPANY_DATA.legalRepresentativeDoc,
 
+    // 5. Numeração Sequencial
+    nextQuoteSequential: typeof row.nextQuoteSequential === 'number' && !isNaN(row.nextQuoteSequential)
+      ? row.nextQuoteSequential
+      : (typeof row.proximo_numero_cotacao === 'number' && !isNaN(row.proximo_numero_cotacao)
+        ? row.proximo_numero_cotacao
+        : (parseInt(row.proximo_numero_cotacao || row.nextQuoteSequential, 10) || 20)),
+    quotePrefix: row.quotePrefix || row.prefixo_cotacao || DEFAULT_COMPANY_DATA.quotePrefix,
+
     // Aliases
     tipo_pessoa: row.tipo_pessoa || DEFAULT_COMPANY_DATA.personType,
     razao_social: row.razao_social || DEFAULT_COMPANY_DATA.corporateName,
@@ -111,11 +125,24 @@ export function mapSupabaseToCompany(row: any): CompanyFiscalData {
     logo_url: row.logo_url || '',
     nome_responsavel: row.nome_responsavel || DEFAULT_COMPANY_DATA.legalRepresentativeName,
     documento_responsavel: row.documento_responsavel || DEFAULT_COMPANY_DATA.legalRepresentativeDoc,
+    proximo_numero_cotacao: typeof row.proximo_numero_cotacao === 'number' && !isNaN(row.proximo_numero_cotacao)
+      ? row.proximo_numero_cotacao
+      : (typeof row.nextQuoteSequential === 'number' && !isNaN(row.nextQuoteSequential)
+        ? row.nextQuoteSequential
+        : (parseInt(row.proximo_numero_cotacao || row.nextQuoteSequential, 10) || 20)),
+    prefixo_cotacao: row.prefixo_cotacao || row.quotePrefix || DEFAULT_COMPANY_DATA.quotePrefix,
     updated_at: row.updated_at || new Date().toISOString()
   };
 }
 
 export function mapCompanyToSupabase(data: CompanyFiscalData): Record<string, any> {
+  const nextSeq = typeof data.nextQuoteSequential === 'number' && !isNaN(data.nextQuoteSequential)
+    ? data.nextQuoteSequential
+    : (typeof data.proximo_numero_cotacao === 'number' && !isNaN(data.proximo_numero_cotacao)
+      ? data.proximo_numero_cotacao
+      : (parseInt(String(data.nextQuoteSequential || data.proximo_numero_cotacao || '20'), 10) || 20));
+  const prefix = data.quotePrefix || data.prefixo_cotacao || 'COT-2026-';
+
   return {
     tipo_pessoa: data.personType || 'Jurídica',
     razao_social: data.corporateName || '',
@@ -141,6 +168,8 @@ export function mapCompanyToSupabase(data: CompanyFiscalData): Record<string, an
     logo_url: data.logoUrl || '',
     nome_responsavel: data.legalRepresentativeName || '',
     documento_responsavel: (data.legalRepresentativeDoc || '').replace(/\D/g, ''),
+    proximo_numero_cotacao: nextSeq,
+    prefixo_cotacao: prefix,
     updated_at: new Date().toISOString()
   };
 }
@@ -280,3 +309,49 @@ export async function saveCompanyData(data: CompanyFiscalData): Promise<{ succes
 
   return { success: true, data: payload };
 }
+
+/**
+ * Obtém a configuração de numeração sequencial de cotações (próximo número e prefixo)
+ */
+export function getQuoteSequentialConfig(): { nextSequential: number; prefix: string } {
+  const comp = getLocalCompanyData();
+  const nextSequential = typeof comp.nextQuoteSequential === 'number' && !isNaN(comp.nextQuoteSequential)
+    ? comp.nextQuoteSequential
+    : (typeof comp.proximo_numero_cotacao === 'number' && !isNaN(comp.proximo_numero_cotacao)
+      ? comp.proximo_numero_cotacao
+      : 20);
+  const prefix = comp.quotePrefix || comp.prefixo_cotacao || `COT-${new Date().getFullYear()}-`;
+  return { nextSequential, prefix };
+}
+
+/**
+ * Incrementa o número sequencial de cotação em +1 nas configurações e persiste no LocalStorage/Supabase
+ */
+export function incrementQuoteSequentialConfig(): number {
+  const comp = getLocalCompanyData();
+  const current = typeof comp.nextQuoteSequential === 'number' && !isNaN(comp.nextQuoteSequential)
+    ? comp.nextQuoteSequential
+    : (typeof comp.proximo_numero_cotacao === 'number' && !isNaN(comp.proximo_numero_cotacao)
+      ? comp.proximo_numero_cotacao
+      : 20);
+  const next = current + 1;
+  comp.nextQuoteSequential = next;
+  comp.proximo_numero_cotacao = next;
+  saveCompanyData(comp).catch(() => {});
+  return next;
+}
+
+/**
+ * Atualiza o número sequencial de cotação nas configurações
+ */
+export function setQuoteSequentialConfig(nextSequential: number, prefix?: string): void {
+  const comp = getLocalCompanyData();
+  comp.nextQuoteSequential = nextSequential;
+  comp.proximo_numero_cotacao = nextSequential;
+  if (prefix !== undefined) {
+    comp.quotePrefix = prefix;
+    comp.prefixo_cotacao = prefix;
+  }
+  saveCompanyData(comp).catch(() => {});
+}
+
