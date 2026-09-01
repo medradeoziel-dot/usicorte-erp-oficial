@@ -4,10 +4,10 @@
    1. CSS DE IMPRESSÃO E LAYOUTS (USICORTE METAIS)
    =================================================== */
 @media print {
-  /* 0. Remove todas as margens padrão de página da impressora */
+  /* 0. Configuração de Impressão: A4 Retrato com margens reduzidas de 8mm */
   @page {
-    margin: 0;
-    size: auto;
+    size: A4 portrait;
+    margin: 8mm;
   }
 
   /* 1. Oculta apenas as partes desnecessárias (menus, sidebars, cabeçalhos, botões, etc.) */
@@ -53,7 +53,7 @@
   body.print-pedido .secao-proposta { display: none !important; }
   body.print-pedido .secao-proposta-resumida { display: none !important; }
   body.print-pedido .secao-corte { display: none !important; }
-  body.print-pedido .secao-pedido { display: block !important; }
+  body.print-pedido .secao-pedido { display: flex !important; }
 
   /* Modo Etiqueta: oculta pedido, corte e proposta, exibe etiqueta 80x80 */
   body.print-etiqueta .secao-pedido { display: none !important; }
@@ -128,17 +128,28 @@
   }
 
   /* ---------------------------------------------------
-     MODELO 2: PEDIDO A4 DIVIDIDO AO MEIO (2 VIAS)
-     Imprime a Via do Cliente e a Via da Empresa/Produção
-     em blocos independentes com suporte a quebra de página automática.
+     MODELO 2: PEDIDO A4 DIVIDIDO AO MEIO (2 VIAS EM FOLHA ÚNICA)
+     Metade Superior: 1ª via ("VIA DO CLIENTE")
+     Linha de Corte: divisória horizontal tracejada (border-bottom: 1px dashed #999)
+     Metade Inferior: 2ª via ("VIA DA EMPRESA / PRODUÇÃO")
      --------------------------------------------------- */
+  body.print-pedido {
+    width: 100% !important;
+    height: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+  }
+
   .secao-pedido,
   .modelo-duas-vias {
-    display: block !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: space-between !important;
     width: 100% !important;
     max-width: 100% !important;
-    height: auto !important;
-    min-height: 0 !important;
+    height: 100% !important;
+    max-height: 275mm !important;
     box-sizing: border-box !important;
     padding: 0 !important;
     margin: 0 auto !important;
@@ -146,39 +157,111 @@
     color: #000 !important;
     box-shadow: none !important;
     border: none !important;
-    overflow: visible !important;
+    overflow: hidden !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    page-break-after: avoid !important;
+    break-after: avoid !important;
   }
 
   .via-pedido,
   .via-bloco {
     width: 100% !important;
-    min-height: 0 !important;
+    height: 48vh !important;
+    max-height: 135mm !important;
     border: 1px solid #000 !important;
-    padding: 4mm 6mm !important;
+    padding: 2.5mm 4mm !important;
     border-radius: 4px !important;
     box-sizing: border-box !important;
     display: flex !important;
     flex-direction: column !important;
     justify-content: space-between !important;
     background: #fff !important;
-    margin-bottom: 3mm !important;
-    page-break-inside: avoid;
-    break-inside: avoid;
+    margin: 0 !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    page-break-after: avoid !important;
+    break-after: avoid !important;
+    overflow: hidden !important;
   }
 
-  /* Quebra de página no final da Via do Cliente se necessário */
-  .via-cliente.quebra-pagina,
-  .via-cliente.break-after-page,
-  .via-cliente-paginada {
-    page-break-after: always !important;
-    break-after: page !important;
+  .via-cliente {
+    margin-bottom: 0 !important;
+    page-break-after: avoid !important;
+    break-after: avoid !important;
+  }
+
+  .via-empresa {
+    margin-top: 0 !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    page-break-after: avoid !important;
+    break-after: avoid !important;
+  }
+
+  /* Linha de Destaque / Divisão de Corte */
+  .linha-corte {
+    width: 100% !important;
+    border-bottom: 1px dashed #999 !important;
+    border-top: none !important;
+    text-align: center !important;
+    margin: 1.5mm 0 !important;
+    padding: 0 !important;
+    position: relative !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    height: 0 !important;
+  }
+
+  .linha-corte span,
+  .linha-corte::after {
+    background: #fff !important;
+    padding: 0 8px !important;
+    font-size: 7.5pt !important;
+    font-weight: bold !important;
+    color: #666 !important;
+    position: relative !important;
+    top: -7px !important;
+  }
+
+  /* Tabela Enxuta: espaçamento reduzido e fonte otimizada para caber na metade da folha */
+  .secao-pedido table,
+  .modelo-duas-vias table,
+  .via-pedido table,
+  .via-bloco table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    font-size: 11px !important;
+    margin-bottom: 1.5mm !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  .secao-pedido table th,
+  .modelo-duas-vias table th,
+  .via-pedido table th,
+  .via-bloco table th {
+    padding: 2px 5px !important;
+    font-size: 10px !important;
+    line-height: 1.2 !important;
+    border-bottom: 1px solid #000 !important;
+  }
+
+  .secao-pedido table td,
+  .modelo-duas-vias table td,
+  .via-pedido table td,
+  .via-bloco table td {
+    padding: 2px 5px !important;
+    font-size: 11px !important;
+    line-height: 1.2 !important;
+    border-bottom: 1px solid #e2e8f0 !important;
   }
 
   /* Header Centralizado da Empresa (L.M BANZATTO METAIS - ME) */
   .company-header-centralizado {
     display: block !important;
     width: 100% !important;
-    margin-bottom: 2.5mm !important;
+    margin-bottom: 1.5mm !important;
     page-break-inside: avoid !important;
     break-inside: avoid !important;
     color: #000 !important;
@@ -190,6 +273,24 @@
 
   .company-header-centralizado p {
     color: #111 !important;
+  }
+
+  .secao-pedido .company-header-centralizado,
+  .modelo-duas-vias .company-header-centralizado {
+    margin-bottom: 1.5mm !important;
+    padding-bottom: 1.5mm !important;
+  }
+
+  .secao-pedido .company-header-centralizado h1,
+  .modelo-duas-vias .company-header-centralizado h1 {
+    font-size: 11pt !important;
+    line-height: 1.1 !important;
+  }
+
+  .secao-pedido .company-header-centralizado p,
+  .modelo-duas-vias .company-header-centralizado p {
+    font-size: 7.5pt !important;
+    line-height: 1.15 !important;
   }
 
   /* Paginação e Repetição de Cabeçalho em Tabelas */
@@ -213,22 +314,6 @@
 
   tbody {
     page-break-inside: auto !important;
-  }
-
-  .linha-corte {
-    border-top: 2px dashed #000 !important;
-    text-align: center !important;
-    margin: 3mm 0 !important;
-    position: relative !important;
-  }
-
-  .linha-corte span,
-  .linha-corte::after {
-    background: #fff !important;
-    padding: 0 10px !important;
-    font-size: 8pt !important;
-    font-weight: bold !important;
-    color: #000 !important;
   }
 
   /* ---------------------------------------------------

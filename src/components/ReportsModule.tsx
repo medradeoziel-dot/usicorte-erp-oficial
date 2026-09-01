@@ -1765,194 +1765,193 @@ export default function ReportsModule({
       </div>
 
       {/* ===================================================
-           PROPOSTA 2: PEDIDO A4 DIVIDIDO AO MEIO (2 VIAS)
+           PROPOSTA 2: PEDIDO A4 DIVIDIDO AO MEIO (2 VIAS EM FOLHA ÚNICA)
            =================================================== */}
-      {(() => {
-        const isMultiPage = displayQuote.items.length > 3;
-        return (
-          <div 
-            id="doc-A4-2vias" 
-            className={`documento-modelo secao-pedido modelo-duas-vias bg-white text-slate-900 p-4 sm:p-6 rounded-xl shadow-2xl w-full max-w-4xl mx-auto font-sans overflow-x-hidden ${
-              activeModel === 'A4-2vias' ? 'block' : 'hidden'
-            }`}
-            style={{ minHeight: isMultiPage ? 'auto' : '850px' }}
-          >
-            {/* VIA 1: CLIENTE (Container / Bloco Independente) */}
-            <div 
-              className={`via-pedido via-cliente border border-black p-3 sm:p-4 rounded bg-white flex flex-col justify-between ${isMultiPage ? 'quebra-pagina' : ''}`} 
-              style={{ 
-                minHeight: isMultiPage ? 'auto' : '380px',
-                breakAfter: isMultiPage ? 'page' : 'auto',
-                pageBreakAfter: isMultiPage ? 'always' : 'auto',
-                marginBottom: isMultiPage ? '0' : '8px'
-              }}
-            >
-              <div>
-                {/* Header Centralizado da Empresa (Via do Cliente) */}
-                <CompanyHeader 
-                  tag="VIA DO CLIENTE"
-                  tagColor="blue"
-                  documentNumber={displayQuote.quoteNumber || '00124'}
-                  documentDate={displayQuote.date || new Date().toLocaleDateString('pt-BR')}
-                  compact={true}
-                />
+      <div 
+        id="doc-A4-2vias" 
+        className={`documento-modelo secao-pedido modelo-duas-vias bg-white text-slate-900 p-2 sm:p-4 rounded-xl shadow-2xl w-full max-w-4xl mx-auto font-sans overflow-hidden flex flex-col justify-between ${
+          activeModel === 'A4-2vias' ? 'block' : 'hidden'
+        }`}
+      >
+        {/* VIA 1: CLIENTE (Metade Superior) */}
+        <div 
+          className="via-pedido via-cliente border border-black p-2 sm:p-3 rounded bg-white flex flex-col justify-between overflow-hidden" 
+          style={{ 
+            minHeight: '340px',
+            maxHeight: '135mm',
+            pageBreakInside: 'avoid',
+            breakInside: 'avoid'
+          }}
+        >
+          <div>
+            {/* Header Centralizado da Empresa (Via do Cliente) */}
+            <CompanyHeader 
+              tag="VIA DO CLIENTE"
+              tagColor="blue"
+              documentNumber={displayQuote.quoteNumber || '00124'}
+              documentDate={displayQuote.date || new Date().toLocaleDateString('pt-BR')}
+              compact={true}
+            />
 
-                <div className="text-xs mb-3 text-slate-700 flex flex-col sm:flex-row justify-between gap-1">
-                  <div><strong>Cliente:</strong> <span className="lbl-cliente-nome font-bold uppercase">{selectedClientName || displayQuote.clientName}</span></div>
-                  <div><strong>Condições:</strong> <span className="font-semibold">{displayQuote.paymentTerms || 'À Vista / Pix'}</span></div>
+            <div className="text-[11px] mb-1.5 text-slate-700 flex flex-col sm:flex-row justify-between gap-1">
+              <div><strong>Cliente:</strong> <span className="lbl-cliente-nome font-bold uppercase">{selectedClientName || displayQuote.clientName}</span></div>
+              <div><strong>Condições:</strong> <span className="font-semibold">{displayQuote.paymentTerms || 'À Vista / Pix'}</span></div>
+            </div>
+
+            {/* Mobile Cards Via 1 */}
+            <div className="block sm:hidden space-y-1.5 mb-2">
+              {displayQuote.items.map((item, idx) => (
+                <div key={idx} className="border border-slate-200 rounded p-1.5 text-[11px] bg-slate-50 space-y-0.5">
+                  <div className="flex justify-between font-bold">
+                    <span>{item.constanteNome || item.material || 'MATERIAL'}</span>
+                    <span className="font-mono">{formatCurrency(item.subtotal || ((item.unitPrice || 0) * (item.quantity || 1)))}</span>
+                  </div>
+                  <div className="text-[10px] text-slate-600 flex justify-between">
+                    <span>Medida: {formatarMedidasLimpa(item)}</span>
+                    <span>Qtd: {item.qtd || item.quantity || 1}</span>
+                  </div>
                 </div>
+              ))}
+            </div>
 
-                {/* Mobile Cards Via 1 */}
-                <div className="block sm:hidden space-y-2 mb-3">
-                  {displayQuote.items.map((item, idx) => (
-                    <div key={idx} className="border border-slate-200 rounded p-2 text-xs bg-slate-50 space-y-1">
-                      <div className="flex justify-between font-bold">
-                        <span>{item.constanteNome || item.material || 'MATERIAL'}</span>
-                        <span className="font-mono">{formatCurrency(item.subtotal || ((item.unitPrice || 0) * (item.quantity || 1)))}</span>
-                      </div>
-                      <div className="text-[11px] text-slate-600 flex justify-between">
-                        <span>Medida: {formatarMedidasLimpa(item)}</span>
-                        <span>Qtd: {item.qtd || item.quantity || 1}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+            {/* Desktop Table Via 1 (7 Colunas Exatas - Tabela Enxuta) */}
+            <table className="hidden sm:table w-full text-[11px] border-collapse mb-1.5" border={1} cellPadding={2}>
+              <thead>
+                <tr className="bg-slate-100 font-bold text-[9.5px] uppercase border-b border-black">
+                  <th className="text-left px-1.5 py-0.5">PRODUTO / MATERIAL</th>
+                  <th className="text-center px-1.5 py-0.5">MEDIDAS</th>
+                  <th className="text-left px-1.5 py-0.5">DESCRIÇÃO</th>
+                  <th className="text-left px-1.5 py-0.5">INFORMAÇÕES</th>
+                  <th className="text-right px-1.5 py-0.5">UNITÁRIO</th>
+                  <th className="text-center px-1.5 py-0.5 w-10">QTD</th>
+                  <th className="text-right px-1.5 py-0.5">SUBTOTAL</th>
+                </tr>
+              </thead>
+              <tbody className="tbody-resumido divide-y divide-slate-200">
+                {displayQuote.items.map((item, idx) => {
+                  const produtoMaterial = item.constanteNome || item.constantName || item.material || 'MATERIAL';
+                  const medidasFormatadas = formatarMedidasLimpa(item);
+                  const descricaoItem = item.descricao || item.description || '-';
+                  const informacoesObs = item.observacao || item.notes || item.info || '-';
+                  const valorUnitario = Number(item.valorUnitario !== undefined ? item.valorUnitario : (item.unitPrice || 0));
+                  const qtd = Number(item.qtd !== undefined ? item.qtd : (item.quantity || 1));
+                  const subtotal = Number(item.subtotal !== undefined ? item.subtotal : (valorUnitario * qtd));
 
-                {/* Desktop Table Via 1 (7 Colunas Exatas) */}
-                <table className="hidden sm:table w-full text-xs border-collapse mb-3" border={1} cellPadding={4}>
-                  <thead>
-                    <tr className="bg-slate-100 font-bold text-[10px] uppercase border-b border-black">
-                      <th className="text-left p-1.5">PRODUTO / MATERIAL</th>
-                      <th className="text-center p-1.5">MEDIDAS</th>
-                      <th className="text-left p-1.5">DESCRIÇÃO</th>
-                      <th className="text-left p-1.5">INFORMAÇÕES</th>
-                      <th className="text-right p-1.5">UNITÁRIO</th>
-                      <th className="text-center p-1.5 w-12">QTD</th>
-                      <th className="text-right p-1.5">SUBTOTAL</th>
+                  return (
+                    <tr key={idx} className="hover:bg-slate-50">
+                      <td className="px-1.5 py-0.5 font-bold text-slate-900">{produtoMaterial}</td>
+                      <td className="px-1.5 py-0.5 text-center font-mono text-[9.5px]">{medidasFormatadas}</td>
+                      <td className="px-1.5 py-0.5 text-left text-slate-800 text-[10.5px]">{descricaoItem}</td>
+                      <td className="px-1.5 py-0.5 text-left text-slate-600 italic text-[9.5px]">{informacoesObs}</td>
+                      <td className="px-1.5 py-0.5 text-right font-mono">{formatCurrency(valorUnitario)}</td>
+                      <td className="px-1.5 py-0.5 text-center font-mono font-bold">{qtd}</td>
+                      <td className="px-1.5 py-0.5 text-right font-mono font-bold">{formatCurrency(subtotal)}</td>
                     </tr>
-                  </thead>
-                  <tbody className="tbody-resumido divide-y divide-slate-200">
-                    {displayQuote.items.map((item, idx) => {
-                      const produtoMaterial = item.constanteNome || item.constantName || item.material || 'MATERIAL';
-                      const medidasFormatadas = formatarMedidasLimpa(item);
-                      const descricaoItem = item.descricao || item.description || '-';
-                      const informacoesObs = item.observacao || item.notes || item.info || '-';
-                      const valorUnitario = Number(item.valorUnitario !== undefined ? item.valorUnitario : (item.unitPrice || 0));
-                      const qtd = Number(item.qtd !== undefined ? item.qtd : (item.quantity || 1));
-                      const subtotal = Number(item.subtotal !== undefined ? item.subtotal : (valorUnitario * qtd));
-
-                      return (
-                        <tr key={idx} className="hover:bg-slate-50">
-                          <td className="p-1.5 font-bold text-slate-900">{produtoMaterial}</td>
-                          <td className="p-1.5 text-center font-mono text-[10px]">{medidasFormatadas}</td>
-                          <td className="p-1.5 text-left text-slate-800 text-[11px]">{descricaoItem}</td>
-                          <td className="p-1.5 text-left text-slate-600 italic text-[10px]">{informacoesObs}</td>
-                          <td className="p-1.5 text-right font-mono">{formatCurrency(valorUnitario)}</td>
-                          <td className="p-1.5 text-center font-mono font-bold">{qtd}</td>
-                          <td className="p-1.5 text-right font-mono font-bold">{formatCurrency(subtotal)}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center text-xs border-t border-black pt-2 mt-2 gap-2">
-                <span className="text-slate-600">Assinatura Cliente: ___________________________________</span>
-                <strong className="text-sm font-mono text-slate-950">TOTAL: <span className="lbl-valor-total">{formatCurrency(grandTotal)}</span></strong>
-              </div>
-            </div>
-
-            {/* LINHA DE CORTE */}
-            <div className={`linha-corte my-6 border-t-2 border-dashed border-black text-center relative ${isMultiPage ? 'hidden print:hidden' : ''}`}>
-              <span className="bg-white px-3 text-[11px] font-bold text-slate-900 relative -top-3">
-                ✂️ CORTE AQUI
-              </span>
-            </div>
-
-            {/* VIA 2: EMPRESA / PRODUÇÃO (Container / Bloco Independente) */}
-            <div 
-              className="via-pedido via-empresa border border-black p-3 sm:p-4 rounded bg-white flex flex-col justify-between" 
-              style={{ minHeight: isMultiPage ? 'auto' : '380px' }}
-            >
-              <div>
-                {/* Header Centralizado da Empresa (Via da Empresa / Produção) */}
-                <CompanyHeader 
-                  tag="VIA DA EMPRESA / PRODUÇÃO"
-                  tagColor="amber"
-                  documentNumber={displayQuote.quoteNumber || '00124'}
-                  documentDate={displayQuote.date || new Date().toLocaleDateString('pt-BR')}
-                  compact={true}
-                />
-
-                <div className="text-xs mb-3 text-slate-700 flex flex-col sm:flex-row justify-between gap-1">
-                  <div><strong>Cliente:</strong> <span className="lbl-cliente-nome font-bold uppercase">{selectedClientName || displayQuote.clientName}</span></div>
-                  <div><strong>Data:</strong> <span className="rel-data font-mono">{displayQuote.date || new Date().toLocaleDateString('pt-BR')}</span></div>
-                </div>
-
-                {/* Mobile Cards Via 2 */}
-                <div className="block sm:hidden space-y-2 mb-3">
-                  {displayQuote.items.map((item, idx) => (
-                    <div key={idx} className="border border-slate-200 rounded p-2 text-xs bg-slate-50 space-y-1">
-                      <div className="flex justify-between font-bold">
-                        <span>{item.constanteNome || item.material || 'MATERIAL'}</span>
-                        <span className="font-mono">{formatCurrency(item.subtotal || ((item.unitPrice || 0) * (item.quantity || 1)))}</span>
-                      </div>
-                      <div className="text-[11px] text-slate-600 flex justify-between">
-                        <span>Medida: {formatarMedidasLimpa(item)}</span>
-                        <span>Qtd: {item.qtd || item.quantity || 1}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Desktop Table Via 2 (7 Colunas Exatas) */}
-                <table className="hidden sm:table w-full text-xs border-collapse mb-3" border={1} cellPadding={4}>
-                  <thead>
-                    <tr className="bg-slate-100 font-bold text-[10px] uppercase border-b border-black">
-                      <th className="text-left p-1.5">PRODUTO / MATERIAL</th>
-                      <th className="text-center p-1.5">MEDIDAS</th>
-                      <th className="text-left p-1.5">DESCRIÇÃO</th>
-                      <th className="text-left p-1.5">INFORMAÇÕES</th>
-                      <th className="text-right p-1.5">UNITÁRIO</th>
-                      <th className="text-center p-1.5 w-12">QTD</th>
-                      <th className="text-right p-1.5">SUBTOTAL</th>
-                    </tr>
-                  </thead>
-                  <tbody className="tbody-resumido divide-y divide-slate-200">
-                    {displayQuote.items.map((item, idx) => {
-                      const produtoMaterial = item.constanteNome || item.constantName || item.material || 'MATERIAL';
-                      const medidasFormatadas = formatarMedidasLimpa(item);
-                      const descricaoItem = item.descricao || item.description || '-';
-                      const informacoesObs = item.observacao || item.notes || item.info || '-';
-                      const valorUnitario = Number(item.valorUnitario !== undefined ? item.valorUnitario : (item.unitPrice || 0));
-                      const qtd = Number(item.qtd !== undefined ? item.qtd : (item.quantity || 1));
-                      const subtotal = Number(item.subtotal !== undefined ? item.subtotal : (valorUnitario * qtd));
-
-                      return (
-                        <tr key={idx} className="hover:bg-slate-50">
-                          <td className="p-1.5 font-bold text-slate-900">{produtoMaterial}</td>
-                          <td className="p-1.5 text-center font-mono text-[10px]">{medidasFormatadas}</td>
-                          <td className="p-1.5 text-left text-slate-800 text-[11px]">{descricaoItem}</td>
-                          <td className="p-1.5 text-left text-slate-600 italic text-[10px]">{informacoesObs}</td>
-                          <td className="p-1.5 text-right font-mono">{formatCurrency(valorUnitario)}</td>
-                          <td className="p-1.5 text-center font-mono font-bold">{qtd}</td>
-                          <td className="p-1.5 text-right font-mono font-bold">{formatCurrency(subtotal)}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center text-xs border-t border-black pt-2 mt-2 gap-2">
-                <span className="text-slate-600">Vendedor / Produção: ___________________________________</span>
-                <strong className="text-sm font-mono text-slate-950">TOTAL: <span className="lbl-valor-total">{formatCurrency(grandTotal)}</span></strong>
-              </div>
-            </div>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
-        );
-      })()}
+
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center text-[11px] border-t border-black pt-1 mt-1 gap-1">
+            <span className="text-slate-600">Assinatura Cliente: ___________________________________</span>
+            <strong className="text-xs sm:text-sm font-mono text-slate-950">TOTAL: <span className="lbl-valor-total">{formatCurrency(grandTotal)}</span></strong>
+          </div>
+        </div>
+
+        {/* LINHA DE DESTAQUE / CORTE ENTRE AS DUAS VIAS */}
+        <div className="linha-corte my-1.5 border-b border-dashed border-[#999] text-center relative w-full h-0">
+          <span className="bg-white px-2.5 text-[9.5px] font-bold text-slate-500 relative -top-2">
+            ✂️ CORTE AQUI
+          </span>
+        </div>
+
+        {/* VIA 2: EMPRESA / PRODUÇÃO (Metade Inferior) */}
+        <div 
+          className="via-pedido via-empresa border border-black p-2 sm:p-3 rounded bg-white flex flex-col justify-between overflow-hidden" 
+          style={{ 
+            minHeight: '340px',
+            maxHeight: '135mm',
+            pageBreakInside: 'avoid',
+            breakInside: 'avoid'
+          }}
+        >
+          <div>
+            {/* Header Centralizado da Empresa (Via da Empresa / Produção) */}
+            <CompanyHeader 
+              tag="VIA DA EMPRESA / PRODUÇÃO"
+              tagColor="amber"
+              documentNumber={displayQuote.quoteNumber || '00124'}
+              documentDate={displayQuote.date || new Date().toLocaleDateString('pt-BR')}
+              compact={true}
+            />
+
+            <div className="text-[11px] mb-1.5 text-slate-700 flex flex-col sm:flex-row justify-between gap-1">
+              <div><strong>Cliente:</strong> <span className="lbl-cliente-nome font-bold uppercase">{selectedClientName || displayQuote.clientName}</span></div>
+              <div><strong>Data:</strong> <span className="rel-data font-mono">{displayQuote.date || new Date().toLocaleDateString('pt-BR')}</span></div>
+            </div>
+
+            {/* Mobile Cards Via 2 */}
+            <div className="block sm:hidden space-y-1.5 mb-2">
+              {displayQuote.items.map((item, idx) => (
+                <div key={idx} className="border border-slate-200 rounded p-1.5 text-[11px] bg-slate-50 space-y-0.5">
+                  <div className="flex justify-between font-bold">
+                    <span>{item.constanteNome || item.material || 'MATERIAL'}</span>
+                    <span className="font-mono">{formatCurrency(item.subtotal || ((item.unitPrice || 0) * (item.quantity || 1)))}</span>
+                  </div>
+                  <div className="text-[10px] text-slate-600 flex justify-between">
+                    <span>Medida: {formatarMedidasLimpa(item)}</span>
+                    <span>Qtd: {item.qtd || item.quantity || 1}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Desktop Table Via 2 (7 Colunas Exatas - Tabela Enxuta) */}
+            <table className="hidden sm:table w-full text-[11px] border-collapse mb-1.5" border={1} cellPadding={2}>
+              <thead>
+                <tr className="bg-slate-100 font-bold text-[9.5px] uppercase border-b border-black">
+                  <th className="text-left px-1.5 py-0.5">PRODUTO / MATERIAL</th>
+                  <th className="text-center px-1.5 py-0.5">MEDIDAS</th>
+                  <th className="text-left px-1.5 py-0.5">DESCRIÇÃO</th>
+                  <th className="text-left px-1.5 py-0.5">INFORMAÇÕES</th>
+                  <th className="text-right px-1.5 py-0.5">UNITÁRIO</th>
+                  <th className="text-center px-1.5 py-0.5 w-10">QTD</th>
+                  <th className="text-right px-1.5 py-0.5">SUBTOTAL</th>
+                </tr>
+              </thead>
+              <tbody className="tbody-resumido divide-y divide-slate-200">
+                {displayQuote.items.map((item, idx) => {
+                  const produtoMaterial = item.constanteNome || item.constantName || item.material || 'MATERIAL';
+                  const medidasFormatadas = formatarMedidasLimpa(item);
+                  const descricaoItem = item.descricao || item.description || '-';
+                  const informacoesObs = item.observacao || item.notes || item.info || '-';
+                  const valorUnitario = Number(item.valorUnitario !== undefined ? item.valorUnitario : (item.unitPrice || 0));
+                  const qtd = Number(item.qtd !== undefined ? item.qtd : (item.quantity || 1));
+                  const subtotal = Number(item.subtotal !== undefined ? item.subtotal : (valorUnitario * qtd));
+
+                  return (
+                    <tr key={idx} className="hover:bg-slate-50">
+                      <td className="px-1.5 py-0.5 font-bold text-slate-900">{produtoMaterial}</td>
+                      <td className="px-1.5 py-0.5 text-center font-mono text-[9.5px]">{medidasFormatadas}</td>
+                      <td className="px-1.5 py-0.5 text-left text-slate-800 text-[10.5px]">{descricaoItem}</td>
+                      <td className="px-1.5 py-0.5 text-left text-slate-600 italic text-[9.5px]">{informacoesObs}</td>
+                      <td className="px-1.5 py-0.5 text-right font-mono">{formatCurrency(valorUnitario)}</td>
+                      <td className="px-1.5 py-0.5 text-center font-mono font-bold">{qtd}</td>
+                      <td className="px-1.5 py-0.5 text-right font-mono font-bold">{formatCurrency(subtotal)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center text-[11px] border-t border-black pt-1 mt-1 gap-1">
+            <span className="text-slate-600">Vendedor / Produção: ___________________________________</span>
+            <strong className="text-xs sm:text-sm font-mono text-slate-950">TOTAL: <span className="lbl-valor-total">{formatCurrency(grandTotal)}</span></strong>
+          </div>
+        </div>
+      </div>
 
       {/* ===================================================
            PROPOSTA 3: ETIQUETA CUPOM 80x80mm (IDENTIFICAÇÃO DA PEÇA)
@@ -2169,10 +2168,10 @@ export default function ReportsModule({
       {/* Tamanho de página: A4 RETRATO para todos os modelos, exceto ETIQUETAS */}
       <style>{activeModel === 'etiqueta-80'
         ? `@page { size: 80mm auto; margin: 3mm; }`
-        : `@page { size: A4 portrait; margin: 10mm; }
+        : `@page { size: A4 portrait; margin: 8mm; }
            @media print {
-             html, body { width: 210mm; }
-             .documento-modelo { width: 100% !important; max-width: 190mm !important; margin: 0 auto !important; box-shadow: none !important; }
+             html, body { width: 100%; height: 100%; margin: 0; padding: 0; }
+             .documento-modelo { width: 100% !important; max-width: 100% !important; margin: 0 auto !important; box-shadow: none !important; }
            }`}</style>
 
       {/* Regras de impressão de todos os modelos */}
@@ -2182,8 +2181,6 @@ export default function ReportsModule({
           tfoot { display: table-footer-group !important; }
           tr { page-break-inside: avoid !important; break-inside: avoid !important; }
           table { page-break-inside: auto !important; }
-          .via-cliente.quebra-pagina,
-          .quebra-pagina { break-after: page !important; page-break-after: always !important; }
 
           body.print-corte .btn-no-print,
           body.print-corte .filtros-bar,
@@ -2199,7 +2196,23 @@ export default function ReportsModule({
           body.print-pedido .tabela-container,
           body.print-pedido .screen-header,
           body.print-pedido .documento-modelo:not(.secao-pedido) { display: none !important; }
-          body.print-pedido #doc-A4-2vias { display: block !important; box-shadow: none !important; width: 100% !important; max-width: 100% !important; }
+          body.print-pedido #doc-A4-2vias { 
+            display: flex !important; 
+            flex-direction: column !important;
+            justify-content: space-between !important;
+            box-shadow: none !important; 
+            width: 100% !important; 
+            max-width: 100% !important;
+            height: 100% !important;
+            max-height: 275mm !important;
+            padding: 0 !important;
+            margin: 0 auto !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+            page-break-after: avoid !important;
+            break-after: avoid !important;
+            overflow: hidden !important;
+          }
 
           body.print-etiqueta .btn-no-print,
           body.print-etiqueta .filtros-bar,

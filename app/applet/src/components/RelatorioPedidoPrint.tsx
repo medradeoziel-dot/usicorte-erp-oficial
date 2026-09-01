@@ -25,94 +25,96 @@ export default function RelatorioPedidoPrint({ cliente, numeroPedido, data, iten
   const valorTotal = itens.reduce((acc, item) => acc + (item.valorGeral || 0), 0);
 
   const ViaDocumento = ({ tipo, bgTag }: { tipo: string; bgTag: string }) => (
-    <div className="w-full box-border">
-      {/* Cabeçalho da Via */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b-2 border-slate-800 pb-2 mb-3 gap-2">
-        <div className="flex items-center gap-3">
-          <div className="leading-none">
-            <span className="text-xl text-slate-900 font-bold">Usi</span>
-            <span className="text-xl text-red-600 font-bold">corte</span>
-            <br />
-            <span className="text-xl text-slate-900">Metais</span>
-          </div>
-          <div className={`${bgTag} text-xs font-bold px-2 py-1 rounded text-slate-800 uppercase`}>
-            {tipo}
-          </div>
-        </div>
-        <div className="text-xs sm:text-sm font-bold text-slate-700 uppercase">
-          Pedido Nº: <span className="text-slate-900 font-mono font-black">{numeroPedido}</span>
-        </div>
-      </div>
-
-      {/* Dados do Cliente e Data */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center text-xs sm:text-sm mb-3 font-medium text-slate-700 gap-1">
-        <div>
-          Cliente: <span className="font-bold text-slate-900 uppercase">{cliente}</span>
-        </div>
-        <div>
-          Data: <span className="font-bold text-slate-900 font-mono">{data}</span>
-        </div>
-      </div>
-
-      {/* MOBILE: Cards (< 640px) */}
-      <div className="block sm:hidden space-y-2 mb-4">
-        {itens.map((item, index) => (
-          <div
-            key={item.idVer || index}
-            className="border border-slate-200 rounded p-2.5 bg-slate-50 text-xs space-y-1"
-          >
-            <div className="flex justify-between items-center font-bold">
-              <span className="text-slate-900">{item.produto}</span>
-              <span className="font-mono text-slate-900">{formatMoeda(item.valorGeral)}</span>
+    <div className="w-full box-border via-pedido flex flex-col justify-between" style={{ height: '48vh', maxHeight: '135mm', pageBreakInside: 'avoid', breakInside: 'avoid' }}>
+      <div>
+        {/* Cabeçalho da Via */}
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b-2 border-slate-800 pb-1.5 mb-2 gap-1">
+          <div className="flex items-center gap-2">
+            <div className="leading-none">
+              <span className="text-base sm:text-lg text-slate-900 font-bold">Usi</span>
+              <span className="text-base sm:text-lg text-red-600 font-bold">corte</span>
+              <br />
+              <span className="text-base sm:text-lg text-slate-900">Metais</span>
             </div>
-            <div className="flex justify-between text-[11px] text-slate-600 font-mono">
-              <span>Medida: {item.medida}</span>
-              <span>Qtd: <strong>{item.qtd}</strong></span>
+            <div className={`${bgTag} text-[10px] font-bold px-1.5 py-0.5 rounded text-slate-800 uppercase`}>
+              {tipo}
             </div>
-            {item.pesoTotal ? (
-              <div className="text-[11px] text-slate-500 font-mono">
-                Peso: {formatPeso(item.pesoTotal)}
+          </div>
+          <div className="text-[11px] sm:text-xs font-bold text-slate-700 uppercase">
+            Pedido Nº: <span className="text-slate-900 font-mono font-black">{numeroPedido}</span>
+          </div>
+        </div>
+
+        {/* Dados do Cliente e Data */}
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center text-[11px] mb-2 font-medium text-slate-700 gap-1">
+          <div>
+            Cliente: <span className="font-bold text-slate-900 uppercase">{cliente}</span>
+          </div>
+          <div>
+            Data: <span className="font-bold text-slate-900 font-mono">{data}</span>
+          </div>
+        </div>
+
+        {/* MOBILE: Cards (< 640px) */}
+        <div className="block sm:hidden space-y-1.5 mb-2">
+          {itens.map((item, index) => (
+            <div
+              key={item.idVer || index}
+              className="border border-slate-200 rounded p-1.5 bg-slate-50 text-[11px] space-y-0.5"
+            >
+              <div className="flex justify-between items-center font-bold">
+                <span className="text-slate-900">{item.produto}</span>
+                <span className="font-mono text-slate-900">{formatMoeda(item.valorGeral)}</span>
               </div>
-            ) : null}
-          </div>
-        ))}
-      </div>
+              <div className="flex justify-between text-[10px] text-slate-600 font-mono">
+                <span>Medida: {item.medida}</span>
+                <span>Qtd: <strong>{item.qtd}</strong></span>
+              </div>
+              {item.pesoTotal ? (
+                <div className="text-[10px] text-slate-500 font-mono">
+                  Peso: {formatPeso(item.pesoTotal)}
+                </div>
+              ) : null}
+            </div>
+          ))}
+        </div>
 
-      {/* DESKTOP & IMPRESSÃO: Tabela (>= 640px / print) */}
-      <div className="hidden sm:block print:block overflow-x-auto mb-4">
-        <table className="w-full text-xs">
-          <thead>
-            <tr className="border-y-2 border-slate-300 text-slate-600">
-              <th className="py-2 px-1 text-left font-bold uppercase">Material</th>
-              <th className="py-2 px-1 text-center font-bold uppercase">Medidas</th>
-              <th className="py-2 px-1 text-center font-bold uppercase">Qtd</th>
-              <th className="py-2 px-1 text-center font-bold uppercase">Peso Total</th>
-              <th className="py-2 px-1 text-right font-bold uppercase">Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            {itens.map((item, index) => (
-              <tr key={item.idVer || index} className="border-b border-slate-100">
-                <td className="py-2 px-1 font-bold">{item.produto}</td>
-                <td className="py-2 px-1 text-center text-slate-600 font-mono">{item.medida}</td>
-                <td className="py-2 px-1 text-center font-bold font-mono">{item.qtd}</td>
-                <td className="py-2 px-1 text-center font-medium font-mono">{formatPeso(item.pesoTotal)}</td>
-                <td className="py-2 px-1 text-right font-bold font-mono">{formatMoeda(item.valorGeral)}</td>
+        {/* DESKTOP & IMPRESSÃO: Tabela (>= 640px / print) */}
+        <div className="hidden sm:block print:block overflow-x-auto mb-2">
+          <table className="w-full text-[11px]">
+            <thead>
+              <tr className="border-y border-slate-300 text-slate-700 text-[10px]">
+                <th className="py-1 px-1.5 text-left font-bold uppercase">Material</th>
+                <th className="py-1 px-1.5 text-center font-bold uppercase">Medidas</th>
+                <th className="py-1 px-1.5 text-center font-bold uppercase">Qtd</th>
+                <th className="py-1 px-1.5 text-center font-bold uppercase">Peso Total</th>
+                <th className="py-1 px-1.5 text-right font-bold uppercase">Total</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {itens.map((item, index) => (
+                <tr key={item.idVer || index} className="border-b border-slate-100">
+                  <td className="py-1 px-1.5 font-bold">{item.produto}</td>
+                  <td className="py-1 px-1.5 text-center text-slate-600 font-mono text-[10px]">{item.medida}</td>
+                  <td className="py-1 px-1.5 text-center font-bold font-mono">{item.qtd}</td>
+                  <td className="py-1 px-1.5 text-center font-medium font-mono text-[10px]">{formatPeso(item.pesoTotal)}</td>
+                  <td className="py-1 px-1.5 text-right font-bold font-mono">{formatMoeda(item.valorGeral)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* Rodapé da Via */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end border-t border-slate-300 pt-4 gap-3">
-        <div className="text-xs text-slate-500 w-full sm:w-1/2">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end border-t border-slate-300 pt-1.5 mt-1 gap-1 text-[11px]">
+        <div className="text-[10px] text-slate-500 w-full sm:w-1/2">
           {tipo === 'VIA DO CLIENTE' ? 'Assinatura Cliente:' : 'Vendedor / Produção:'}{' '}
-          <span className="inline-block border-b border-slate-400 w-full sm:w-56 mt-1 sm:mt-0 sm:ml-2"></span>
+          <span className="inline-block border-b border-slate-400 w-full sm:w-48 mt-1 sm:mt-0 sm:ml-2"></span>
         </div>
-        <div className="text-xs sm:text-sm font-bold uppercase w-full sm:w-auto flex justify-between sm:block">
+        <div className="text-[11px] sm:text-xs font-bold uppercase w-full sm:w-auto flex justify-between sm:block">
           <span>Total:</span>{' '}
-          <span className="text-sm sm:text-base font-mono font-black text-slate-900 ml-1">
+          <span className="text-xs sm:text-sm font-mono font-black text-slate-900 ml-1">
             {formatMoeda(valorTotal)}
           </span>
         </div>
@@ -121,12 +123,20 @@ export default function RelatorioPedidoPrint({ cliente, numeroPedido, data, iten
   );
 
   return (
-    <div className="w-full bg-white text-slate-900 font-sans print:p-0 p-4 sm:p-8 max-w-[900px] mx-auto min-h-screen flex flex-col justify-between box-border overflow-x-hidden">
+    <div className="w-full bg-white text-slate-900 font-sans print:p-0 p-2 sm:p-4 max-w-[900px] mx-auto min-h-screen flex flex-col justify-between box-border overflow-hidden secao-pedido modelo-duas-vias">
+      {/* Estilos específicos para impressão em página única A4 */}
+      <style>{`
+        @page { size: A4 portrait; margin: 8mm; }
+        @media print {
+          html, body { width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden; }
+        }
+      `}</style>
+
       {/* Botão de Impressão (Oculto na impressão) */}
-      <div className="print:hidden mb-4 flex justify-end">
+      <div className="print:hidden mb-2 flex justify-end">
         <button
           onClick={() => window.print()}
-          className="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded shadow font-bold text-xs sm:text-sm cursor-pointer transition flex items-center gap-2"
+          className="bg-slate-800 hover:bg-slate-900 text-white px-3 py-1.5 rounded shadow font-bold text-xs cursor-pointer transition flex items-center gap-1.5"
         >
           <span>🖨️</span> Imprimir Pedido
         </button>
@@ -136,9 +146,9 @@ export default function RelatorioPedidoPrint({ cliente, numeroPedido, data, iten
       <ViaDocumento tipo="VIA DO CLIENTE" bgTag="bg-blue-100" />
 
       {/* LINHA DE CORTE */}
-      <div className="relative my-8 sm:my-10 border-t-2 border-dashed border-slate-400 flex justify-center items-center">
-        <span className="absolute bg-white px-3 text-[11px] sm:text-xs text-slate-500 font-bold tracking-widest uppercase flex items-center gap-1.5">
-          ✂️ Corte Aqui
+      <div className="linha-corte my-1.5 border-b border-dashed border-[#999] text-center relative w-full h-0">
+        <span className="bg-white px-2.5 text-[9.5px] font-bold text-slate-500 relative -top-2">
+          ✂️ CORTE AQUI
         </span>
       </div>
 

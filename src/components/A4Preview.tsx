@@ -124,16 +124,15 @@ export default function A4Preview({ pedido, cliente, itens, fotosPorPeca, mode }
   );
 
   if (is2vias) {
-    const isMultiPage = itens.length > 3;
     return (
-      <div className="flex flex-col gap-4 w-full max-w-4xl mx-auto">
-        <div className={`via-bloco via-cliente border border-black rounded p-2 bg-white ${isMultiPage ? 'quebra-pagina' : ''}`} style={{ breakAfter: isMultiPage ? 'page' : 'auto', pageBreakAfter: isMultiPage ? 'always' : 'auto' }}>
+      <div className="flex flex-col justify-between w-full max-w-4xl mx-auto secao-pedido modelo-duas-vias">
+        <div className="via-bloco via-cliente border border-black rounded p-1 sm:p-2 bg-white" style={{ pageBreakInside: 'avoid', breakInside: 'avoid' }}>
           <DocumentBlock label="VIA DO CLIENTE" tagColor="blue" />
         </div>
-        <div className={`linha-corte border-t-2 border-dashed border-black my-4 text-center ${isMultiPage ? 'hidden print:hidden' : 'no-print'}`}>
-          <span className="bg-white px-2 text-xs font-bold text-slate-800 relative -top-2.5">✂️ CORTE AQUI</span>
+        <div className="linha-corte border-b border-dashed border-[#999] my-1.5 text-center relative w-full h-0">
+          <span className="bg-white px-2.5 text-[9.5px] font-bold text-slate-500 relative -top-2">✂️ CORTE AQUI</span>
         </div>
-        <div className="via-bloco via-empresa border border-black rounded p-2 bg-white">
+        <div className="via-bloco via-empresa border border-black rounded p-1 sm:p-2 bg-white" style={{ pageBreakInside: 'avoid', breakInside: 'avoid' }}>
           <DocumentBlock label="VIA DA EMPRESA / PRODUÇÃO" tagColor="amber" />
         </div>
       </div>
