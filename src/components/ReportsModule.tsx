@@ -1963,14 +1963,21 @@ export default function ReportsModule({
           <div 
             key={itemIdx}
             id={`doc-etiqueta-80-${itemIdx}`}
-            className={`documento-modelo secao-etiqueta modelo-etiqueta-80 w-full max-w-[380px] border-2 border-black rounded-lg p-4 bg-white text-black font-sans relative mx-auto shadow-2xl print:m-0 print:break-after-page ${
+            className={`documento-modelo secao-etiqueta modelo-etiqueta-80 etiqueta-card w-full max-w-[380px] border-2 border-black rounded-lg bg-white text-black font-sans relative mx-auto shadow-2xl ${
               activeModel === 'etiqueta-80'
                 ? (selectedItemIndex === itemIdx ? 'block' : 'hidden print:block')
                 : 'hidden'
             }`}
+            style={{
+              padding: '8px',
+              marginBottom: '12mm',
+              breakInside: 'avoid',
+              pageBreakInside: 'avoid',
+              boxSizing: 'border-box'
+            }}
           >
             {/* Cabeçalho da Empresa */}
-            <div className="etiqueta-header text-center pb-2 mb-3 border-b border-black">
+            <div className="etiqueta-header text-center pb-1.5 mb-2 border-b border-black">
               <h2 className="font-black text-sm tracking-wide uppercase leading-tight text-slate-950 font-sans">
                 USICORTE METAIS
               </h2>
@@ -1986,11 +1993,11 @@ export default function ReportsModule({
             </div>
 
             {/* Conteúdo: Dados + Desenho */}
-            <div className="etiqueta-corpo grid grid-cols-12 gap-2 items-start mb-3">
+            <div className="etiqueta-corpo grid grid-cols-12 gap-2 items-start mb-2">
               {/* Coluna Esquerda - Informações */}
-              <div className="etiqueta-dados col-span-7 text-xs space-y-1.4 leading-tight">
+              <div className="etiqueta-dados col-span-7 text-xs space-y-1 leading-tight">
                 <div>
-                  <span className="font-bold text-gray-600 block text-[12px]">EMPRESA / CLIENTE:</span>
+                  <span className="font-bold text-gray-600 block text-[11px]">EMPRESA / CLIENTE:</span>
                   <span className="lbl-cliente-nome font-extrabold uppercase">{selectedClientName || displayQuote.clientName || 'CLIENTE BALCÃO'}</span>
                 </div>
 
@@ -2017,9 +2024,9 @@ export default function ReportsModule({
 
                 {/* Campo de Observação */}
                 {(item.observacao || item.notes || item.info || item.descricao || displayQuote.observations) && (
-                  <div className="pt-1">
-                    <span className="font-bold text-gray-600 block text-[10px]">OBSERVAÇÃO:</span>
-                    <span id="etiq-obs" className="font-semibold text-[10px] block text-gray-800 italic leading-snug">
+                  <div className="pt-0.5">
+                    <span className="font-bold text-gray-600 block text-[9.5px]">OBSERVAÇÃO:</span>
+                    <span id="etiq-obs" className="font-semibold text-[9.5px] block text-gray-800 italic leading-snug">
                       {item.observacao || item.notes || item.info || item.descricao || displayQuote.observations}
                     </span>
                   </div>
@@ -2029,7 +2036,7 @@ export default function ReportsModule({
               {/* Coluna Direita - Desenho Técnico Nítido */}
               <div 
                 id="box-foto-etiqueta"
-                className="etiqueta-foto-box col-span-5 border-2 border-dashed border-gray-400 p-1 rounded flex items-center justify-center min-h-[110px] bg-slate-50 overflow-hidden"
+                className="etiqueta-foto-box col-span-5 border-2 border-dashed border-gray-400 p-1 rounded flex items-center justify-center min-h-[105px] bg-slate-50 overflow-hidden"
               >
                 <EtiquetaDesenho
                   material={item.constanteNome || item.material || (item as any).produto || item.descricao}
@@ -2044,7 +2051,7 @@ export default function ReportsModule({
 
             {/* Item selector pills if quote has multiple items */}
             {displayQuote.items.length > 1 && (
-              <div className="btn-no-print pt-1 pb-2 mb-2 flex items-center gap-1 overflow-x-auto border-t border-slate-200">
+              <div className="btn-no-print pt-1 pb-1.5 mb-1.5 flex items-center gap-1 overflow-x-auto border-t border-slate-200">
                 <span className="text-[9px] text-slate-400 font-bold">Peça:</span>
                 {displayQuote.items.map((it, idx) => (
                   <button
@@ -2062,8 +2069,8 @@ export default function ReportsModule({
             )}
 
             {/* Rodapé Interno */}
-            <div className="etiqueta-footer pt-2 text-center mt-auto">
-              <span className="site-url text-[10px] font-bold tracking-widest text-black uppercase block">
+            <div className="etiqueta-footer pt-1.5 pb-0.5 text-center mt-auto">
+              <span className="site-url text-[9.5px] font-bold tracking-widest text-black uppercase block">
                 www.usicortemetais.com.br
               </span>
             </div>
@@ -2167,7 +2174,16 @@ export default function ReportsModule({
 
       {/* Tamanho de página: A4 RETRATO para todos os modelos, exceto ETIQUETAS */}
       <style>{activeModel === 'etiqueta-80'
-        ? `@page { size: 80mm auto; margin: 3mm; }`
+        ? `@page { size: auto; margin: 5mm; }
+           @media print {
+             .etiqueta-card {
+               break-inside: avoid !important;
+               page-break-inside: avoid !important;
+               margin-bottom: 12mm !important;
+               box-sizing: border-box !important;
+               padding: 8px !important;
+             }
+           }`
         : `@page { size: A4 portrait; margin: 8mm; }
            @media print {
              html, body { width: 100%; height: 100%; margin: 0; padding: 0; }
@@ -2181,6 +2197,14 @@ export default function ReportsModule({
           tfoot { display: table-footer-group !important; }
           tr { page-break-inside: avoid !important; break-inside: avoid !important; }
           table { page-break-inside: auto !important; }
+
+          .etiqueta-card {
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
+            margin-bottom: 12mm !important;
+            box-sizing: border-box !important;
+            padding: 8px !important;
+          }
 
           body.print-corte .btn-no-print,
           body.print-corte .filtros-bar,

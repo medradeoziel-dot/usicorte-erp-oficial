@@ -25,8 +25,15 @@ export default function LabelPreview({
     <div className="flex justify-center no-print-wrapper">
       <div
         id="etiqueta-print"
-        className="label-80x80 bg-white text-black select-none"
-        style={{ fontFamily: "'Courier New', Courier, monospace" }}
+        className="label-80x80 etiqueta-card bg-white text-black select-none"
+        style={{ 
+          fontFamily: "'Courier New', Courier, monospace",
+          padding: '8px',
+          marginBottom: '12mm',
+          breakInside: 'avoid',
+          pageBreakInside: 'avoid',
+          boxSizing: 'border-box'
+        }}
       >
         <div className="label-header">
           <div className="label-company">USICORTE METAIS</div>

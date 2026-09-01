@@ -346,6 +346,14 @@
     border: none !important;
   }
 
+  .etiqueta-card {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+    margin-bottom: 12mm !important;
+    box-sizing: border-box !important;
+    padding: 8px !important;
+  }
+
   .secao-etiqueta,
   .modelo-etiqueta-80 {
     display: flex !important;
@@ -354,8 +362,9 @@
     width: 80mm !important;
     max-width: 80mm !important;
     height: 80mm !important;
+    min-height: 80mm !important;
     max-height: 80mm !important;
-    padding: 2mm 2.5mm !important;
+    padding: 8px !important;
     box-sizing: border-box !important;
     border: 1.5px solid #000 !important;
     border-top: 1.5px solid #000 !important;
@@ -363,11 +372,11 @@
     background: #fff !important;
     color: #000 !important;
     margin: 0 auto !important;
-    margin-top: 0 !important;
+    margin-bottom: 12mm !important;
     box-shadow: none !important;
     overflow: hidden !important; /* Evita gerar páginas em branco extras */
-    page-break-after: avoid !important;
-    break-after: avoid !important;
+    page-break-after: auto !important;
+    break-after: auto !important;
     page-break-inside: avoid !important;
     break-inside: avoid !important;
   }
@@ -499,7 +508,9 @@
 
   .etiqueta-footer {
     border-top: 1px solid #000 !important;
-    padding-top: 1mm !important;
+    padding-top: 1.5mm !important;
+    padding-bottom: 2px !important;
+    margin-top: auto !important;
     text-align: center !important;
   }
 
@@ -509,17 +520,15 @@
     letter-spacing: 0.5px !important;
     color: #000 !important;
     display: block !important;
+    line-height: 1.2 !important;
   }
 
   /* Ajustes de corpo por modo */
   body.print-etiqueta {
-    width: 80mm !important;
-    max-width: 80mm !important;
-    height: 80mm !important;
-    max-height: 80mm !important;
+    width: 100% !important;
+    max-width: 100% !important;
     margin: 0 auto !important;
     padding: 0 !important;
-    overflow: hidden !important;
   }
 
   body.print-pedido,
@@ -870,6 +879,18 @@
   image-rendering: crisp-edges;
   image-rendering: pixelated;
 }
+
+/* ===================================================
+   CONTAINER E CARD DE ETIQUETA (ESPACAMENTO E QUEBRA)
+   =================================================== */
+.etiqueta-card {
+  break-inside: avoid !important;
+  page-break-inside: avoid !important;
+  margin-bottom: 12mm !important;
+  box-sizing: border-box;
+  padding: 8px;
+}
+
 
 
 
