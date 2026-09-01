@@ -22,6 +22,8 @@ export default function RelatorioEmpresaPrint({ itens }: Props) {
     return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(val || 0);
   };
 
+  const totalTiposItens = itens.length;
+  const totalPecas = itens.reduce((acc, item) => acc + Number(item.qtd || 0), 0);
   const valorTotal = itens.reduce((acc, item) => acc + (item.valorGeral || 0), 0);
 
   return (
@@ -100,12 +102,13 @@ export default function RelatorioEmpresaPrint({ itens }: Props) {
         </table>
       </div>
 
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mt-4 pt-3 border-t border-slate-300 gap-2">
-        <div className="font-bold text-xs sm:text-sm text-slate-700">
-          Quantidade de Registros: <span className="ml-2 font-black text-slate-900">{itens.length}</span>
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mt-2 pt-2 border-t border-slate-400 font-bold text-xs gap-2">
+        <div className="flex gap-4 text-slate-700">
+          <span>ITENS: <strong className="text-slate-900">{totalTiposItens}</strong></span>
+          <span>TOTAL PEÇAS: <strong className="text-slate-900">{totalPecas} PÇ</strong></span>
         </div>
-        <div className="font-bold text-xs sm:text-sm text-slate-800 w-full sm:w-auto flex justify-between sm:block">
-          <span>VALOR TOTAL:</span> <span className="ml-2 text-blue-700 font-black text-sm sm:text-base font-mono">{formatCurrency(valorTotal)}</span>
+        <div className="text-sm">
+          TOTAL: <strong className="text-slate-900 font-mono font-black">{formatCurrency(valorTotal)}</strong>
         </div>
       </div>
     </div>

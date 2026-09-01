@@ -41,6 +41,8 @@ export default function RelatorioPropostaPrint({
   const formatPeso = (val?: number) =>
     val ? new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 3 }).format(val) + " Kg" : "-";
 
+  const totalTiposItens = itens.length;
+  const totalPecas = itens.reduce((acc, item) => acc + Number(item.qtd || 0), 0);
   const subtotalGeral = itens.reduce((acc, item) => acc + (item.valorGeral || 0), 0);
   const pesoGeral = itens.reduce((acc, item) => acc + (item.pesoTotal || 0), 0);
   const valorTotal = subtotalGeral - desconto + frete;
@@ -169,6 +171,17 @@ export default function RelatorioPropostaPrint({
             ))}
           </tbody>
         </table>
+      </div>
+
+      {/* Totais de Itens / Peças */}
+      <div className="flex justify-between items-center mb-3 pt-2 border-t border-slate-400 font-bold text-xs">
+        <div className="flex gap-4 text-slate-700">
+          <span>ITENS: <strong className="text-slate-900">{totalTiposItens}</strong></span>
+          <span>TOTAL PEÇAS: <strong className="text-slate-900">{totalPecas} PÇ</strong></span>
+        </div>
+        <div className="text-sm">
+          SUBTOTAL: <strong className="text-slate-900 font-mono font-black">{formatMoeda(subtotalGeral)}</strong>
+        </div>
       </div>
 
       {/* Observações e Totais */}

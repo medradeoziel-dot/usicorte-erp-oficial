@@ -22,6 +22,8 @@ export default function RelatorioPedidoPrint({ cliente, numeroPedido, data, iten
   const formatPeso = (val?: number) =>
     val ? new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 3 }).format(val) + " Kg" : "-";
 
+  const totalTiposItens = itens.length;
+  const totalPecas = itens.reduce((acc, item) => acc + Number(item.qtd || 0), 0);
   const valorTotal = itens.reduce((acc, item) => acc + (item.valorGeral || 0), 0);
 
   const ViaDocumento = ({ tipo, bgTag }: { tipo: string; bgTag: string }) => (
@@ -106,17 +108,23 @@ export default function RelatorioPedidoPrint({ cliente, numeroPedido, data, iten
         </div>
       </div>
 
-      {/* Rodapé da Via */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end border-t border-slate-300 pt-1.5 mt-1 gap-1 text-[11px]">
-        <div className="text-[10px] text-slate-500 w-full sm:w-1/2">
-          {tipo === 'VIA DO CLIENTE' ? 'Assinatura Cliente:' : 'Vendedor / Produção:'}{' '}
-          <span className="inline-block border-b border-slate-400 w-full sm:w-48 mt-1 sm:mt-0 sm:ml-2"></span>
+      {/* Rodapé da Via com Totais de Itens, Peças e Valor */}
+      <div>
+        <div className="flex justify-between items-center mt-1 pt-1.5 border-t border-slate-400 font-bold text-xs">
+          <div className="flex gap-4 text-slate-700">
+            <span>ITENS: <strong className="text-slate-900">{totalTiposItens}</strong></span>
+            <span>TOTAL PEÇAS: <strong className="text-slate-900">{totalPecas} PÇ</strong></span>
+          </div>
+          <div className="text-xs sm:text-sm">
+            TOTAL: <strong className="text-slate-900 font-mono font-black">{formatMoeda(valorTotal)}</strong>
+          </div>
         </div>
-        <div className="text-[11px] sm:text-xs font-bold uppercase w-full sm:w-auto flex justify-between sm:block">
-          <span>Total:</span>{' '}
-          <span className="text-xs sm:text-sm font-mono font-black text-slate-900 ml-1">
-            {formatMoeda(valorTotal)}
-          </span>
+
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end border-t border-slate-200 pt-1 mt-1 gap-1 text-[11px]">
+          <div className="text-[10px] text-slate-500 w-full sm:w-1/2">
+            {tipo === 'VIA DO CLIENTE' ? 'Assinatura Cliente:' : 'Vendedor / Produção:'}{' '}
+            <span className="inline-block border-b border-slate-400 w-full sm:w-48 mt-1 sm:mt-0 sm:ml-2"></span>
+          </div>
         </div>
       </div>
     </div>

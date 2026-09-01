@@ -260,195 +260,245 @@ export default function GestaoPedidosRelatorios() {
           {/* FOLHA DE IMPRESSÃO (O NAVEGADOR IMPRIME APENAS ESTE BLOCO) */}
           <div className="max-w-[1000px] mx-auto mt-6 bg-white rounded-lg shadow-2xl overflow-hidden">
             <div id="area-impressao" className="p-8 text-black">
+              {(() => {
+                const totalTiposItens = itensParaImprimir.length;
+                const totalPecas = itensParaImprimir.reduce((acc, item) => acc + Number(item.qtd || 0), 0);
+                const valorTotal = itensParaImprimir.reduce((acc, item) => acc + (item.valorGeral || 0), 0);
 
-              {/* MODELO 1: EMPRESA */}
-              {modeloAtivo === 'empresa' && (
-                <div>
-                  <h2 className="text-xl font-bold text-slate-800 border-b-2 border-slate-800 pb-2 mb-4">Relatório Empresa</h2>
-                  <table className="w-full text-xs border-collapse border border-slate-300">
-                    <thead>
-                      <tr className="bg-slate-100 text-slate-800 border-b border-slate-300">
-                        <th className="p-2 border border-slate-300">Data</th>
-                        <th className="p-2 border border-slate-300">Produto</th>
-                        <th className="p-2 border border-slate-300">Medida</th>
-                        <th className="p-2 border border-slate-300">Descrição</th>
-                        <th className="p-2 border border-slate-300">Qtd</th>
-                        <th className="p-2 border border-slate-300">Unitário</th>
-                        <th className="p-2 border border-slate-300">Total</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {itensParaImprimir.map((item) => (
-                        <tr key={item.idVer} className="border-b border-slate-200">
-                          <td className="p-2 border text-center">{item.data}</td>
-                          <td className="p-2 border">{item.produto}</td>
-                          <td className="p-2 border font-mono">{item.medida}</td>
-                          <td className="p-2 border">{item.descricao}</td>
-                          <td className="p-2 border text-center font-bold">{item.qtd}</td>
-                          <td className="p-2 border text-right">{formatCurrency(item.unitario)}</td>
-                          <td className="p-2 border text-right font-bold">{formatCurrency(item.valorGeral)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  <div className="mt-4 flex justify-between font-bold text-sm">
-                    <span>Qtd de Registros: {itensParaImprimir.length}</span>
-                    <span>TOTAL: {formatCurrency(itensParaImprimir.reduce((a, b) => a + b.valorGeral, 0))}</span>
-                  </div>
-                </div>
-              )}
+                return (
+                  <>
+                    {/* MODELO 1: EMPRESA */}
+                    {modeloAtivo === 'empresa' && (
+                      <div>
+                        <h2 className="text-xl font-bold text-slate-800 border-b-2 border-slate-800 pb-2 mb-4">Relatório Empresa</h2>
+                        <table className="w-full text-xs border-collapse border border-slate-300">
+                          <thead>
+                            <tr className="bg-slate-100 text-slate-800 border-b border-slate-300">
+                              <th className="p-2 border border-slate-300">Data</th>
+                              <th className="p-2 border border-slate-300">Produto</th>
+                              <th className="p-2 border border-slate-300">Medida</th>
+                              <th className="p-2 border border-slate-300">Descrição</th>
+                              <th className="p-2 border border-slate-300">Qtd</th>
+                              <th className="p-2 border border-slate-300">Unitário</th>
+                              <th className="p-2 border border-slate-300">Total</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {itensParaImprimir.map((item) => (
+                              <tr key={item.idVer} className="border-b border-slate-200">
+                                <td className="p-2 border text-center">{item.data}</td>
+                                <td className="p-2 border">{item.produto}</td>
+                                <td className="p-2 border font-mono">{item.medida}</td>
+                                <td className="p-2 border">{item.descricao}</td>
+                                <td className="p-2 border text-center font-bold">{item.qtd}</td>
+                                <td className="p-2 border text-right">{formatCurrency(item.unitario)}</td>
+                                <td className="p-2 border text-right font-bold">{formatCurrency(item.valorGeral)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        <div className="flex justify-between items-center mt-2 pt-2 border-t border-slate-400 font-bold text-xs">
+                          <div className="flex gap-4 text-slate-700">
+                            <span>ITENS: <strong className="text-slate-900">{totalTiposItens}</strong></span>
+                            <span>TOTAL PEÇAS: <strong className="text-slate-900">{totalPecas} PÇ</strong></span>
+                          </div>
+                          <div className="text-sm">
+                            TOTAL: <strong className="text-slate-900 font-mono font-black">{formatCurrency(valorTotal)}</strong>
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
-              {/* MODELO 2: CORTE */}
-              {modeloAtivo === 'corte' && (
-                <div>
-                  <h2 className="text-xl font-bold text-slate-900 border-b-2 border-black pb-2 mb-4 uppercase">Ordem de Corte - Produção</h2>
-                  <table className="w-full text-xs border-collapse">
-                    <thead>
-                      <tr className="border-b-2 border-black text-black">
-                        <th className="p-2 text-left">Código</th>
-                        <th className="p-2 text-left">Produto</th>
-                        <th className="p-2 text-left">Medida</th>
-                        <th className="p-2 text-left">Descrição</th>
-                        <th className="p-2 text-center">Qtd</th>
-                        <th className="p-2 text-center w-32 border-l border-black">Conferência</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {itensParaImprimir.map((item) => (
-                        <tr key={item.idVer} className="border-b border-slate-300">
-                          <td className="p-2.5 font-mono">{item.observacao || '-'}</td>
-                          <td className="p-2.5 font-bold">{item.produto}</td>
-                          <td className="p-2.5 font-mono">{item.medida}</td>
-                          <td className="p-2.5">{item.descricao}</td>
-                          <td className="p-2.5 text-center font-bold text-sm">{item.qtd}</td>
-                          <td className="p-2.5 border-l border-slate-300"></td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
+                    {/* MODELO 2: CORTE */}
+                    {modeloAtivo === 'corte' && (
+                      <div>
+                        <h2 className="text-xl font-bold text-slate-900 border-b-2 border-black pb-2 mb-4 uppercase">Ordem de Corte - Produção</h2>
+                        <table className="w-full text-xs border-collapse">
+                          <thead>
+                            <tr className="border-b-2 border-black text-black">
+                              <th className="p-2 text-left">Código</th>
+                              <th className="p-2 text-left">Produto</th>
+                              <th className="p-2 text-left">Medida</th>
+                              <th className="p-2 text-left">Descrição</th>
+                              <th className="p-2 text-center">Qtd</th>
+                              <th className="p-2 text-center w-32 border-l border-black">Conferência</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {itensParaImprimir.map((item) => (
+                              <tr key={item.idVer} className="border-b border-slate-300">
+                                <td className="p-2.5 font-mono">{item.observacao || '-'}</td>
+                                <td className="p-2.5 font-bold">{item.produto}</td>
+                                <td className="p-2.5 font-mono">{item.medida}</td>
+                                <td className="p-2.5">{item.descricao}</td>
+                                <td className="p-2.5 text-center font-bold text-sm">{item.qtd}</td>
+                                <td className="p-2.5 border-l border-slate-300"></td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        <div className="flex justify-between items-center mt-2 pt-2 border-t border-slate-400 font-bold text-xs">
+                          <div className="flex gap-4 text-slate-700">
+                            <span>ITENS: <strong className="text-slate-900">{totalTiposItens}</strong></span>
+                            <span>TOTAL PEÇAS: <strong className="text-slate-900">{totalPecas} PÇ</strong></span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
-              {/* MODELO 3: PROPOSTA COMERCIAL */}
-              {modeloAtivo === 'proposta' && (
-                <div>
-                  <div className="flex justify-between items-end mb-4 border-b-2 border-slate-900 pb-2">
-                    <div>
-                      <div className="text-3xl font-black text-slate-900">Usi<span className="text-red-600">corte</span> Metais</div>
-                      <p className="text-xs text-slate-500 uppercase tracking-widest font-bold">Corte e Usinagem de Metais</p>
-                    </div>
-                    <div className="text-right text-xs font-bold text-slate-700">
-                      <p>PROPOSTA: <span className="text-blue-600">COT-2026-1560</span></p>
-                      <p>DATA: {itensParaImprimir[0]?.data}</p>
-                    </div>
-                  </div>
+                    {/* MODELO 3: PROPOSTA COMERCIAL */}
+                    {modeloAtivo === 'proposta' && (
+                      <div>
+                        <div className="flex justify-between items-end mb-4 border-b-2 border-slate-900 pb-2">
+                          <div>
+                            <div className="text-3xl font-black text-slate-900">Usi<span className="text-red-600">corte</span> Metais</div>
+                            <p className="text-xs text-slate-500 uppercase tracking-widest font-bold">Corte e Usinagem de Metais</p>
+                          </div>
+                          <div className="text-right text-xs font-bold text-slate-700">
+                            <p>PROPOSTA: <span className="text-blue-600">COT-2026-1560</span></p>
+                            <p>DATA: {itensParaImprimir[0]?.data}</p>
+                          </div>
+                        </div>
 
-                  <div className="bg-slate-100 p-3 rounded mb-4 text-xs">
-                    <p><strong>CLIENTE / EMPRESA:</strong> {clienteAtual}</p>
-                    <p><strong>CONTATO:</strong> {itensParaImprimir[0]?.contato || 'Atendimento'}</p>
-                  </div>
+                        <div className="bg-slate-100 p-3 rounded mb-4 text-xs">
+                          <p><strong>CLIENTE / EMPRESA:</strong> {clienteAtual}</p>
+                          <p><strong>CONTATO:</strong> {itensParaImprimir[0]?.contato || 'Atendimento'}</p>
+                        </div>
 
-                  <table className="w-full text-xs mb-6 border-collapse">
-                    <thead>
-                      <tr className="bg-slate-200 border-y border-slate-400">
-                        <th className="p-2 text-left">Material</th>
-                        <th className="p-2 text-left">Medidas</th>
-                        <th className="p-2 text-left">Descrição</th>
-                        <th className="p-2 text-right">Unitário</th>
-                        <th className="p-2 text-center">Qtd</th>
-                        <th className="p-2 text-right">Subtotal</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {itensParaImprimir.map((item) => (
-                        <tr key={item.idVer} className="border-b border-slate-200">
-                          <td className="p-2 font-bold">{item.produto}</td>
-                          <td className="p-2 font-mono">{item.medida}</td>
-                          <td className="p-2">{item.descricao}</td>
-                          <td className="p-2 text-right">{formatCurrency(item.unitario)}</td>
-                          <td className="p-2 text-center font-bold">{item.qtd}</td>
-                          <td className="p-2 text-right font-bold">{formatCurrency(item.valorGeral)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                        <table className="w-full text-xs mb-4 border-collapse">
+                          <thead>
+                            <tr className="bg-slate-200 border-y border-slate-400">
+                              <th className="p-2 text-left">Material</th>
+                              <th className="p-2 text-left">Medidas</th>
+                              <th className="p-2 text-left">Descrição</th>
+                              <th className="p-2 text-right">Unitário</th>
+                              <th className="p-2 text-center">Qtd</th>
+                              <th className="p-2 text-right">Subtotal</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {itensParaImprimir.map((item) => (
+                              <tr key={item.idVer} className="border-b border-slate-200">
+                                <td className="p-2 font-bold">{item.produto}</td>
+                                <td className="p-2 font-mono">{item.medida}</td>
+                                <td className="p-2">{item.descricao}</td>
+                                <td className="p-2 text-right">{formatCurrency(item.unitario)}</td>
+                                <td className="p-2 text-center font-bold">{item.qtd}</td>
+                                <td className="p-2 text-right font-bold">{formatCurrency(item.valorGeral)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
 
-                  <div className="border-t-2 border-slate-900 pt-4 flex justify-between text-xs">
-                    <div>
-                      <p>• Validade: <strong>10 dias</strong></p>
-                      <p>• Condições: <strong>À Vista / Pix</strong></p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-base font-bold">TOTAL: <span className="text-blue-700">{formatCurrency(itensParaImprimir.reduce((a, b) => a + b.valorGeral, 0))}</span></p>
-                    </div>
-                  </div>
-                </div>
-              )}
+                        <div className="flex justify-between items-center mb-4 pt-2 border-t border-slate-400 font-bold text-xs">
+                          <div className="flex gap-4 text-slate-700">
+                            <span>ITENS: <strong className="text-slate-900">{totalTiposItens}</strong></span>
+                            <span>TOTAL PEÇAS: <strong className="text-slate-900">{totalPecas} PÇ</strong></span>
+                          </div>
+                          <div className="text-sm">
+                            TOTAL: <strong className="text-slate-900 font-mono font-black">{formatCurrency(valorTotal)}</strong>
+                          </div>
+                        </div>
 
-              {/* MODELO 4: PEDIDO (DUAS VIAS) */}
-              {modeloAtivo === 'pedido' && (
-                <div className="space-y-12">
-                  {/* VIA 1: CLIENTE */}
-                  <div>
-                    <div className="flex justify-between items-center border-b-2 border-black pb-2 mb-3">
-                      <div className="font-bold text-lg">Usicorte Metais <span className="text-xs bg-slate-200 px-2 py-0.5 rounded ml-2">VIA DO CLIENTE</span></div>
-                      <div className="text-xs font-bold">PEDIDO Nº COT-2026-8166</div>
-                    </div>
-                    <p className="text-xs mb-2"><strong>Cliente:</strong> {clienteAtual} | <strong>Data:</strong> {itensParaImprimir[0]?.data}</p>
-                    <table className="w-full text-xs border-collapse">
-                      <thead>
-                        <tr className="border-y border-black bg-slate-100">
-                          <th className="p-1.5 text-left">Material</th>
-                          <th className="p-1.5 text-left">Medida</th>
-                          <th className="p-1.5 text-center">Qtd</th>
-                          <th className="p-1.5 text-right">Total</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {itensParaImprimir.map((item) => (
-                          <tr key={item.idVer} className="border-b border-slate-200">
-                            <td className="p-1.5 font-bold">{item.produto}</td>
-                            <td className="p-1.5 font-mono">{item.medida}</td>
-                            <td className="p-1.5 text-center font-bold">{item.qtd}</td>
-                            <td className="p-1.5 text-right font-bold">{formatCurrency(item.valorGeral)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                        <div className="border-t-2 border-slate-900 pt-4 flex justify-between text-xs">
+                          <div>
+                            <p>• Validade: <strong>10 dias</strong></p>
+                            <p>• Condições: <strong>À Vista / Pix</strong></p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-base font-bold">TOTAL: <span className="text-blue-700">{formatCurrency(valorTotal)}</span></p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
-                  <div className="border-t border-dashed border-slate-400 text-center text-xs text-slate-400 py-1">✂️ Corte Aqui</div>
+                    {/* MODELO 4: PEDIDO (DUAS VIAS) */}
+                    {modeloAtivo === 'pedido' && (
+                      <div className="space-y-8">
+                        {/* VIA 1: CLIENTE */}
+                        <div>
+                          <div className="flex justify-between items-center border-b-2 border-black pb-2 mb-3">
+                            <div className="font-bold text-lg">Usicorte Metais <span className="text-xs bg-slate-200 px-2 py-0.5 rounded ml-2">VIA DO CLIENTE</span></div>
+                            <div className="text-xs font-bold">PEDIDO Nº COT-2026-8166</div>
+                          </div>
+                          <p className="text-xs mb-2"><strong>Cliente:</strong> {clienteAtual} | <strong>Data:</strong> {itensParaImprimir[0]?.data}</p>
+                          <table className="w-full text-xs border-collapse">
+                            <thead>
+                              <tr className="border-y border-black bg-slate-100">
+                                <th className="p-1.5 text-left">Material</th>
+                                <th className="p-1.5 text-left">Medida</th>
+                                <th className="p-1.5 text-center">Qtd</th>
+                                <th className="p-1.5 text-right">Total</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {itensParaImprimir.map((item) => (
+                                <tr key={item.idVer} className="border-b border-slate-200">
+                                  <td className="p-1.5 font-bold">{item.produto}</td>
+                                  <td className="p-1.5 font-mono">{item.medida}</td>
+                                  <td className="p-1.5 text-center font-bold">{item.qtd}</td>
+                                  <td className="p-1.5 text-right font-bold">{formatCurrency(item.valorGeral)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
 
-                  {/* VIA 2: EMPRESA */}
-                  <div>
-                    <div className="flex justify-between items-center border-b-2 border-black pb-2 mb-3">
-                      <div className="font-bold text-lg">Usicorte Metais <span className="text-xs bg-yellow-200 px-2 py-0.5 rounded ml-2 text-black">VIA DA EMPRESA</span></div>
-                      <div className="text-xs font-bold">PEDIDO Nº COT-2026-8166</div>
-                    </div>
-                    <p className="text-xs mb-2"><strong>Cliente:</strong> {clienteAtual} | <strong>Data:</strong> {itensParaImprimir[0]?.data}</p>
-                    <table className="w-full text-xs border-collapse">
-                      <thead>
-                        <tr className="border-y border-black bg-slate-100">
-                          <th className="p-1.5 text-left">Material</th>
-                          <th className="p-1.5 text-left">Medida</th>
-                          <th className="p-1.5 text-center">Qtd</th>
-                          <th className="p-1.5 text-right">Total</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {itensParaImprimir.map((item) => (
-                          <tr key={item.idVer} className="border-b border-slate-200">
-                            <td className="p-1.5 font-bold">{item.produto}</td>
-                            <td className="p-1.5 font-mono">{item.medida}</td>
-                            <td className="p-1.5 text-center font-bold">{item.qtd}</td>
-                            <td className="p-1.5 text-right font-bold">{formatCurrency(item.valorGeral)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
+                          <div className="flex justify-between items-center mt-2 pt-2 border-t border-slate-400 font-bold text-xs">
+                            <div className="flex gap-4 text-slate-700">
+                              <span>ITENS: <strong className="text-slate-900">{totalTiposItens}</strong></span>
+                              <span>TOTAL PEÇAS: <strong className="text-slate-900">{totalPecas} PÇ</strong></span>
+                            </div>
+                            <div className="text-sm">
+                              TOTAL: <strong>{formatCurrency(valorTotal)}</strong>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="border-t border-dashed border-slate-400 text-center text-xs text-slate-400 py-1">✂️ Corte Aqui</div>
+
+                        {/* VIA 2: EMPRESA */}
+                        <div>
+                          <div className="flex justify-between items-center border-b-2 border-black pb-2 mb-3">
+                            <div className="font-bold text-lg">Usicorte Metais <span className="text-xs bg-yellow-200 px-2 py-0.5 rounded ml-2 text-black">VIA DA EMPRESA</span></div>
+                            <div className="text-xs font-bold">PEDIDO Nº COT-2026-8166</div>
+                          </div>
+                          <p className="text-xs mb-2"><strong>Cliente:</strong> {clienteAtual} | <strong>Data:</strong> {itensParaImprimir[0]?.data}</p>
+                          <table className="w-full text-xs border-collapse">
+                            <thead>
+                              <tr className="border-y border-black bg-slate-100">
+                                <th className="p-1.5 text-left">Material</th>
+                                <th className="p-1.5 text-left">Medida</th>
+                                <th className="p-1.5 text-center">Qtd</th>
+                                <th className="p-1.5 text-right">Total</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {itensParaImprimir.map((item) => (
+                                <tr key={item.idVer} className="border-b border-slate-200">
+                                  <td className="p-1.5 font-bold">{item.produto}</td>
+                                  <td className="p-1.5 font-mono">{item.medida}</td>
+                                  <td className="p-1.5 text-center font-bold">{item.qtd}</td>
+                                  <td className="p-1.5 text-right font-bold">{formatCurrency(item.valorGeral)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+
+                          <div className="flex justify-between items-center mt-2 pt-2 border-t border-slate-400 font-bold text-xs">
+                            <div className="flex gap-4 text-slate-700">
+                              <span>ITENS: <strong className="text-slate-900">{totalTiposItens}</strong></span>
+                              <span>TOTAL PEÇAS: <strong className="text-slate-900">{totalPecas} PÇ</strong></span>
+                            </div>
+                            <div className="text-sm">
+                              TOTAL: <strong>{formatCurrency(valorTotal)}</strong>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
 
               {/* MODELO 5: ETIQUETAS */}
               {modeloAtivo === 'etiqueta' && (

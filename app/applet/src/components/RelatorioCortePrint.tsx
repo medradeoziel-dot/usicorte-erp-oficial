@@ -14,6 +14,9 @@ interface Props {
 }
 
 export default function RelatorioCortePrint({ itens }: Props) {
+  const totalTiposItens = itens.length;
+  const totalPecas = itens.reduce((acc, item) => acc + Number(item.qtd || 0), 0);
+
   return (
     <div className="w-full bg-white text-black font-sans print:p-0 p-4 sm:p-8 max-w-[1000px] mx-auto box-border overflow-x-hidden">
       <div className="print:hidden mb-6 flex justify-between sm:justify-end items-center gap-3">
@@ -94,10 +97,11 @@ export default function RelatorioCortePrint({ itens }: Props) {
         </table>
       </div>
 
-      <div className="mt-4 pt-2 border-t border-slate-200">
-        <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">
-          Total de Itens para Corte: <span className="text-slate-900 font-black">{itens.length}</span>
-        </p>
+      <div className="flex justify-between items-center mt-2 pt-2 border-t border-slate-400 font-bold text-xs">
+        <div className="flex gap-4 text-slate-700">
+          <span>ITENS: <strong className="text-slate-900">{totalTiposItens}</strong></span>
+          <span>TOTAL PEÇAS: <strong className="text-slate-900">{totalPecas} PÇ</strong></span>
+        </div>
       </div>
     </div>
   );

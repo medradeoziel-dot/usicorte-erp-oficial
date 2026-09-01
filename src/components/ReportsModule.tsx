@@ -1594,7 +1594,11 @@ export default function ReportsModule({
   };
 
   // ✅ Componente Reutilizável de Renderização dos 5 Modelos de Documento
-  const renderDocumentosImpressao = () => (
+  const renderDocumentosImpressao = () => {
+    const totalTiposItens = displayQuote.items.length;
+    const totalPecas = displayQuote.items.reduce((acc, item) => acc + Number(item.qtd !== undefined ? item.qtd : (item.quantity || 1)), 0);
+
+    return (
     <div className="bg-slate-900/60 p-2 sm:p-6 rounded-2xl border border-slate-800 w-full overflow-x-hidden print:bg-transparent print:p-0 print:m-0 print:border-none print:shadow-none">
       
       {/* ===================================================
@@ -1731,6 +1735,17 @@ export default function ReportsModule({
           </tbody>
         </table>
 
+        {/* Totais de Itens / Peças */}
+        <div className="flex justify-between items-center mt-2 pt-2 border-t border-slate-400 font-bold text-xs">
+          <div className="flex gap-4 text-slate-700">
+            <span>ITENS: <strong className="text-slate-900">{totalTiposItens}</strong></span>
+            <span>TOTAL PEÇAS: <strong className="text-slate-900">{totalPecas} PÇ</strong></span>
+          </div>
+          <div className="text-sm">
+            TOTAL: <strong className="text-slate-900 font-mono font-black">{formatCurrency(grandTotal)}</strong>
+          </div>
+        </div>
+
         {/* Totals & Notes footer */}
         <div className="border-t-2 border-black pt-4 flex flex-col sm:flex-row justify-between items-start sm:items-end text-xs gap-4">
           <div className="space-y-1 text-slate-600 max-w-md w-full sm:w-auto">
@@ -1851,11 +1866,20 @@ export default function ReportsModule({
                 })}
               </tbody>
             </table>
+            {/* Totais de Itens / Peças Via 1 */}
+            <div className="flex justify-between items-center mt-1.5 pt-1.5 border-t border-slate-400 font-bold text-xs">
+              <div className="flex gap-4 text-slate-700">
+                <span>ITENS: <strong className="text-slate-900">{totalTiposItens}</strong></span>
+                <span>TOTAL PEÇAS: <strong className="text-slate-900">{totalPecas} PÇ</strong></span>
+              </div>
+              <div className="text-xs sm:text-sm">
+                TOTAL: <strong className="text-slate-950 font-mono font-black">{formatCurrency(grandTotal)}</strong>
+              </div>
+            </div>
           </div>
 
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center text-[11px] border-t border-black pt-1 mt-1 gap-1">
             <span className="text-slate-600">Assinatura Cliente: ___________________________________</span>
-            <strong className="text-xs sm:text-sm font-mono text-slate-950">TOTAL: <span className="lbl-valor-total">{formatCurrency(grandTotal)}</span></strong>
           </div>
         </div>
 
@@ -1944,11 +1968,21 @@ export default function ReportsModule({
                 })}
               </tbody>
             </table>
+
+            {/* Totais de Itens / Peças Via 2 */}
+            <div className="flex justify-between items-center mt-1.5 pt-1.5 border-t border-slate-400 font-bold text-xs">
+              <div className="flex gap-4 text-slate-700">
+                <span>ITENS: <strong className="text-slate-900">{totalTiposItens}</strong></span>
+                <span>TOTAL PEÇAS: <strong className="text-slate-900">{totalPecas} PÇ</strong></span>
+              </div>
+              <div className="text-xs sm:text-sm">
+                TOTAL: <strong className="text-slate-950 font-mono font-black">{formatCurrency(grandTotal)}</strong>
+              </div>
+            </div>
           </div>
 
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center text-[11px] border-t border-black pt-1 mt-1 gap-1">
             <span className="text-slate-600">Vendedor / Produção: ___________________________________</span>
-            <strong className="text-xs sm:text-sm font-mono text-slate-950">TOTAL: <span className="lbl-valor-total">{formatCurrency(grandTotal)}</span></strong>
           </div>
         </div>
       </div>
@@ -2167,7 +2201,8 @@ export default function ReportsModule({
       </div>
 
     </div>
-  );
+    );
+  };
 
   return (
     <div id="screen-relatorios" className="space-y-6">
