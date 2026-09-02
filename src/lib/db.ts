@@ -670,31 +670,41 @@ export async function saveCotacaoDb(quote: Quote): Promise<{ data: any; error: a
       cliente_id: quote.clientId && isUuid(quote.clientId) ? quote.clientId : undefined
     };
 
-    // 1. Busca TODAS as cotações existentes com o mesmo número ou mesmo ID no Supabase
+    // 1. Busca se a cotação já existe no Supabase (pelo ID direto ou pelo Número)
     let existingRecords: { id: string; numero: string; created_at?: string }[] = [];
-    if (quote.quoteNumber && quote.quoteNumber.trim()) {
-      const { data } = await db
+
+    // Prioridade 1: Buscar pelo ID direto (seja UUID ou ID de registro existente)
+    if (quote.id) {
+      const { data: byId } = await db
+        .from('cotacoes')
+        .select('id, numero, created_at')
+        .eq('id', quote.id)
+        .maybeSingle();
+
+      if (byId) {
+        existingRecords = [byId];
+      }
+    }
+
+    // Prioridade 2: Se não encontrou por ID, busca pelo número de cotação
+    if (existingRecords.length === 0 && quote.quoteNumber && quote.quoteNumber.trim()) {
+      const { data: byNumero } = await db
         .from('cotacoes')
         .select('id, numero, created_at')
         .eq('numero', quote.quoteNumber.trim());
-      if (data && data.length > 0) existingRecords = data;
-    }
 
-    if (existingRecords.length === 0 && quote.id && isUuid(quote.id)) {
-      const { data } = await db
-        .from('cotacoes')
-        .select('id, numero, created_at')
-        .eq('id', quote.id);
-      if (data && data.length > 0) existingRecords = data;
+      if (byNumero && byNumero.length > 0) {
+        existingRecords = byNumero;
+      }
     }
 
     let cotacaoId: string | undefined = undefined;
 
     if (existingRecords.length > 0) {
-      // Usa o primeiro registro como principal
+      // É UPDATE de registro existente
       cotacaoId = existingRecords[0].id;
 
-      // Se existiam duplicatas antigas com o mesmo número, remove os itens e registros extras
+      // Se existiam duplicatas antigas com o mesmo número, remove os registros e itens extras
       if (existingRecords.length > 1) {
         const duplicateIds = existingRecords.slice(1).map(r => r.id);
         for (const extraId of duplicateIds) {
@@ -707,10 +717,13 @@ export async function saveCotacaoDb(quote: Quote): Promise<{ data: any; error: a
         }
       }
 
-      // Atualiza a cotação principal (UPDATE)
+      // Executa o UPDATE no registro existente pelo seu ID
       const { error: updateErr } = await db
         .from('cotacoes')
-        .update(cotacaoPayload)
+        .update({
+          ...cotacaoPayload,
+          updated_at: new Date().toISOString()
+        })
         .eq('id', cotacaoId);
 
       if (updateErr) {
@@ -718,7 +731,7 @@ export async function saveCotacaoDb(quote: Quote): Promise<{ data: any; error: a
         return { data: null, error: updateErr };
       }
 
-      // Limpa TODOS os itens antigos associados a essa cotação para garantir que não haja duplicatas
+      // Limpa TODOS os itens antigos associados a essa cotação para garantir lista sincronizada
       const { error: delItensErr } = await db
         .from('cotacao_itens')
         .delete()
@@ -728,7 +741,7 @@ export async function saveCotacaoDb(quote: Quote): Promise<{ data: any; error: a
         console.warn("Aviso ao limpar itens antigos da cotação:", delItensErr);
       }
     } else {
-      // Insere nova cotação (INSERT)
+      // É INSERT de novo registro
       const { data: created, error: insertErr } = await db
         .from('cotacoes')
         .insert(cotacaoPayload)
