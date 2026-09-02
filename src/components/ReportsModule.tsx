@@ -80,6 +80,7 @@ export interface ConsultaItem {
   cotacaoId?: string;
   itemId?: string | number;
   observacao?: string;
+  obs?: string;
   status: StatusProposta;
   desenhoUrl?: string;
 }
@@ -474,7 +475,8 @@ export default function ReportsModule({
               cotacao: q.numero,
               cotacaoId: q.id,
               itemId: it.id,
-              observacao: it.observacao || '',
+              observacao: it.observacao || (it as any).notes || (it as any).obs || '',
+              obs: it.observacao || (it as any).notes || (it as any).obs || '',
               status: q.status as StatusProposta,
               desenhoUrl: it.desenho_url || undefined
             });
@@ -513,6 +515,7 @@ export default function ReportsModule({
               });
 
               (q.items || []).forEach((it, itIdx) => {
+                const obsText = it.notes || it.observacao || (it as any).obs || '';
                 itemsList.push({
                   idVer: 20000 + qIdx * 100 + itIdx,
                   data: formatSafeDate(q.date || q.createdAt),
@@ -528,7 +531,8 @@ export default function ReportsModule({
                   cotacao: q.quoteNumber || `COT-${qIdx + 1}`,
                   cotacaoId: q.id,
                   itemId: it.id,
-                  observacao: it.notes || '',
+                  observacao: obsText,
+                  obs: obsText,
                   status: (q.status?.toLowerCase().includes('aprov') ? 'aprovado' :
                            q.status?.toLowerCase().includes('canc') ? 'rejeitado' :
                            q.status?.toLowerCase().includes('env') ? 'pendente' : 'rascunho') as StatusProposta,
@@ -2158,9 +2162,15 @@ export default function ReportsModule({
         <div className="flex items-center justify-between border-b-2 border-black pb-2 mb-4">
           <div>
             <h2 className="m-0 text-lg font-black uppercase tracking-wide">Ordem de Corte</h2>
-            <p className="m-0 text-[11px] font-semibold text-slate-600 uppercase">
-              Cliente: {selectedClientName || displayQuote.clientName || 'TODOS'}
-            </p>
+            <div className="flex flex-wrap items-center gap-x-3 text-[11px] font-semibold text-slate-600 uppercase mt-0.5">
+              <p className="m-0">
+                Cliente: <span className="text-black font-bold">{selectedClientName || displayQuote.clientName || 'TODOS'}</span>
+              </p>
+              <span className="text-slate-400">•</span>
+              <p className="m-0">
+                Cotação: <span className="text-black font-bold font-mono">{displayQuote.quoteNumber || displayQuote.id || '-'}</span>
+              </p>
+            </div>
           </div>
           <div className="text-right text-[11px] font-semibold text-slate-600">
             <p className="m-0">Data: {new Date().toLocaleDateString('pt-BR')}</p>
@@ -2631,7 +2641,14 @@ export default function ReportsModule({
                         <td><strong>{item.empresa}</strong></td>
                         <td>{item.contato || '-'}</td>
                         <td>{item.produto}</td>
-                        <td>{item.medida}</td>
+                        <td>
+                          <div>{item.medida || '-'}</div>
+                          {Boolean((item.observacao || item.obs) && (item.observacao || item.obs)?.trim()) && (
+                            <div className="text-xs text-slate-400 italic mt-0.5">
+                              {item.observacao || item.obs}
+                            </div>
+                          )}
+                        </td>
                         <td>{item.descricao}</td>
                         <td>{item.valor}</td>
                         <td>{item.qtd}</td>
