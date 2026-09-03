@@ -31,7 +31,7 @@
   }
 
   /* 2. Garante que o documento raiz e containers principais fiquem visíveis (NÃO escondem o documento) */
-  html, body, #root, #app-root, .app-body, main, .content-area, #container-impressao, #screen-relatorios {
+  html, body, #root, #app-root, #app-root > div, .app-body, main, .content-area, #container-impressao, #container-impressao > div, #screen-relatorios, #screen-consulta {
     background: #ffffff !important;
     color: #000000 !important;
     margin: 0 !important;
@@ -44,7 +44,54 @@
     display: block !important;
     box-shadow: none !important;
     border: none !important;
+    border-top: none !important;
+    border-top-width: 0 !important;
+    border-top-style: none !important;
+    border-top-color: transparent !important;
+    outline: none !important;
     position: static !important;
+  }
+
+  /* Remoção global de qualquer linha divisória ou cabeçalho superior no topo absoluto das folhas impressas */
+  hr,
+  .linha-separadora,
+  #container-impressao hr,
+  #container-impressao > hr,
+  .documento-modelo hr,
+  .documento-modelo > hr,
+  .secao-proposta hr,
+  .secao-proposta > hr,
+  .secao-pedido hr,
+  .secao-pedido > hr,
+  .secao-corte hr,
+  .secao-corte > hr,
+  .secao-extrato hr,
+  .secao-extrato > hr,
+  .secao-etiqueta hr,
+  .secao-etiqueta > hr,
+  .modelo-etiqueta-80 hr {
+    display: none !important;
+    border: none !important;
+    border-top: none !important;
+    height: 0 !important;
+  }
+
+  /* Garante ausência total de borda superior em cabeçalhos de todos os relatórios */
+  header,
+  header.company-header-centralizado,
+  .company-header-centralizado,
+  .etiqueta-header {
+    border-top: none !important;
+    border-top-width: 0 !important;
+    border-top-style: none !important;
+    box-shadow: none !important;
+  }
+
+  /* Reseta bordas externas de modelos para não criarem linha no topo */
+  .documento-modelo:not(.secao-etiqueta) {
+    border: none !important;
+    border-top: none !important;
+    box-shadow: none !important;
   }
 
   /* 3. Regras de exibição por Modo de Impressão */
@@ -125,6 +172,23 @@
     margin: 0 auto !important;
     box-shadow: none !important;
     border: none !important;
+    border-top: none !important;
+  }
+
+  /* ---------------------------------------------------
+     MODELO CORTE & MODELO EMPRESA RESUMIDA
+     --------------------------------------------------- */
+  .secao-corte,
+  .secao-proposta-resumida {
+    width: 100% !important;
+    max-width: 100% !important;
+    color: #000 !important;
+    background: #fff !important;
+    padding: 0 !important;
+    margin: 0 auto !important;
+    box-shadow: none !important;
+    border: none !important;
+    border-top: none !important;
   }
 
   /* ---------------------------------------------------

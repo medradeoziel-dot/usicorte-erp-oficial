@@ -62,7 +62,7 @@ export default function CompanyHeader({
 
   return (
     <header
-      className={`company-header-centralizado w-full select-none ${
+      className={`company-header-centralizado w-full select-none border-t-0 print:border-t-0 shadow-none print:shadow-none ${
         showBorder ? 'border-b-2 border-black pb-2.5 mb-3' : 'mb-2'
       } ${className}`}
     >

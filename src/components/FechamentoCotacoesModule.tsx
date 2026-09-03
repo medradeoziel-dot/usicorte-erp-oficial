@@ -947,10 +947,10 @@ export default function FechamentoCotacoesModule({
 
       {/* 5. MODAL DE PRÉVIA E IMPRESSÃO DO EXTRATO DE COBRANÇA (A4) */}
       {isExtratoModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[95vh] flex flex-col overflow-hidden shadow-2xl">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 overflow-y-auto print:static print:p-0 print:m-0 print:bg-transparent">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[95vh] flex flex-col overflow-hidden shadow-2xl print:bg-transparent print:border-none print:border-t-0 print:shadow-none print:max-h-none print:w-full print:rounded-none">
             {/* Topo Modal */}
-            <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950 shrink-0">
+            <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950 shrink-0 no-print btn-no-print">
               <div className="flex items-center gap-2">
                 <div className="p-2 bg-blue-600/20 text-blue-400 rounded-xl border border-blue-500/30">
                   <Printer className="w-5 h-5" />
@@ -982,8 +982,8 @@ export default function FechamentoCotacoesModule({
             </div>
 
             {/* Conteúdo do Extrato Formatado para A4 */}
-            <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-800/40">
-              <div className="bg-white rounded-xl shadow-2xl border border-slate-300 overflow-hidden">
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-800/40 print:p-0 print:m-0 print:bg-transparent">
+              <div className="bg-white rounded-xl shadow-2xl border border-slate-300 overflow-hidden print:border-none print:border-t-0 print:shadow-none print:rounded-none print:p-0 print:m-0">
                 <ExtratoCobrancaPrint 
                   cotacoes={selectedQuotes}
                   clienteInfo={selectedClientInfo}
@@ -994,7 +994,7 @@ export default function FechamentoCotacoesModule({
             </div>
 
             {/* Rodapé Modal */}
-            <div className="p-3 border-t border-slate-800 bg-slate-950 flex items-center justify-between text-xs text-slate-400 shrink-0">
+            <div className="p-3 border-t border-slate-800 bg-slate-950 flex items-center justify-between text-xs text-slate-400 shrink-0 no-print btn-no-print">
               <span>Layout certificado para impressão em folha A4 e envio de cobrança via WhatsApp / PDF.</span>
               <button
                 onClick={() => setIsExtratoModalOpen(false)}

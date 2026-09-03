@@ -1604,7 +1604,7 @@ export default function ReportsModule({
       : (selectedClientName || displayQuote.clientName || 'CLIENTE BALCÃO');
 
     return (
-    <div className="bg-slate-900/60 p-2 sm:p-6 rounded-2xl border border-slate-800 w-full overflow-x-hidden print:bg-transparent print:p-0 print:m-0 print:border-none print:shadow-none">
+    <div className="bg-slate-900/60 p-2 sm:p-6 rounded-2xl border border-slate-800 w-full overflow-x-hidden print:bg-transparent print:p-0 print:m-0 print:border-none print:border-t-0 print:shadow-none">
       
       {/* ===================================================
            PROPOSTA 1: RELATÓRIO A4 INTEIRO (GERAL)
@@ -2299,12 +2299,24 @@ export default function ReportsModule({
         : `@page { size: A4 portrait; margin: 8mm; }
            @media print {
              html, body { width: 100%; height: 100%; margin: 0; padding: 0; }
-             .documento-modelo { width: 100% !important; max-width: 100% !important; margin: 0 auto !important; box-shadow: none !important; }
+             .documento-modelo:not(.secao-etiqueta) { width: 100% !important; max-width: 100% !important; margin: 0 auto !important; box-shadow: none !important; border: none !important; border-top: none !important; }
            }`}</style>
 
       {/* Regras de impressão de todos os modelos */}
       <style>{`
         @media print {
+          html, body, #root, #app-root, main, #screen-relatorios, #screen-consulta, #container-impressao {
+            border-top: none !important;
+            border: none !important;
+            box-shadow: none !important;
+          }
+          header, .company-header-centralizado, .etiqueta-header {
+            border-top: none !important;
+          }
+          hr, .linha-separadora {
+            display: none !important;
+            border: none !important;
+          }
           thead { display: table-header-group !important; }
           tfoot { display: table-footer-group !important; }
           tr { page-break-inside: avoid !important; break-inside: avoid !important; }
@@ -2971,7 +2983,7 @@ export default function ReportsModule({
                (Renderiza diretamente abaixo da tabela mantendo estado)
                =================================================== */}
           {selectedIds.length > 0 && (
-            <div className="pt-4 border-t border-slate-800 space-y-4 animate-in fade-in duration-200">
+            <div className="pt-4 border-t border-slate-800 print:pt-0 print:border-none print:border-t-0 space-y-4 animate-in fade-in duration-200">
               {/* Barra de controle da visualização direta */}
               <div className="btn-no-print bg-slate-900 border border-slate-800 p-3 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg">
                 <div className="flex items-center gap-2 flex-wrap">
@@ -3065,7 +3077,7 @@ export default function ReportsModule({
               </div>
 
               {/* Renderização do Documento Selecionado */}
-              <div id="container-impressao" className="w-full overflow-x-hidden print:border-none print:p-0 print:m-0 print:shadow-none">
+              <div id="container-impressao" className="w-full overflow-x-hidden print:border-none print:border-t-0 print:p-0 print:m-0 print:shadow-none">
                 {renderDocumentosImpressao()}
               </div>
             </div>
@@ -3351,7 +3363,7 @@ export default function ReportsModule({
       {/* ===================================================
            CONTAINER DE IMPRESSÃO (O QUE SAI NA IMPRESSORA E NA PRÉVIA)
            =================================================== */}
-      <div id="container-impressao" className="w-full overflow-x-hidden print:border-none print:p-0 print:m-0 print:shadow-none">
+      <div id="container-impressao" className="w-full overflow-x-hidden print:border-none print:border-t-0 print:p-0 print:m-0 print:shadow-none">
         {renderDocumentosImpressao()}
       </div>
         </>
