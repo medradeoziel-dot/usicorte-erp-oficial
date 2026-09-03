@@ -9,7 +9,8 @@ import {
   formatCurrency, 
   formatWeightKg, 
   formatarMedidasLimpa,
-  formatSafeDate 
+  formatSafeDate,
+  getObservacaoEspecificaItem
 } from '../utils/calculator';
 import { 
   fetchCotacoesDb, 
@@ -112,6 +113,14 @@ export default function ReportsModule({
 
   const switchTab = (tab: 'propostas' | 'consulta') => {
     setActiveTab(tab);
+    if (tab === 'consulta') {
+      // Reset de seleções e estados pendentes ao entrar na Consulta & Relatório Geral
+      setSelectedIds([]);
+      setItemToDelete(null);
+      setActiveImagePreviewItem(null);
+      setIsBulkDeleteOpen(false);
+      loadAllConsultaData();
+    }
     if (onTabChange) {
       onTabChange(tab);
     }
@@ -120,8 +129,21 @@ export default function ReportsModule({
   useEffect(() => {
     if (initialTab) {
       setActiveTab(initialTab);
+      if (initialTab === 'consulta') {
+        setSelectedIds([]);
+        setItemToDelete(null);
+        setActiveImagePreviewItem(null);
+        setIsBulkDeleteOpen(false);
+        loadAllConsultaData();
+      }
     }
   }, [initialTab]);
+
+  useEffect(() => {
+    if (activeTab === 'consulta') {
+      loadAllConsultaData();
+    }
+  }, [activeTab]);
 
   // Cotação ativa específica (carregada do banco por ID/URL ou cotação atual)
   const [activeQuote, setActiveQuote] = useState<Quote>(currentQuote);
@@ -329,8 +351,8 @@ export default function ReportsModule({
               unitPrice: Number(cot.valor_total) || 0,
               valorUnitario: Number(cot.valor_total) || 0,
               subtotal: Number(cot.valor_total) || 0,
-              notes: cot.observacoes || '',
-              observacao: cot.observacoes || '',
+              notes: '',
+              observacao: '',
               totalWeightKg: 0,
               pesoTotal: 0
             }];
@@ -908,65 +930,11 @@ export default function ReportsModule({
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Consolida itens da consulta garantindo exibição de cotação única sem duplicar com a cotação ativa
+  // ✅ Itens da consulta carregados EXCLUSIVAMENTE do banco de dados (Supabase) e registros locais (localStorage).
+  // Totalmente isolado da "Cotação Atual (Em Edição)" da primeira aba/orçamento para evitar contaminação cruzada.
   const allConsultaItems: ConsultaItem[] = useMemo(() => {
-    // Se temos itens persistidos no banco/local
-    if (dbQuotesItems.length > 0) {
-      const currQuoteNum = String(currentQuote?.quoteNumber || '').trim().toLowerCase();
-      const currItems = currentQuote?.items || [];
-
-      // Se a cotação atual em memória possui itens e ainda NÃO está salva no banco/local
-      if (currQuoteNum && currItems.length > 0) {
-        const existsInDb = dbQuotesItems.some(
-          it => String(it.cotacao || '').trim().toLowerCase() === currQuoteNum
-        );
-        if (!existsInDb) {
-          const currentItemsMapped: ConsultaItem[] = currItems.map((it, idx) => ({
-            idVer: 14000 + idx,
-            data: formatSafeDate(currentQuote.date || currentQuote.createdAt),
-            empresa: selectedClientName || currentQuote.clientName || 'Cliente Balcão',
-            contato: currentQuote.contactPerson || '-',
-            produto: it.constanteNome || it.material || 'Material',
-            medida: formatarMedidasLimpa(it),
-            descricao: it.descricao || it.description || 'Item UsiCorte',
-            valor: formatCurrency(it.unitPrice || 0),
-            qtd: it.qtd || it.quantity || 1,
-            unitario: it.unitPrice || 0,
-            valorGeral: (it.unitPrice || 0) * (it.qtd || it.quantity || 1),
-            cotacao: currentQuote.quoteNumber || 'COT-NOVA',
-            cotacaoId: currentQuote.id,
-            itemId: it.id,
-            observacao: (it.observacao || it.notes || it.info || '') as string,
-            status: (((it as unknown as { status?: StatusProposta }).status) || (currentQuote as unknown as { status?: StatusProposta }).status || 'rascunho') as StatusProposta
-          }));
-          return [...currentItemsMapped, ...dbQuotesItems];
-        }
-      }
-      return dbQuotesItems;
-    }
-
-    // Fallback: se não há nada no banco ainda, exibe a cotação atual em memória
-    const currentItemsMapped: ConsultaItem[] = (currentQuote?.items || []).map((it, idx) => ({
-      idVer: 14000 + idx,
-      data: formatSafeDate(currentQuote.date || currentQuote.createdAt),
-      empresa: selectedClientName || currentQuote.clientName || 'Cliente Balcão',
-      contato: currentQuote.contactPerson || '-',
-      produto: it.constanteNome || it.material || 'Material',
-      medida: formatarMedidasLimpa(it),
-      descricao: it.descricao || it.description || 'Item UsiCorte',
-      valor: formatCurrency(it.unitPrice || 0),
-      qtd: it.qtd || it.quantity || 1,
-      unitario: it.unitPrice || 0,
-      valorGeral: (it.unitPrice || 0) * (it.qtd || it.quantity || 1),
-      cotacao: currentQuote.quoteNumber || 'COT-NOVA',
-      cotacaoId: currentQuote.id,
-      itemId: it.id,
-      observacao: (it.observacao || it.notes || it.info || '') as string,
-      status: (((it as unknown as { status?: StatusProposta }).status) || (currentQuote as unknown as { status?: StatusProposta }).status || 'rascunho') as StatusProposta
-    }));
-
-    return currentItemsMapped;
-  }, [currentQuote, selectedClientName, dbQuotesItems]);
+    return dbQuotesItems;
+  }, [dbQuotesItems]);
 
 
   // Normaliza texto (minúsculo, sem acentos) para comparações
@@ -1039,7 +1007,8 @@ export default function ReportsModule({
   };
 
   // ✅ Padronização de todos os botões de impressão da CONSULTA (GERAL, EMPRESA, PEDIDO, ETIQUETAS, CORTE)
-  // Renderizam diretamente na tela atual sem redirecionar de aba
+  // Utiliza EXCLUSIVAMENTE a cotação/itens selecionados na tabela da Consulta,
+  // 100% isolado do estado ou cache da primeira aba.
   const imprimirRelatorioGeral = async (tipoRelatorio: 'GERAL' | 'EMPRESA' | 'PEDIDO' | 'ETIQUETAS' | 'CORTE') => {
     if (selectedIds.length === 0) {
       alert(`Por favor, selecione ao menos um item da tabela para gerar o relatório de ${tipoRelatorio}.`);
@@ -1048,19 +1017,7 @@ export default function ReportsModule({
 
     document.body.classList.remove('print-pedido', 'print-etiqueta', 'print-proposta', 'print-corte', 'print-geral', 'print-empresa');
 
-    // Se houver item selecionado, carrega os dados completos da cotação caso exista no banco
-    const selectedItem = filteredConsultaItems.find(i => selectedIds.includes(i.idVer));
-    if (selectedItem) {
-      const targetId = selectedItem.cotacaoId || selectedItem.cotacao;
-      if (targetId) {
-        await carregarCotacaoPorId(targetId);
-      }
-      if (selectedItem.empresa) {
-        setSelectedClientName(selectedItem.empresa);
-      }
-    }
-
-    // Configura o modelo ativo e classe de impressão conforme o botão acionado (sem sair da tela de Consulta)
+    // Configura o modelo ativo e classe de impressão conforme o botão acionado (renderizado na tela de Consulta)
     if (tipoRelatorio === 'CORTE') {
       setActiveModel('corte');
       setPrintMode('corte');
@@ -1458,45 +1415,75 @@ export default function ReportsModule({
     }, 150);
   };
 
+  const EMPTY_QUOTE: Quote = {
+    id: '',
+    quoteNumber: '',
+    date: '',
+    clientName: '',
+    contactPerson: '',
+    status: 'Rascunho',
+    validityDays: 10,
+    paymentTerms: 'À Vista / Pix',
+    observations: '',
+    items: [],
+    subtotalTotal: 0,
+    grandTotal: 0,
+    discount: 0,
+    shipping: 0,
+    totalWeightKg: 0,
+    createdAt: '',
+    updatedAt: ''
+  };
+
+  // ✅ Cotação gerada EXCLUSIVAMENTE a partir das linhas selecionadas na tabela da Consulta
+  // 100% independente da "Cotação Atual (Em Edição)" e de qualquer cache da primeira aba.
   const consultaSelectedQuote = useMemo<Quote>(() => {
     const selRows = filteredConsultaItems.filter(i => selectedIds.includes(i.idVer));
-    if (selRows.length === 0) return activeQuote || currentQuote;
+    if (selRows.length === 0) return EMPTY_QUOTE;
 
     const firstItem = selRows[0];
-    const clientName = firstItem.empresa || selectedClientName || activeQuote?.clientName || 'CLIENTE BALCÃO';
-    const quoteNum = firstItem.cotacao || activeQuote?.quoteNumber || 'COT-SELECIONADA';
-    const dateVal = firstItem.data || activeQuote?.date || new Date().toISOString().slice(0, 10);
+    const clientName = firstItem.empresa || 'CLIENTE BALCÃO';
+    const quoteNum = firstItem.cotacao || 'COT-SELECIONADA';
+    const dateVal = firstItem.data || new Date().toISOString().slice(0, 10);
+
+    const mapStatus = (st?: string): Quote['status'] => {
+      if (!st) return 'Rascunho';
+      const lower = st.toLowerCase();
+      if (lower.includes('aprov')) return 'Aprovado';
+      if (lower.includes('pend') || lower.includes('env')) return 'Enviado';
+      if (lower.includes('rej') || lower.includes('canc')) return 'Cancelado';
+      return 'Rascunho';
+    };
 
     const mappedItems: QuoteItem[] = selRows.map((it, idx) => {
-      const matchInActive = (activeQuote?.items || []).find(
-        aqIt => String(aqIt.id) === String(it.itemId) || aqIt.descricao === it.descricao
-      );
-
-      const persistentDrawing = it.desenhoUrl || matchInActive?.drawingImage || matchInActive?.fotoDesenho || drawingPhotos[idx] || undefined;
+      const persistentDrawing = it.desenhoUrl || undefined;
+      const unitVal = Number(it.unitario) || 0;
+      const qty = Number(it.qtd) || 1;
+      const subVal = Number(it.valorGeral) || (unitVal * qty);
 
       return {
         id: String(it.itemId || it.idVer || idx + 1),
-        date: dateVal,
-        companyName: clientName,
-        constant: matchInActive?.constant || '1.0',
-        diameter: it.medida || matchInActive?.diameter || '',
+        date: it.data || dateVal,
+        companyName: it.empresa || clientName,
+        constant: '1.0',
+        diameter: it.medida || '',
         description: it.descricao || it.produto || `Item #${idx + 1}`,
         descricao: it.descricao || it.produto || `Item #${idx + 1}`,
-        material: it.produto || matchInActive?.material || 'MATERIAL',
-        constanteNome: it.produto || matchInActive?.constanteNome || 'MATERIAL',
-        measure: it.medida || matchInActive?.measure || '',
-        widthLength: it.medida || matchInActive?.widthLength || '',
-        quantity: Number(it.qtd) || 1,
-        qtd: Number(it.qtd) || 1,
-        unitPrice: Number(it.unitario) || 0,
-        valorUnitario: Number(it.unitario) || 0,
-        subtotal: Number(it.valorGeral) || ((Number(it.unitario) || 0) * (Number(it.qtd) || 1)),
-        notes: it.observacao || matchInActive?.notes || '',
-        observacao: it.observacao || matchInActive?.observacao || '',
+        material: it.produto || 'MATERIAL',
+        constanteNome: it.produto || 'MATERIAL',
+        measure: it.medida || '',
+        widthLength: it.medida || '',
+        quantity: qty,
+        qtd: qty,
+        unitPrice: unitVal,
+        valorUnitario: unitVal,
+        subtotal: subVal,
+        notes: it.observacao || '',
+        observacao: it.observacao || '',
         drawingImage: persistentDrawing,
         fotoDesenho: persistentDrawing,
-        totalWeightKg: matchInActive?.totalWeightKg || matchInActive?.pesoTotal || 0,
-        pesoTotal: matchInActive?.pesoTotal || matchInActive?.totalWeightKg || 0
+        totalWeightKg: 0,
+        pesoTotal: 0
       };
     });
 
@@ -1504,29 +1491,34 @@ export default function ReportsModule({
     const totalWeight = mappedItems.reduce((acc, it) => acc + (it.totalWeightKg || it.pesoTotal || 0), 0);
 
     return {
-      id: activeQuote?.id || firstItem.cotacaoId || quoteNum,
+      id: firstItem.cotacaoId || quoteNum,
       quoteNumber: quoteNum,
       date: dateVal,
       clientName: clientName,
-      contactPerson: firstItem.contato || activeQuote?.contactPerson || '',
-      status: activeQuote?.status || 'Rascunho',
-      validityDays: activeQuote?.validityDays || 10,
-      paymentTerms: activeQuote?.paymentTerms || 'À Vista / Pix',
-      observations: activeQuote?.observations || '',
+      contactPerson: (firstItem.contato && firstItem.contato !== '-') ? firstItem.contato : '',
+      status: mapStatus(firstItem.status),
+      validityDays: 10,
+      paymentTerms: 'À Vista / Pix',
+      observations: '',
       items: mappedItems,
       subtotalTotal: subtotal,
       grandTotal: subtotal,
-      discount: activeQuote?.discount || 0,
-      shipping: activeQuote?.shipping || 0,
+      discount: 0,
+      shipping: 0,
       totalWeightKg: totalWeight,
-      createdAt: activeQuote?.createdAt || new Date().toISOString(),
-      updatedAt: activeQuote?.updatedAt || new Date().toISOString()
+      createdAt: firstItem.data || new Date().toISOString(),
+      updatedAt: firstItem.data || new Date().toISOString()
     };
-  }, [filteredConsultaItems, selectedIds, activeQuote, currentQuote, selectedClientName, drawingPhotos]);
+  }, [filteredConsultaItems, selectedIds]);
 
-  const displayQuote = (activeTab === 'consulta' && selectedIds.length > 0)
+  const propostasQuote = (selectedOrderKey === 'CURRENT' ? (currentQuote || activeQuote) : (activeQuote || currentQuote)) || currentQuote;
+
+  // ✅ displayQuote isolado por aba:
+  // - Na aba 'consulta', utiliza estritamente o consultaSelectedQuote
+  // - Na aba 'propostas', utiliza a cotação ativa / selecionada da primeira aba
+  const displayQuote = activeTab === 'consulta'
     ? consultaSelectedQuote
-    : (activeQuote || currentQuote);
+    : propostasQuote;
 
   const totalItems = displayQuote.items.length;
   const totalWeight = displayQuote.totalWeightKg || displayQuote.items.reduce((acc, item) => acc + (item.totalWeightKg || item.pesoTotal || 0), 0);
@@ -1544,12 +1536,17 @@ export default function ReportsModule({
     qtd: 1,
     unitPrice: 185.00,
     totalWeightKg: 3.450,
-    observacao: 'CONFORME DESENHO TÉCNICO',
+    observacao: '',
     description: 'BUCHA USINADA'
   };
 
-  // ✅ imagem de UM item específico: override manual -> imagem do próprio item -> exemplo
+  // ✅ imagem de UM item específico:
+  // Na aba consulta, busca diretamente a imagem do item selecionado sem contaminação pelo clipboard da aba 1
   const getDrawing = (idx: number): string => {
+    if (activeTab === 'consulta') {
+      const it = displayQuote.items[idx] as (QuoteItem & { drawingImage?: string; fotoDesenho?: string }) | undefined;
+      return it?.drawingImage || it?.fotoDesenho || SAMPLE_DRAWING_BASE64;
+    }
     const override = drawingPhotos[idx];
     if (override !== undefined && override !== '') return override;
     const it = displayQuote.items[idx] as (QuoteItem & { drawingImage?: string; fotoDesenho?: string }) | undefined;
@@ -1601,6 +1598,10 @@ export default function ReportsModule({
   const renderDocumentosImpressao = () => {
     const totalTiposItens = displayQuote.items.length;
     const totalPecas = displayQuote.items.reduce((acc, item) => acc + Number(item.qtd !== undefined ? item.qtd : (item.quantity || 1)), 0);
+    // Na Consulta, utiliza 100% o cliente da linha selecionada sem vazamento do filtro da aba de Propostas
+    const effectiveClientName = activeTab === 'consulta'
+      ? (displayQuote.clientName || 'CLIENTE BALCÃO')
+      : (selectedClientName || displayQuote.clientName || 'CLIENTE BALCÃO');
 
     return (
     <div className="bg-slate-900/60 p-2 sm:p-6 rounded-2xl border border-slate-800 w-full overflow-x-hidden print:bg-transparent print:p-0 print:m-0 print:border-none print:shadow-none">
@@ -1626,7 +1627,7 @@ export default function ReportsModule({
         <div className="bg-slate-100 border border-slate-300 p-3 rounded-md mb-4 text-xs flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
           <div>
             <span className="font-bold text-slate-700">EMPRESA / CLIENTE:</span>{' '}
-            <strong className="lbl-cliente-nome text-slate-900 text-sm font-black uppercase break-words">{selectedClientName || displayQuote.clientName}</strong>
+            <strong className="lbl-cliente-nome text-slate-900 text-sm font-black uppercase break-words">{effectiveClientName}</strong>
           </div>
           <div className="text-slate-600 font-mono">
             Condições: <strong>{displayQuote.paymentTerms || 'À Vista / Pix'}</strong>
@@ -1647,7 +1648,7 @@ export default function ReportsModule({
               const produtoMaterial = item.constanteNome || item.constantName || item.material || 'MATERIAL';
               const medidasFormatadas = formatarMedidasLimpa(item);
               const descricaoItem = item.descricao || item.description || '-';
-              const informacoesObs = item.observacao || item.notes || item.info || '-';
+              const obsEspecifica = getObservacaoEspecificaItem(item);
               const valorUnitario = Number(item.valorUnitario !== undefined ? item.valorUnitario : (item.unitPrice || 0));
               const qtd = Number(item.qtd !== undefined ? item.qtd : (item.quantity || 1));
               const pesoTotal = Number(item.pesoTotal !== undefined ? item.pesoTotal : (item.totalWeightKg || 0));
@@ -1662,7 +1663,12 @@ export default function ReportsModule({
 
                   <div>
                     <span className="text-[10px] text-slate-500 uppercase font-bold block">Medidas</span>
-                    <span className="font-mono text-slate-800 font-semibold">{medidasFormatadas}</span>
+                    <div className="medida-bloco flex flex-col">
+                      <span className="medida-dimensao font-mono text-slate-900 font-bold">{medidasFormatadas}</span>
+                      {obsEspecifica && (
+                        <span className="medida-obs text-[10px] text-slate-500 italic mt-0.5">{obsEspecifica}</span>
+                      )}
+                    </div>
                   </div>
 
                   <div>
@@ -1670,10 +1676,10 @@ export default function ReportsModule({
                     <span className="text-slate-700">{descricaoItem}</span>
                   </div>
 
-                  {informacoesObs !== '-' && (
+                  {obsEspecifica && (
                     <div>
                       <span className="text-[10px] text-slate-500 uppercase font-bold block">Informações</span>
-                      <span className="italic text-slate-600">{informacoesObs}</span>
+                      <span className="italic text-slate-600">{obsEspecifica}</span>
                     </div>
                   )}
 
@@ -1718,7 +1724,7 @@ export default function ReportsModule({
                 const produtoMaterial = item.constanteNome || item.constantName || item.material || 'MATERIAL';
                 const medidasFormatadas = formatarMedidasLimpa(item);
                 const descricaoItem = item.descricao || item.description || '-';
-                const informacoesObs = item.observacao || item.notes || item.info || '-';
+                const obsEspecifica = getObservacaoEspecificaItem(item);
                 const valorUnitario = Number(item.valorUnitario !== undefined ? item.valorUnitario : (item.unitPrice || 0));
                 const qtd = Number(item.qtd !== undefined ? item.qtd : (item.quantity || 1));
                 const subtotal = Number(item.subtotal !== undefined ? item.subtotal : (valorUnitario * qtd));
@@ -1726,9 +1732,20 @@ export default function ReportsModule({
                 return (
                   <tr key={item.id || idx} className="hover:bg-slate-50">
                     <td className="text-left font-bold text-slate-900 p-2">{produtoMaterial}</td>
-                    <td className="text-center font-mono text-[11px] p-2">{medidasFormatadas}</td>
+                    <td className="text-center p-2">
+                      <div className="medida-bloco-center flex flex-col items-center justify-center">
+                        <span className="medida-dimensao font-bold font-mono text-[11px] text-slate-900 leading-tight">
+                          {medidasFormatadas}
+                        </span>
+                        {obsEspecifica && (
+                          <span className="medida-obs text-[9.5px] text-slate-500 italic font-sans leading-tight mt-0.5">
+                            {obsEspecifica}
+                          </span>
+                        )}
+                      </div>
+                    </td>
                     <td className="text-left p-2 text-slate-800">{descricaoItem}</td>
-                    <td className="text-left p-2 text-slate-600 italic text-[10px]">{informacoesObs}</td>
+                    <td className="text-left p-2 text-slate-600 italic text-[10px]">{obsEspecifica || '-'}</td>
                     <td className="text-right font-mono p-2">{formatCurrency(valorUnitario)}</td>
                     <td className="text-center font-bold font-mono p-2">{qtd}</td>
                     <td className="text-right font-mono font-bold p-2 text-slate-950">{formatCurrency(subtotal)}</td>
@@ -1813,24 +1830,33 @@ export default function ReportsModule({
             />
 
             <div className="text-[11px] mb-1.5 text-slate-700 flex flex-col sm:flex-row justify-between gap-1">
-              <div><strong>Cliente:</strong> <span className="lbl-cliente-nome font-bold uppercase">{selectedClientName || displayQuote.clientName}</span></div>
+              <div><strong>Cliente:</strong> <span className="lbl-cliente-nome font-bold uppercase">{effectiveClientName}</span></div>
               <div><strong>Condições:</strong> <span className="font-semibold">{displayQuote.paymentTerms || 'À Vista / Pix'}</span></div>
             </div>
 
             {/* Mobile Cards Via 1 */}
             <div className="block sm:hidden space-y-1.5 mb-2">
-              {displayQuote.items.map((item, idx) => (
-                <div key={idx} className="border border-slate-200 rounded p-1.5 text-[11px] bg-slate-50 space-y-0.5">
-                  <div className="flex justify-between font-bold">
-                    <span>{item.constanteNome || item.material || 'MATERIAL'}</span>
-                    <span className="font-mono">{formatCurrency(item.subtotal || ((item.unitPrice || 0) * (item.quantity || 1)))}</span>
+              {displayQuote.items.map((item, idx) => {
+                const medidasFormatadas = formatarMedidasLimpa(item);
+                const obsEspecifica = getObservacaoEspecificaItem(item);
+                return (
+                  <div key={idx} className="border border-slate-200 rounded p-1.5 text-[11px] bg-slate-50 space-y-0.5">
+                    <div className="flex justify-between font-bold">
+                      <span>{item.constanteNome || item.material || 'MATERIAL'}</span>
+                      <span className="font-mono">{formatCurrency(item.subtotal || ((item.unitPrice || 0) * (item.quantity || 1)))}</span>
+                    </div>
+                    <div className="text-[10px] text-slate-600 flex justify-between">
+                      <div>
+                        <span>Medida: <strong className="font-mono text-slate-900">{medidasFormatadas}</strong></span>
+                        {obsEspecifica && (
+                          <span className="block text-[9px] text-slate-500 italic mt-0.5">{obsEspecifica}</span>
+                        )}
+                      </div>
+                      <span>Qtd: {item.qtd || item.quantity || 1}</span>
+                    </div>
                   </div>
-                  <div className="text-[10px] text-slate-600 flex justify-between">
-                    <span>Medida: {formatarMedidasLimpa(item)}</span>
-                    <span>Qtd: {item.qtd || item.quantity || 1}</span>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             {/* Desktop Table Via 1 (7 Colunas Exatas - Tabela Enxuta) */}
@@ -1851,7 +1877,7 @@ export default function ReportsModule({
                   const produtoMaterial = item.constanteNome || item.constantName || item.material || 'MATERIAL';
                   const medidasFormatadas = formatarMedidasLimpa(item);
                   const descricaoItem = item.descricao || item.description || '-';
-                  const informacoesObs = item.observacao || item.notes || item.info || '-';
+                  const obsEspecifica = getObservacaoEspecificaItem(item);
                   const valorUnitario = Number(item.valorUnitario !== undefined ? item.valorUnitario : (item.unitPrice || 0));
                   const qtd = Number(item.qtd !== undefined ? item.qtd : (item.quantity || 1));
                   const subtotal = Number(item.subtotal !== undefined ? item.subtotal : (valorUnitario * qtd));
@@ -1859,9 +1885,20 @@ export default function ReportsModule({
                   return (
                     <tr key={idx} className="hover:bg-slate-50">
                       <td className="px-1.5 py-0.5 font-bold text-slate-900">{produtoMaterial}</td>
-                      <td className="px-1.5 py-0.5 text-center font-mono text-[9.5px]">{medidasFormatadas}</td>
+                      <td className="px-1.5 py-0.5 text-center">
+                        <div className="medida-bloco-center flex flex-col items-center justify-center">
+                          <span className="medida-dimensao font-bold font-mono text-[9.5px] text-slate-900 leading-tight">
+                            {medidasFormatadas}
+                          </span>
+                          {obsEspecifica && (
+                            <span className="medida-obs text-[8.5px] text-slate-500 italic font-sans leading-tight mt-0.5">
+                              {obsEspecifica}
+                            </span>
+                          )}
+                        </div>
+                      </td>
                       <td className="px-1.5 py-0.5 text-left text-slate-800 text-[10.5px]">{descricaoItem}</td>
-                      <td className="px-1.5 py-0.5 text-left text-slate-600 italic text-[9.5px]">{informacoesObs}</td>
+                      <td className="px-1.5 py-0.5 text-left text-slate-600 italic text-[9.5px]">{obsEspecifica || '-'}</td>
                       <td className="px-1.5 py-0.5 text-right font-mono">{formatCurrency(valorUnitario)}</td>
                       <td className="px-1.5 py-0.5 text-center font-mono font-bold">{qtd}</td>
                       <td className="px-1.5 py-0.5 text-right font-mono font-bold">{formatCurrency(subtotal)}</td>
@@ -1915,24 +1952,33 @@ export default function ReportsModule({
             />
 
             <div className="text-[11px] mb-1.5 text-slate-700 flex flex-col sm:flex-row justify-between gap-1">
-              <div><strong>Cliente:</strong> <span className="lbl-cliente-nome font-bold uppercase">{selectedClientName || displayQuote.clientName}</span></div>
+              <div><strong>Cliente:</strong> <span className="lbl-cliente-nome font-bold uppercase">{effectiveClientName}</span></div>
               <div><strong>Data:</strong> <span className="rel-data font-mono">{displayQuote.date || new Date().toLocaleDateString('pt-BR')}</span></div>
             </div>
 
             {/* Mobile Cards Via 2 */}
             <div className="block sm:hidden space-y-1.5 mb-2">
-              {displayQuote.items.map((item, idx) => (
-                <div key={idx} className="border border-slate-200 rounded p-1.5 text-[11px] bg-slate-50 space-y-0.5">
-                  <div className="flex justify-between font-bold">
-                    <span>{item.constanteNome || item.material || 'MATERIAL'}</span>
-                    <span className="font-mono">{formatCurrency(item.subtotal || ((item.unitPrice || 0) * (item.quantity || 1)))}</span>
+              {displayQuote.items.map((item, idx) => {
+                const medidasFormatadas = formatarMedidasLimpa(item);
+                const obsEspecifica = getObservacaoEspecificaItem(item);
+                return (
+                  <div key={idx} className="border border-slate-200 rounded p-1.5 text-[11px] bg-slate-50 space-y-0.5">
+                    <div className="flex justify-between font-bold">
+                      <span>{item.constanteNome || item.material || 'MATERIAL'}</span>
+                      <span className="font-mono">{formatCurrency(item.subtotal || ((item.unitPrice || 0) * (item.quantity || 1)))}</span>
+                    </div>
+                    <div className="text-[10px] text-slate-600 flex justify-between">
+                      <div>
+                        <span>Medida: <strong className="font-mono text-slate-900">{medidasFormatadas}</strong></span>
+                        {obsEspecifica && (
+                          <span className="block text-[9px] text-slate-500 italic mt-0.5">{obsEspecifica}</span>
+                        )}
+                      </div>
+                      <span>Qtd: {item.qtd || item.quantity || 1}</span>
+                    </div>
                   </div>
-                  <div className="text-[10px] text-slate-600 flex justify-between">
-                    <span>Medida: {formatarMedidasLimpa(item)}</span>
-                    <span>Qtd: {item.qtd || item.quantity || 1}</span>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             {/* Desktop Table Via 2 (7 Colunas Exatas - Tabela Enxuta) */}
@@ -1953,7 +1999,7 @@ export default function ReportsModule({
                   const produtoMaterial = item.constanteNome || item.constantName || item.material || 'MATERIAL';
                   const medidasFormatadas = formatarMedidasLimpa(item);
                   const descricaoItem = item.descricao || item.description || '-';
-                  const informacoesObs = item.observacao || item.notes || item.info || '-';
+                  const obsEspecifica = getObservacaoEspecificaItem(item);
                   const valorUnitario = Number(item.valorUnitario !== undefined ? item.valorUnitario : (item.unitPrice || 0));
                   const qtd = Number(item.qtd !== undefined ? item.qtd : (item.quantity || 1));
                   const subtotal = Number(item.subtotal !== undefined ? item.subtotal : (valorUnitario * qtd));
@@ -1961,9 +2007,20 @@ export default function ReportsModule({
                   return (
                     <tr key={idx} className="hover:bg-slate-50">
                       <td className="px-1.5 py-0.5 font-bold text-slate-900">{produtoMaterial}</td>
-                      <td className="px-1.5 py-0.5 text-center font-mono text-[9.5px]">{medidasFormatadas}</td>
+                      <td className="px-1.5 py-0.5 text-center">
+                        <div className="medida-bloco-center flex flex-col items-center justify-center">
+                          <span className="medida-dimensao font-bold font-mono text-[9.5px] text-slate-900 leading-tight">
+                            {medidasFormatadas}
+                          </span>
+                          {obsEspecifica && (
+                            <span className="medida-obs text-[8.5px] text-slate-500 italic font-sans leading-tight mt-0.5">
+                              {obsEspecifica}
+                            </span>
+                          )}
+                        </div>
+                      </td>
                       <td className="px-1.5 py-0.5 text-left text-slate-800 text-[10.5px]">{descricaoItem}</td>
-                      <td className="px-1.5 py-0.5 text-left text-slate-600 italic text-[9.5px]">{informacoesObs}</td>
+                      <td className="px-1.5 py-0.5 text-left text-slate-600 italic text-[9.5px]">{obsEspecifica || '-'}</td>
                       <td className="px-1.5 py-0.5 text-right font-mono">{formatCurrency(valorUnitario)}</td>
                       <td className="px-1.5 py-0.5 text-center font-mono font-bold">{qtd}</td>
                       <td className="px-1.5 py-0.5 text-right font-mono font-bold">{formatCurrency(subtotal)}</td>
@@ -1997,6 +2054,7 @@ export default function ReportsModule({
       {displayQuote.items.map((rawItem, itemIdx) => {
         const item: Partial<QuoteItem> = rawItem || {};
         const img = getDrawing(itemIdx);
+        const obsItem = getObservacaoEspecificaItem(item);
         return (
           <div 
             key={itemIdx}
@@ -2036,7 +2094,7 @@ export default function ReportsModule({
               <div className="etiqueta-dados col-span-7 text-xs space-y-1 leading-tight">
                 <div>
                   <span className="font-bold text-gray-600 block text-[11px]">EMPRESA / CLIENTE:</span>
-                  <span className="lbl-cliente-nome font-extrabold uppercase">{selectedClientName || displayQuote.clientName || 'CLIENTE BALCÃO'}</span>
+                  <span className="lbl-cliente-nome font-extrabold uppercase">{effectiveClientName}</span>
                 </div>
 
                 <div>
@@ -2048,9 +2106,16 @@ export default function ReportsModule({
 
                 <div>
                   <span className="font-bold text-gray-600 block text-[8px]">MEDIDA:</span>
-                  <span id="etiq-medida" className="font-extrabold uppercase text-[10px] font-mono">
-                    {formatarMedidasLimpa(item) || 'Ø 50 x 200 mm'}
-                  </span>
+                  <div className="medida-bloco flex flex-col">
+                    <span id="etiq-medida" className="medida-dimensao font-extrabold uppercase text-[10.5px] font-mono leading-tight text-slate-900">
+                      {formatarMedidasLimpa(item) || 'Ø 50 x 200 mm'}
+                    </span>
+                    {obsItem && (
+                      <span id="etiq-obs" className="medida-obs text-[8.5px] text-gray-500 italic font-sans leading-tight mt-0.5">
+                        {obsItem}
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 <div>
@@ -2059,16 +2124,6 @@ export default function ReportsModule({
                     {item.qtd || item.quantity || 1} PC
                   </span>
                 </div>
-
-                {/* Campo de Observação */}
-                {(item.observacao || item.notes || item.info || item.descricao || displayQuote.observations) && (
-                  <div className="pt-0.5">
-                    <span className="font-bold text-gray-600 block text-[9.5px]">OBSERVAÇÃO:</span>
-                    <span id="etiq-obs" className="font-semibold text-[9.5px] block text-gray-800 italic leading-snug">
-                      {item.observacao || item.notes || item.info || item.descricao || displayQuote.observations}
-                    </span>
-                  </div>
-                )}
               </div>
 
               {/* Coluna Direita - Desenho Técnico Nítido */}
@@ -2079,7 +2134,7 @@ export default function ReportsModule({
                 <EtiquetaDesenho
                   material={item.constanteNome || item.material || (item as any).produto || item.descricao}
                   medida={formatarMedidasLimpa(item) || item.medida || (item as any).measure}
-                  observacao={item.observacao || item.notes || item.info || item.descricao || displayQuote.observations}
+                  observacao={obsItem || ''}
                   descricao={item.descricao || (item as any).description || item.material}
                   imagem={img}
                   engrossarTracos={true}
@@ -2130,7 +2185,7 @@ export default function ReportsModule({
             id: displayQuote.quoteNumber || displayQuote.id || 'COT-2026-3169',
             quoteNumber: displayQuote.quoteNumber || displayQuote.id || 'COT-2026-3169',
             date: displayQuote.date || new Date().toLocaleDateString('pt-BR'),
-            clientName: selectedClientName || displayQuote.clientName || 'BRASIL TECNOLOGIAS LTDA',
+            clientName: effectiveClientName,
             paymentTerms: displayQuote.paymentTerms || 'À Vista / Pix (3% Desc.)',
             validityDays: displayQuote.validityDays || 10,
             deliveryTerms: 'A combinar / Imediato',
@@ -2164,7 +2219,7 @@ export default function ReportsModule({
             <h2 className="m-0 text-lg font-black uppercase tracking-wide">Ordem de Corte</h2>
             <div className="flex flex-wrap items-center gap-x-3 text-[11px] font-semibold text-slate-600 uppercase mt-0.5">
               <p className="m-0">
-                Cliente: <span className="text-black font-bold">{selectedClientName || displayQuote.clientName || 'TODOS'}</span>
+                Cliente: <span className="text-black font-bold">{effectiveClientName}</span>
               </p>
               <span className="text-slate-400">•</span>
               <p className="m-0">
@@ -2190,18 +2245,30 @@ export default function ReportsModule({
             </tr>
           </thead>
           <tbody>
-            {displayQuote.items.map((item, idx) => (
-              <tr key={item.id || idx}>
-                <td className="border border-black p-1.5 font-bold uppercase">{item.observacao || item.notes || item.info || displayQuote.quoteNumber || '-'}</td>
-                <td className="border border-black p-1.5 uppercase">{item.constanteNome || item.material || 'MATERIAL'}</td>
-                <td className="border border-black p-1.5">{formatarMedidasLimpa(item)}</td>
-                <td className="border border-black p-1.5 uppercase">{item.descricao || item.description || '-'}</td>
-                <td className="border border-black p-1.5 text-center font-bold">{item.qtd || item.quantity || 1}</td>
-                <td className="border border-black p-1.5 text-center">
-                  <span className="inline-block w-4 h-4 border-2 border-black align-middle" />
-                </td>
-              </tr>
-            ))}
+            {displayQuote.items.map((item, idx) => {
+              const obsItem = getObservacaoEspecificaItem(item);
+              return (
+                <tr key={item.id || idx}>
+                  <td className="border border-black p-1.5 font-bold uppercase">{obsItem || '-'}</td>
+                  <td className="border border-black p-1.5 uppercase">{item.constanteNome || item.material || 'MATERIAL'}</td>
+                  <td className="border border-black p-1.5">
+                    <div className="medida-bloco flex flex-col">
+                      <span className="medida-dimensao font-bold font-mono text-slate-900">{formatarMedidasLimpa(item)}</span>
+                      {obsItem && (
+                        <span className="medida-obs text-[9px] text-gray-500 italic font-sans mt-0.5">
+                          {obsItem}
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="border border-black p-1.5 uppercase">{item.descricao || item.description || '-'}</td>
+                  <td className="border border-black p-1.5 text-center font-bold">{item.qtd || item.quantity || 1}</td>
+                  <td className="border border-black p-1.5 text-center">
+                    <span className="inline-block w-4 h-4 border-2 border-black align-middle" />
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
 
@@ -2309,6 +2376,13 @@ export default function ReportsModule({
           body.print-proposta .tabela-container,
           body.print-proposta .screen-header,
           body.print-proposta .documento-modelo:not(.secao-proposta):not(.secao-proposta-resumida) { display: none !important; }
+
+          .medida-bloco { display: flex !important; flex-direction: column !important; align-items: flex-start !important; }
+          .medida-bloco-center { display: flex !important; flex-direction: column !important; align-items: center !important; justify-content: center !important; text-align: center !important; }
+          .medida-dimensao { font-weight: 800 !important; color: #000000 !important; font-family: monospace, Courier, monospace !important; display: block !important; }
+          .medida-obs { font-size: 7.5pt !important; font-style: italic !important; color: #4b5563 !important; font-family: Arial, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important; display: block !important; margin-top: 1px !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+          .secao-etiqueta .medida-dimensao { font-size: 8.5pt !important; font-weight: 900 !important; color: #000 !important; }
+          .secao-etiqueta .medida-obs { font-size: 6.8pt !important; color: #4b5563 !important; font-style: italic !important; line-height: 1.1 !important; }
         }
       `}</style>
       
@@ -2643,9 +2717,9 @@ export default function ReportsModule({
                         <td>{item.produto}</td>
                         <td>
                           <div>{item.medida || '-'}</div>
-                          {Boolean((item.observacao || item.obs) && (item.observacao || item.obs)?.trim()) && (
+                          {getObservacaoEspecificaItem(item) && (
                             <div className="text-xs text-slate-400 italic mt-0.5">
-                              {item.observacao || item.obs}
+                              {getObservacaoEspecificaItem(item)}
                             </div>
                           )}
                         </td>
@@ -2991,7 +3065,9 @@ export default function ReportsModule({
               </div>
 
               {/* Renderização do Documento Selecionado */}
-              {renderDocumentosImpressao()}
+              <div id="container-impressao" className="w-full overflow-x-hidden print:border-none print:p-0 print:m-0 print:shadow-none">
+                {renderDocumentosImpressao()}
+              </div>
             </div>
           )}
 
@@ -3101,7 +3177,7 @@ export default function ReportsModule({
               className="w-full px-3 py-2 bg-slate-950 text-slate-100 border border-slate-700 rounded-lg text-xs focus:outline-hidden focus:border-blue-500 font-mono"
             >
               <option value="CURRENT">
-                {displayQuote.quoteNumber ? `[${displayQuote.quoteNumber}] ${displayQuote.clientName || 'Cotação Atual'} (Cotação Selecionada)` : 'Cotação Atual (Em Edição)'}
+                {propostasQuote.quoteNumber ? `[${propostasQuote.quoteNumber}] ${propostasQuote.clientName || 'Cotação Atual'} (Cotação Selecionada)` : 'Cotação Atual (Em Edição)'}
               </option>
               {filteredSavedQuotes.map(sq => (
                 <option key={sq.id || sq.numero} value={sq.id || sq.numero}>

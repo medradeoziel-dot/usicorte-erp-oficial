@@ -1,4 +1,5 @@
 import React from 'react';
+import { getObservacaoEspecificaItem } from '../../../../src/utils/calculator';
 
 export interface ItemRelatorio {
   idVer?: string | number;
@@ -45,11 +46,16 @@ export default function RelatorioCortePrint({ itens }: Props) {
             <div className="grid grid-cols-2 gap-2 text-slate-700">
               <div>
                 <span className="text-[10px] text-slate-500 block uppercase font-bold">Medida</span>
-                <span className="font-mono font-semibold text-slate-900">{item.medida}</span>
+                <div className="medida-bloco flex flex-col">
+                  <span className="font-mono font-semibold text-slate-900">{item.medida}</span>
+                  {getObservacaoEspecificaItem(item) && (
+                    <span className="medida-obs text-[9.5px] text-slate-500 italic mt-0.5">{getObservacaoEspecificaItem(item)}</span>
+                  )}
+                </div>
               </div>
               <div>
                 <span className="text-[10px] text-slate-500 block uppercase font-bold">Código</span>
-                <span className="font-mono">{item.observacao || '-'}</span>
+                <span className="font-mono">{getObservacaoEspecificaItem(item) || '-'}</span>
               </div>
             </div>
 
@@ -82,17 +88,27 @@ export default function RelatorioCortePrint({ itens }: Props) {
           </thead>
           
           <tbody>
-            {itens.map((item, index) => (
-              <tr key={item.idVer || index} className="text-gray-900">
-                <td className="border-y border-l border-black py-2 px-2 text-center whitespace-nowrap font-mono">{item.observacao || '-'}</td>
-                <td className="border-y border-black py-2 px-2 text-center font-medium">{item.produto}</td>
-                <td className="border-y border-black py-2 px-2 text-center font-mono">{item.medida}</td>
-                <td className="border-y border-black py-2 px-2 text-center">{item.descricao}</td>
-                <td className="border-y border-r border-black py-2 px-2 text-center font-bold font-mono text-sm">{item.qtd}</td>
-                <td className="border-transparent"></td>
-                <td className="border border-black py-2 px-2"></td>
-              </tr>
-            ))}
+            {itens.map((item, index) => {
+              const obsItem = getObservacaoEspecificaItem(item);
+              return (
+                <tr key={item.idVer || index} className="text-gray-900">
+                  <td className="border-y border-l border-black py-2 px-2 text-center whitespace-nowrap font-mono">{obsItem || '-'}</td>
+                  <td className="border-y border-black py-2 px-2 text-center font-medium">{item.produto}</td>
+                  <td className="border-y border-black py-2 px-2 text-center font-mono">
+                    <div className="medida-bloco-center flex flex-col items-center justify-center">
+                      <span className="medida-dimensao font-bold font-mono text-slate-900 leading-tight">{item.medida}</span>
+                      {obsItem && (
+                        <span className="medida-obs text-[9.5px] text-slate-500 italic font-sans leading-tight mt-0.5">{obsItem}</span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="border-y border-black py-2 px-2 text-center">{item.descricao}</td>
+                  <td className="border-y border-r border-black py-2 px-2 text-center font-bold font-mono text-sm">{item.qtd}</td>
+                  <td className="border-transparent"></td>
+                  <td className="border border-black py-2 px-2"></td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

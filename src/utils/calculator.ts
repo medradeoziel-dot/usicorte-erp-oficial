@@ -556,6 +556,36 @@ export function formatarMedidasLimpa(item: Record<string, any>): string {
 // Alias para compatibilidade, se necessário
 export const formatarMedida = formatarMedidasLimpa;
 
+/**
+ * Extrai a observação específica e manual de um item.
+ * Retorna null se:
+ * - O campo for nulo, undefined, vazio ou contiver apenas espaços/traços ("-", "—").
+ * - Conter textos padrão/genéricos do sistema (ex: "Preços com impostos inclusos...", "Material sujeito a conferência...").
+ */
+export function getObservacaoEspecificaItem(item: any): string | null {
+  if (!item || typeof item !== 'object') return null;
+  const raw = item.observacao ?? item.obs ?? item.notes ?? item.observacoes ?? item.informacoes;
+  if (!raw || typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed === '-' || trimmed === '—' || trimmed.toLowerCase() === 'n/a') {
+    return null;
+  }
+  const lower = trimmed.toLowerCase();
+  if (
+    lower.includes('preços com impostos inclusos') ||
+    lower.includes('precos com impostos inclusos') ||
+    lower.includes('material sujeito a conferência') ||
+    lower.includes('material sujeito a conferencia') ||
+    lower.includes('material sujeito à conferência') ||
+    lower.includes('material sujeito à conferencia') ||
+    lower.includes('condições de pagamento') ||
+    lower.includes('condicoes de pagamento')
+  ) {
+    return null;
+  }
+  return trimmed;
+}
+
 export function renderizarTabelaRelatorio(listaItens: any[]): void {
   if (typeof document === 'undefined') return;
   const tbody = document.getElementById('tbody-relatorio');
@@ -573,15 +603,20 @@ export function renderizarTabelaRelatorio(listaItens: any[]): void {
     // 3. Descrição
     const descricaoItem = item.descricao || item.description || "-";
 
-    // 4. Informações (Campo Observação)
-    const informacoesObs = item.observacao || item.notes || item.info || "-";
+    // 4. Observação Específica do Item
+    const obsItem = getObservacaoEspecificaItem(item);
 
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td style="text-align: left; font-weight: bold;">${produtoMaterial}</td>
-      <td style="text-align: center;">${medidasFormatadas}</td>
+      <td style="text-align: center;">
+        <div class="medida-bloco-center" style="display: flex; flex-direction: column; align-items: center; justify-content: center;">
+          <span class="medida-dimensao" style="font-family: monospace; font-weight: bold;">${medidasFormatadas}</span>
+          ${obsItem ? `<span class="medida-obs" style="font-size: 8.5pt; font-style: italic; color: #4b5563; margin-top: 1px;">${obsItem}</span>` : ''}
+        </div>
+      </td>
       <td style="text-align: left;">${descricaoItem}</td>
-      <td style="text-align: left; font-style: italic; color: #555;">${informacoesObs}</td>
+      <td style="text-align: left; font-style: italic; color: #555;">${obsItem || '-'}</td>
       <td style="text-align: right;">R$ ${Number(item.valorUnitario !== undefined ? item.valorUnitario : (item.unitPrice || 0)).toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
       <td style="text-align: center;">${item.qtd || item.quantity || 1}</td>
       <td style="text-align: right; font-weight: bold;">${Number(item.pesoTotal !== undefined ? item.pesoTotal : (item.totalWeightKg || 0)).toFixed(3)} Kg</td>

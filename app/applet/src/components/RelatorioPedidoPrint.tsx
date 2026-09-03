@@ -1,4 +1,5 @@
 import React from 'react';
+import { getObservacaoEspecificaItem } from '../../../../src/utils/calculator';
 
 export interface ItemRelatorio {
   idVer?: string | number;
@@ -7,6 +8,7 @@ export interface ItemRelatorio {
   qtd: number;
   valorGeral: number;
   pesoTotal?: number;
+  observacao?: string;
 }
 
 interface Props {
@@ -94,15 +96,25 @@ export default function RelatorioPedidoPrint({ cliente, numeroPedido, data, iten
               </tr>
             </thead>
             <tbody>
-              {itens.map((item, index) => (
-                <tr key={item.idVer || index} className="border-b border-slate-100">
-                  <td className="py-1 px-1.5 font-bold">{item.produto}</td>
-                  <td className="py-1 px-1.5 text-center text-slate-600 font-mono text-[10px]">{item.medida}</td>
-                  <td className="py-1 px-1.5 text-center font-bold font-mono">{item.qtd}</td>
-                  <td className="py-1 px-1.5 text-center font-medium font-mono text-[10px]">{formatPeso(item.pesoTotal)}</td>
-                  <td className="py-1 px-1.5 text-right font-bold font-mono">{formatMoeda(item.valorGeral)}</td>
-                </tr>
-              ))}
+              {itens.map((item, index) => {
+                const obsItem = getObservacaoEspecificaItem(item);
+                return (
+                  <tr key={item.idVer || index} className="border-b border-slate-100">
+                    <td className="py-1 px-1.5 font-bold">{item.produto}</td>
+                    <td className="py-1 px-1.5 text-center text-slate-600 font-mono text-[10px]">
+                      <div className="medida-bloco-center flex flex-col items-center justify-center">
+                        <span className="medida-dimensao font-bold font-mono text-slate-900 leading-tight">{item.medida}</span>
+                        {obsItem && (
+                          <span className="medida-obs text-[9px] text-slate-500 italic font-sans leading-tight mt-0.5">{obsItem}</span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="py-1 px-1.5 text-center font-bold font-mono">{item.qtd}</td>
+                    <td className="py-1 px-1.5 text-center font-medium font-mono text-[10px]">{formatPeso(item.pesoTotal)}</td>
+                    <td className="py-1 px-1.5 text-right font-bold font-mono">{formatMoeda(item.valorGeral)}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

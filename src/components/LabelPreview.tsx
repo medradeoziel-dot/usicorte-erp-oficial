@@ -1,5 +1,6 @@
 import type { ItemPedido, Cliente } from "../lib/types";
 import EtiquetaDesenho from "./EtiquetaDesenho";
+import { getObservacaoEspecificaItem } from "../utils/calculator";
 
 interface LabelPreviewProps {
   pedidoId: string;
@@ -20,6 +21,7 @@ export default function LabelPreview({
 }: LabelPreviewProps) {
   const peca = itens.find((i) => i.id === pecaAtiva);
   const foto = fotosPorPeca[pecaAtiva];
+  const obsItem = getObservacaoEspecificaItem(peca);
 
   return (
     <div className="flex justify-center no-print-wrapper">
@@ -58,10 +60,17 @@ export default function LabelPreview({
             <span className="label-key">DESCRIÇÃO:</span>
             <span className="label-val label-val--bold">{peca?.descricao ?? "—"}</span>
           </div>
-          <div className="label-row label-row--split">
-            <div className="label-row">
+          <div className="label-row label-row--split items-start">
+            <div className="label-row flex-col items-start">
               <span className="label-key">MEDIDA:</span>
-              <span className="label-val">{peca?.medida ?? "—"}</span>
+              <div className="medida-bloco flex flex-col items-start">
+                <span className="label-val label-val--bold font-mono text-[11px] leading-tight text-black">{peca?.medida ?? "—"}</span>
+                {obsItem && (
+                  <span className="medida-obs text-[9px] text-gray-500 italic font-sans leading-tight mt-0.5">
+                    {obsItem}
+                  </span>
+                )}
+              </div>
             </div>
             <div className="label-row">
               <span className="label-key">QTD:</span>
@@ -71,15 +80,17 @@ export default function LabelPreview({
         </div>
 
         <div className="label-body">
-          <div className="label-obs">
-            <div className="label-key label-key--block">OBSERVAÇÕES:</div>
-            <div className="label-obs-text">{peca?.observacoes ?? "—"}</div>
-          </div>
+          {obsItem && (
+            <div className="label-obs">
+              <div className="label-key label-key--block">OBSERVAÇÕES:</div>
+              <div className="label-obs-text">{obsItem}</div>
+            </div>
+          )}
           <div className="label-drawing flex items-center justify-center p-1">
             <EtiquetaDesenho
               material={peca?.material}
               medida={peca?.medida}
-              observacao={peca?.observacoes}
+              observacao={obsItem || ''}
               descricao={peca?.descricao}
               imagem={foto}
               engrossarTracos={true}

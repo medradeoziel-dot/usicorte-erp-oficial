@@ -1,5 +1,5 @@
 import React from "react";
-import { formatSafeDate } from "../utils/calculator";
+import { formatSafeDate, getObservacaoEspecificaItem } from "../utils/calculator";
 import CompanyHeader from "./CompanyHeader";
 
 // Types/Interfaces
@@ -149,7 +149,8 @@ export const QuotePrintView: React.FC<QuotePrintViewProps> = (props) => {
     material: item.material ?? item.name ?? "MATERIAL",
     medidas: item.medidas ?? item.dimensions ?? item.dimensões ?? "",
     descricao: item.descricao ?? item.descrição ?? item.description ?? "",
-    informacoes: item.informacoes ?? item.informação ?? item.info ?? "-",
+    informacoes: item.informacoes ?? item.informação ?? item.info ?? "",
+    observacao: item.observacao ?? item.obs ?? item.notes ?? item.observacoes ?? "",
     quantidade: item.quantidade ?? item.qtd ?? item.quantity ?? 1,
     valorUnitario: item.valorUnitario ?? item.unitPrice ?? 0,
     valorTotal: item.valorTotal ?? item.subtotal ?? (Number(item.valorUnitario || item.unitPrice || 0) * Number(item.quantidade || item.qtd || item.quantity || 1)),
@@ -174,13 +175,29 @@ export const QuotePrintView: React.FC<QuotePrintViewProps> = (props) => {
     quote?.grandTotal ??
     (subtotal - (desconto || 0) + (quote?.shippingCost || quote?.shipping || 0));
 
-  const observacoes =
+  const rawObs =
     props.observacoes ??
     quote?.observacoes ??
     quote?.observations ??
-    (quote?.paymentTerms
-      ? `Condições de pagamento: ${quote.paymentTerms}\nPreços com impostos inclusos. Material sujeito à conferência no ato do recebimento.`
-      : "Preços com impostos inclusos. Material sujeito à conferência no ato do recebimento.");
+    "";
+  
+  const observacoes = (() => {
+    if (!rawObs || typeof rawObs !== 'string') return "";
+    const trimmed = rawObs.trim();
+    if (!trimmed || trimmed === '-' || trimmed === '—') return "";
+    const lower = trimmed.toLowerCase();
+    if (
+      lower.includes("preços com impostos inclusos") ||
+      lower.includes("precos com impostos inclusos") ||
+      lower.includes("material sujeito a conferência") ||
+      lower.includes("material sujeito a conferencia") ||
+      lower.includes("material sujeito à conferência") ||
+      lower.includes("material sujeito à conferencia")
+    ) {
+      return "";
+    }
+    return trimmed;
+  })();
 
   const formatCurrency = (val: number) => {
     return new Intl.NumberFormat("pt-BR", {
@@ -253,7 +270,12 @@ export const QuotePrintView: React.FC<QuotePrintViewProps> = (props) => {
                 {item.medidas && (
                   <div>
                     <span className="text-[10px] text-slate-400 uppercase font-bold block">Medidas</span>
-                    <span className="font-mono text-slate-700 break-all">{item.medidas}</span>
+                    <div className="medida-bloco flex flex-col">
+                      <span className="medida-dimensao font-mono text-slate-900 font-bold">{item.medidas}</span>
+                      {getObservacaoEspecificaItem(item) && (
+                        <span className="medida-obs text-[10px] text-slate-500 italic mt-0.5">{getObservacaoEspecificaItem(item)}</span>
+                      )}
+                    </div>
                   </div>
                 )}
 
@@ -264,10 +286,10 @@ export const QuotePrintView: React.FC<QuotePrintViewProps> = (props) => {
                   </div>
                 )}
 
-                {item.informacoes && item.informacoes !== "-" && (
+                {getObservacaoEspecificaItem(item) && (
                   <div>
                     <span className="text-[10px] text-slate-400 uppercase font-bold block">Informações</span>
-                    <span className="text-slate-600 italic break-words">{item.informacoes}</span>
+                    <span className="text-slate-600 italic break-words">{getObservacaoEspecificaItem(item)}</span>
                   </div>
                 )}
 
@@ -370,14 +392,23 @@ export const QuotePrintView: React.FC<QuotePrintViewProps> = (props) => {
                       />
                     )}
                   </td>
-                  <td className="p-2 text-center font-mono text-[11px] text-slate-800">
-                    {item.medidas || "—"}
+                  <td className="p-2 text-center">
+                    <div className="medida-bloco-center flex flex-col items-center justify-center">
+                      <span className="medida-dimensao font-bold font-mono text-[11px] text-slate-900 leading-tight">
+                        {item.medidas || "—"}
+                      </span>
+                      {getObservacaoEspecificaItem(item) && (
+                        <span className="medida-obs text-[9.5px] text-slate-500 italic font-sans leading-tight mt-0.5">
+                          {getObservacaoEspecificaItem(item)}
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="p-2 text-slate-800">
                     {item.descricao || "—"}
                   </td>
                   <td className="p-2 text-slate-600 italic text-[11px]">
-                    {item.informacoes && item.informacoes !== "-" ? item.informacoes : "—"}
+                    {getObservacaoEspecificaItem(item) || "—"}
                   </td>
                   <td className="p-2 text-right text-slate-800 font-mono">
                     {formatCurrency(item.valorUnitario || 0)}

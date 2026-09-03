@@ -1,6 +1,6 @@
 import React from "react";
 import type { Cliente, ItemPedido, Pedido } from "../lib/types";
-import { formatSafeDate } from "../utils/calculator";
+import { formatSafeDate, getObservacaoEspecificaItem } from "../utils/calculator";
 import CompanyHeader from "./CompanyHeader";
 
 interface A4PreviewProps {
@@ -62,9 +62,14 @@ export default function A4Preview({ pedido, cliente, itens, fotosPorPeca, mode }
                   <div className="a4-card-no-img h-24 flex items-center justify-center bg-slate-100 text-slate-400 text-[10px] rounded">SEM DESENHO</div>
                 )}
                 <div className="a4-card-detail text-[11px]"><b>Material:</b> {item.material}</div>
-                <div className="a4-card-detail text-[11px]"><b>Medida:</b> {item.medida}</div>
+                <div className="a4-card-detail text-[11px]">
+                  <b>Medida:</b> <span className="font-mono font-bold text-slate-900">{item.medida}</span>
+                  {getObservacaoEspecificaItem(item) && (
+                    <span className="block text-[10px] text-slate-500 italic mt-0.5">{getObservacaoEspecificaItem(item)}</span>
+                  )}
+                </div>
                 <div className="a4-card-detail text-[11px]"><b>Qtd:</b> {item.quantidade} pcs</div>
-                {item.observacoes && <div className="a4-card-detail a4-card-obs text-[10px] text-slate-500 italic"><b>Obs:</b> {item.observacoes}</div>}
+                {getObservacaoEspecificaItem(item) && <div className="a4-card-detail a4-card-obs text-[10px] text-slate-500 italic"><b>Obs:</b> {getObservacaoEspecificaItem(item)}</div>}
                 <div className="a4-card-price text-[11px] text-slate-600">{formatCurrency(item.valorUnit)} / pc</div>
                 <div className="a4-card-subtotal font-bold text-slate-900 pt-1 border-t border-slate-100 flex justify-between">
                   <span>Total:</span>
@@ -92,9 +97,16 @@ export default function A4Preview({ pedido, cliente, itens, fotosPorPeca, mode }
               {itens.map((item) => (
                 <tr key={item.id} className="a4-tr hover:bg-slate-50">
                   <td className="a4-td font-bold text-slate-900 p-1.5">{item.material || "—"}</td>
-                  <td className="a4-td text-center font-mono text-[11px] p-1.5">{item.medida || "—"}</td>
+                  <td className="a4-td text-center p-1.5">
+                    <div className="medida-bloco-center flex flex-col items-center justify-center">
+                      <span className="medida-dimensao font-bold font-mono text-[11px] text-slate-900 leading-tight">{item.medida || "—"}</span>
+                      {getObservacaoEspecificaItem(item) && (
+                        <span className="medida-obs text-[9.5px] text-slate-500 italic font-sans leading-tight mt-0.5">{getObservacaoEspecificaItem(item)}</span>
+                      )}
+                    </div>
+                  </td>
                   <td className="a4-td a4-td-desc text-left text-slate-800 p-1.5">{item.descricao || "—"}</td>
-                  <td className="a4-td text-left text-slate-600 italic text-[10px] p-1.5">{item.observacoes || "—"}</td>
+                  <td className="a4-td text-left text-slate-600 italic text-[10px] p-1.5">{getObservacaoEspecificaItem(item) || "—"}</td>
                   <td className="a4-td a4-td-r text-right font-mono p-1.5">{formatCurrency(item.valorUnit)}</td>
                   <td className="a4-td a4-td-r text-center font-mono font-bold p-1.5">{item.quantidade}</td>
                   <td className="a4-td a4-td-r text-right font-mono font-bold p-1.5 text-slate-950">{formatCurrency(item.valorUnit * item.quantidade)}</td>

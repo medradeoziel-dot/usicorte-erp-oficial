@@ -1,4 +1,5 @@
 import React from 'react';
+import { getObservacaoEspecificaItem } from '../../../../src/utils/calculator';
 
 export interface ItemRelatorio {
   idVer?: string | number;
@@ -98,45 +99,53 @@ export default function RelatorioPropostaPrint({
         <span className="text-xs font-bold uppercase tracking-wider text-slate-600">
           Itens da Proposta ({itens.length})
         </span>
-        {itens.map((item, index) => (
-          <div
-            key={item.idVer || index}
-            className="border border-slate-200 rounded-lg p-3 bg-white space-y-2 text-xs shadow-xs"
-          >
-            <div className="flex justify-between items-center border-b border-slate-100 pb-1.5">
-              <span className="text-[10px] text-slate-400 uppercase font-bold">Material</span>
-              <strong className="font-bold text-slate-900 text-sm">{item.produto}</strong>
-            </div>
+        {itens.map((item, index) => {
+          const obsItem = getObservacaoEspecificaItem(item);
+          return (
+            <div
+              key={item.idVer || index}
+              className="border border-slate-200 rounded-lg p-3 bg-white space-y-2 text-xs shadow-xs"
+            >
+              <div className="flex justify-between items-center border-b border-slate-100 pb-1.5">
+                <span className="text-[10px] text-slate-400 uppercase font-bold">Material</span>
+                <strong className="font-bold text-slate-900 text-sm">{item.produto}</strong>
+              </div>
 
-            <div>
-              <span className="text-[10px] text-slate-400 uppercase font-bold block">Medidas</span>
-              <span className="font-mono text-slate-800 font-semibold">{item.medida}</span>
-            </div>
-
-            <div>
-              <span className="text-[10px] text-slate-400 uppercase font-bold block">Descrição</span>
-              <span className="text-slate-700">{item.descricao}</span>
-            </div>
-
-            {item.observacao && item.observacao !== '-' && (
               <div>
-                <span className="text-[10px] text-slate-400 uppercase font-bold block">Informações</span>
-                <span className="italic text-slate-600">{item.observacao}</span>
+                <span className="text-[10px] text-slate-400 uppercase font-bold block">Medidas</span>
+                <div className="medida-bloco flex flex-col">
+                  <span className="medida-dimensao font-mono text-slate-800 font-semibold">{item.medida}</span>
+                  {obsItem && (
+                    <span className="medida-obs text-[10px] text-slate-500 italic mt-0.5">{obsItem}</span>
+                  )}
+                </div>
               </div>
-            )}
 
-            <div className="pt-2 border-t border-slate-100 flex justify-between items-center text-xs">
               <div>
-                <span className="text-slate-500">Qtd: <strong>{item.qtd}</strong></span>
-                <span className="mx-1 text-slate-300">|</span>
-                <span className="text-slate-500">Unit: {formatMoeda(item.unitario)}</span>
+                <span className="text-[10px] text-slate-400 uppercase font-bold block">Descrição</span>
+                <span className="text-slate-700">{item.descricao}</span>
               </div>
-              <div className="font-bold text-slate-950 font-mono text-sm">
-                {formatMoeda(item.valorGeral)}
+
+              {obsItem && (
+                <div>
+                  <span className="text-[10px] text-slate-400 uppercase font-bold block">Informações</span>
+                  <span className="italic text-slate-600">{obsItem}</span>
+                </div>
+              )}
+
+              <div className="pt-2 border-t border-slate-100 flex justify-between items-center text-xs">
+                <div>
+                  <span className="text-slate-500">Qtd: <strong>{item.qtd}</strong></span>
+                  <span className="mx-1 text-slate-300">|</span>
+                  <span className="text-slate-500">Unit: {formatMoeda(item.unitario)}</span>
+                </div>
+                <div className="font-bold text-slate-950 font-mono text-sm">
+                  {formatMoeda(item.valorGeral)}
+                </div>
               </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* DESKTOP & IMPRESSÃO: Tabela (>= 640px / print) */}
@@ -155,20 +164,28 @@ export default function RelatorioPropostaPrint({
             </tr>
           </thead>
           <tbody>
-            {itens.map((item, index) => (
-              <tr key={item.idVer || index} className="border-b border-slate-200">
-                <td className="py-3 px-2 font-bold">{item.produto}</td>
-                <td className="py-3 px-2 text-center text-slate-600 font-medium whitespace-pre-line font-mono text-xs">
-                  {item.medida}
-                </td>
-                <td className="py-3 px-2 text-slate-700">{item.descricao}</td>
-                <td className="py-3 px-2 text-slate-500 italic text-xs">{item.observacao || "-"}</td>
-                <td className="py-3 px-2 text-right font-semibold font-mono">{formatMoeda(item.unitario)}</td>
-                <td className="py-3 px-2 text-center font-bold font-mono">{item.qtd}</td>
-                <td className="py-3 px-2 text-right font-semibold font-mono">{formatPeso(item.pesoTotal)}</td>
-                <td className="py-3 px-2 text-right font-bold font-mono">{formatMoeda(item.valorGeral)}</td>
-              </tr>
-            ))}
+            {itens.map((item, index) => {
+              const obsItem = getObservacaoEspecificaItem(item);
+              return (
+                <tr key={item.idVer || index} className="border-b border-slate-200">
+                  <td className="py-3 px-2 font-bold">{item.produto}</td>
+                  <td className="py-3 px-2 text-center text-slate-600 font-medium whitespace-pre-line font-mono text-xs">
+                    <div className="medida-bloco-center flex flex-col items-center justify-center">
+                      <span className="medida-dimensao font-bold font-mono text-slate-900 leading-tight">{item.medida}</span>
+                      {obsItem && (
+                        <span className="medida-obs text-[9.5px] text-slate-500 italic font-sans leading-tight mt-0.5">{obsItem}</span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="py-3 px-2 text-slate-700">{item.descricao}</td>
+                  <td className="py-3 px-2 text-slate-500 italic text-xs">{obsItem || "-"}</td>
+                  <td className="py-3 px-2 text-right font-semibold font-mono">{formatMoeda(item.unitario)}</td>
+                  <td className="py-3 px-2 text-center font-bold font-mono">{item.qtd}</td>
+                  <td className="py-3 px-2 text-right font-semibold font-mono">{formatPeso(item.pesoTotal)}</td>
+                  <td className="py-3 px-2 text-right font-bold font-mono">{formatMoeda(item.valorGeral)}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

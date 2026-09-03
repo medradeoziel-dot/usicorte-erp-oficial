@@ -1,4 +1,5 @@
 import React from 'react';
+import { getObservacaoEspecificaItem } from '../../../../src/utils/calculator';
 
 export interface ItemRelatorio {
   idVer?: string | number;
@@ -86,18 +87,28 @@ export default function RelatorioEmpresaPrint({ itens }: Props) {
             </tr>
           </thead>
           <tbody>
-            {itens.map((item, index) => (
-              <tr key={item.idVer || index} className="odd:bg-white even:bg-slate-50 text-slate-900 border-b border-slate-100">
-                <td className="py-2 px-1 text-center whitespace-nowrap font-mono text-xs">{item.data}</td>
-                <td className="py-2 px-1 text-center font-medium">{item.produto}</td>
-                <td className="py-2 px-1 text-center font-mono text-xs">{item.medida}</td>
-                <td className="py-2 px-1 text-center">{item.descricao}</td>
-                <td className="py-2 px-1 text-center">{item.observacao || '-'}</td>
-                <td className="py-2 px-1 text-center font-bold font-mono">{item.qtd}</td>
-                <td className="py-2 px-1 text-center whitespace-nowrap font-mono">{formatCurrency(item.unitario)}</td>
-                <td className="py-2 px-1 text-center font-bold whitespace-nowrap font-mono">{formatCurrency(item.valorGeral)}</td>
-              </tr>
-            ))}
+            {itens.map((item, index) => {
+              const obsItem = getObservacaoEspecificaItem(item);
+              return (
+                <tr key={item.idVer || index} className="odd:bg-white even:bg-slate-50 text-slate-900 border-b border-slate-100">
+                  <td className="py-2 px-1 text-center whitespace-nowrap font-mono text-xs">{item.data}</td>
+                  <td className="py-2 px-1 text-center font-medium">{item.produto}</td>
+                  <td className="py-2 px-1 text-center font-mono text-xs">
+                    <div className="medida-bloco-center flex flex-col items-center justify-center">
+                      <span className="medida-dimensao font-bold font-mono text-slate-900 leading-tight">{item.medida}</span>
+                      {obsItem && (
+                        <span className="medida-obs text-[9px] text-slate-500 italic font-sans leading-tight mt-0.5">{obsItem}</span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="py-2 px-1 text-center">{item.descricao}</td>
+                  <td className="py-2 px-1 text-center">{obsItem || '-'}</td>
+                  <td className="py-2 px-1 text-center font-bold font-mono">{item.qtd}</td>
+                  <td className="py-2 px-1 text-center whitespace-nowrap font-mono">{formatCurrency(item.unitario)}</td>
+                  <td className="py-2 px-1 text-center font-bold whitespace-nowrap font-mono">{formatCurrency(item.valorGeral)}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
