@@ -266,6 +266,33 @@ export interface LancamentoFinanceiro {
 }
 
 // ==========================================
+// CONTAS A RECEBER / GESTÃO DE BOLETOS & PARCELAS
+// ==========================================
+
+export interface ContaReceberParcela {
+  id: string;
+  clienteId?: string;
+  clienteNome: string;
+  cotacaoId?: string;
+  cotacaoNumero: string;
+  numeroParcela: number; // 1, 2, 3...
+  totalParcelas: number; // 3
+  valorParcela: number;
+  dataVencimento: string; // YYYY-MM-DD
+  dataEmissao: string; // YYYY-MM-DD
+  dataPagamento?: string; // YYYY-MM-DD
+  status: 'Pendente' | 'Baixado' | 'Atrasado';
+  formaPagamento?: string;
+  banco?: string;
+  codigoBarras?: string;
+  nossoNumero?: string;
+  observacoes?: string;
+  lancamentoId?: string;
+  criadoEm?: string;
+  atualizadoEm?: string;
+}
+
+// ==========================================
 // DADOS DA EMPRESA / EMITENTE (NF-e E CABEÇALHO)
 // ==========================================
 
@@ -330,6 +357,19 @@ export interface CompanyFiscalData {
   nome_responsavel?: string;
   documento_responsavel?: string;
   updated_at?: string;
+}
+
+export type StatusProposta = 'rascunho' | 'pendente' | 'aprovado' | 'faturado' | 'rejeitado' | 'cancelado' | string;
+
+export interface ItemCotacaoResumo {
+  id: string;
+  cotacaoNumero: string;
+  clienteNome: string;
+  clienteId?: string;
+  data: string;
+  valorTotal: number;
+  status: StatusProposta;
+  itensCount: number;
 }
 
 

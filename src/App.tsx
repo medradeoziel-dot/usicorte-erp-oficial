@@ -19,11 +19,12 @@ import DailyOSModule from './components/DailyOSModule';
 import InventoryFinanceModule from './components/InventoryFinanceModule';
 import CompanySettingsModule from './components/CompanySettingsModule';
 import FechamentoCotacoesModule from './components/FechamentoCotacoesModule';
+import AndamentoMovimentacoesModule from './components/AndamentoMovimentacoesModule';
 import UsicorteCalculatorModal from './components/UsicorteCalculatorModal';
 import { MaterialProfile } from './utils/calculator';
 import { Users, FileCode } from 'lucide-react';
 
-export type ScreenType = 'home' | 'clientes' | 'produtos' | 'orcamento' | 'ordem_servico' | 'vendas' | 'relatorios' | 'estoque' | 'financeiro' | 'fechamento' | 'empresa' | 'php';
+export type ScreenType = 'home' | 'clientes' | 'produtos' | 'orcamento' | 'ordem_servico' | 'vendas' | 'relatorios' | 'estoque' | 'financeiro' | 'fechamento' | 'movimentacoes' | 'empresa' | 'php';
 
 export default function App() {
   const { 
@@ -186,6 +187,15 @@ export default function App() {
               onEditQuote={handleEditQuote}
               initialTab={reportsTab}
               onTabChange={setReportsTab}
+              onNavigateToMovimentacoes={() => trocarTela('movimentacoes')}
+            />
+          )}
+
+          {currentScreen === 'movimentacoes' && (
+            <AndamentoMovimentacoesModule 
+              clients={clients}
+              onNavigateToReports={(tab) => trocarTela('relatorios', tab)}
+              onNavigateToQuote={() => trocarTela('orcamento')}
             />
           )}
 

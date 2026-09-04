@@ -52,8 +52,24 @@ import {
   Loader2,
   ChevronDown,
   Check,
-  X
+  X,
+  Barcode,
+  CreditCard,
+  TrendingUp,
+  Bell,
+  Clock
 } from 'lucide-react';
+import BoletosGestaoModal from './BoletosGestaoModal';
+import { 
+  ContaReceberParcela,
+  fetchBoletosDb,
+  darBaixaBoletoDb,
+  registrarFaturamentoCotacaoDb,
+  obterBoletosVencimentoHoje,
+  formatCurrencyPtBr,
+  formatDataPtBr,
+  getDataHojeIso
+} from '../services/boletosService';
 
 interface ReportsModuleProps {
   currentQuote: Quote;
@@ -62,6 +78,7 @@ interface ReportsModuleProps {
   onEditQuote?: (quote: Quote) => void;
   initialTab?: 'propostas' | 'consulta';
   onTabChange?: (tab: 'propostas' | 'consulta') => void;
+  onNavigateToMovimentacoes?: () => void;
 }
 
 export type StatusProposta = 'rascunho' | 'pendente' | 'aprovado' | 'faturado' | 'rejeitado' | 'cancelado' | string;
@@ -151,7 +168,8 @@ export default function ReportsModule({
   onNavigateToQuote, 
   onEditQuote,
   initialTab = 'propostas',
-  onTabChange
+  onTabChange,
+  onNavigateToMovimentacoes
 }: ReportsModuleProps) {
   // Navigation tab: 'propostas' | 'consulta'
   const [activeTab, setActiveTab] = useState<'propostas' | 'consulta'>(initialTab);
@@ -353,6 +371,89 @@ export default function ReportsModule({
   const [statusToast, setStatusToast] = useState<{ message: string; type: 'success' | 'info' } | null>(null);
   const [openStatusDropdownId, setOpenStatusDropdownId] = useState<number | 'filtro' | null>(null);
 
+  // Estados para Gestão de Boletos e Alertas de Vencimento
+  const [boletos, setBoletos] = useState<ContaReceberParcela[]>([]);
+  const [isBoletosModalOpen, setIsBoletosModalOpen] = useState<boolean>(false);
+  const [selectedBoletoCotacao, setSelectedBoletoCotacao] = useState<{
+    cotacaoNumero: string;
+    clienteNome: string;
+    valorTotal: number;
+    cotacaoId?: string;
+    clienteId?: string;
+  } | null>(null);
+  const [isQuickPayingBoletoId, setIsQuickPayingBoletoId] = useState<string | null>(null);
+  const [vencimentosDismissed, setVencimentosDismissed] = useState<boolean>(false);
+
+  // Carregamento inicial de boletos cadastrados
+  useEffect(() => {
+    fetchBoletosDb()
+      .then(b => setBoletos(b))
+      .catch(err => console.warn('Aviso ao carregar boletos:', err));
+  }, []);
+
+  // Abre modal de gestão de boletos a partir de um item de consulta
+  const abrirModalBoletosItem = (item: ConsultaItem) => {
+    const targetNumero = (item.cotacao || '').trim();
+    const targetId = item.cotacaoId ? String(item.cotacaoId).trim() : '';
+    const itensDestaCotacao = dbQuotesItems.filter(it => 
+      (targetId && it.cotacaoId && String(it.cotacaoId).trim() === targetId) ||
+      (targetNumero && it.cotacao && String(it.cotacao).trim().toLowerCase() === targetNumero.toLowerCase()) ||
+      it.idVer === item.idVer
+    );
+    const valorTotalCotacao = itensDestaCotacao.reduce((acc, it) => acc + (Number(it.valorGeral) || 0), 0) || Number(item.valorGeral) || 0;
+
+    setSelectedBoletoCotacao({
+      cotacaoNumero: targetNumero || `COT-${item.idVer}`,
+      clienteNome: item.empresa || 'Cliente',
+      valorTotal: valorTotalCotacao,
+      cotacaoId: targetId || undefined
+    });
+    setIsBoletosModalOpen(true);
+  };
+
+  // Abre modal de boletos para a cotação selecionada
+  const handleAbrirBoletosSelecionado = () => {
+    if (selectedIds.length > 0) {
+      const itemSel = filteredConsultaItems.find(i => selectedIds.includes(i.idVer)) || filteredConsultaItems[0];
+      if (itemSel) {
+        abrirModalBoletosItem(itemSel);
+        return;
+      }
+    }
+    if (filteredConsultaItems.length > 0) {
+      abrirModalBoletosItem(filteredConsultaItems[0]);
+    } else {
+      setDeleteFeedback({ message: 'Nenhuma cotação disponível na tabela para gerenciar boletos.', type: 'error' });
+    }
+  };
+
+  // Baixa rápida de boleto pelo painel de alerta diário
+  const handleBaixaRapidaBoleto = async (boletoId: string) => {
+    setIsQuickPayingBoletoId(boletoId);
+    try {
+      const res = await darBaixaBoletoDb(boletoId, getDataHojeIso());
+      if (res.sucesso && res.boleto) {
+        setBoletos(prev => prev.map(b => b.id === boletoId ? res.boleto! : b));
+        setDeleteFeedback({
+          message: res.mensagem,
+          type: 'success'
+        });
+      } else {
+        setDeleteFeedback({
+          message: res.mensagem || 'Erro ao dar baixa no boleto.',
+          type: 'error'
+        });
+      }
+    } catch (e: any) {
+      setDeleteFeedback({
+        message: `Erro ao baixar boleto: ${e?.message || 'Falha de comunicação'}`,
+        type: 'error'
+      });
+    } finally {
+      setIsQuickPayingBoletoId(null);
+    }
+  };
+
   // Fecha dropdowns de situação ao clicar fora
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -418,7 +519,8 @@ export default function ReportsModule({
           const quotes: Quote[] = JSON.parse(saved);
           const mappedLabel =
             newStatus === 'aprovado' ? 'Aprovado' :
-            newStatus === 'reprovado' ? 'Rejeitado' :
+            newStatus === 'faturado' ? 'Faturado' :
+            newStatus === 'rejeitado' ? 'Rejeitado' :
             newStatus === 'cancelado' ? 'Cancelado' :
             newStatus === 'em_analise' ? 'Pendente' :
             newStatus === 'pendente' ? 'Enviado' : 'Rascunho';
@@ -453,7 +555,8 @@ export default function ReportsModule({
         if (isSame) {
           const mappedLabel =
             newStatus === 'aprovado' ? 'Aprovado' :
-            newStatus === 'reprovado' ? 'Rejeitado' :
+            newStatus === 'faturado' ? 'Faturado' :
+            newStatus === 'rejeitado' ? 'Rejeitado' :
             newStatus === 'cancelado' ? 'Cancelado' :
             newStatus === 'em_analise' ? 'Pendente' :
             newStatus === 'pendente' ? 'Enviado' : 'Rascunho';
@@ -461,6 +564,31 @@ export default function ReportsModule({
         }
         return prev;
       });
+
+      // 5. Integração com o Módulo Financeiro: Quando uma cotação for alterada para "FATURADO"
+      if (newStatus === 'faturado') {
+        const itensDestaCotacao = dbQuotesItems.filter(it => 
+          (targetId && it.cotacaoId && String(it.cotacaoId).trim() === targetId) ||
+          (targetNumero && it.cotacao && String(it.cotacao).trim().toLowerCase() === targetNumero.toLowerCase()) ||
+          it.idVer === item.idVer
+        );
+        const valorTotalCotacao = itensDestaCotacao.reduce((acc, it) => acc + (Number(it.valorGeral) || 0), 0) || Number(item.valorGeral) || 0;
+
+        registrarFaturamentoCotacaoDb(
+          targetNumero || String(item.cotacao) || 'COT',
+          item.empresa || 'Cliente',
+          valorTotalCotacao,
+          targetId || item.cotacaoId
+        ).then(() => {
+          fetchBoletosDb().then(b => setBoletos(b));
+          setStatusToast({
+            message: `Cotação #${targetNumero || ''} faturada! Lançamento de ${formatCurrencyPtBr(valorTotalCotacao)} registrado automaticamente no Módulo Financeiro e indicador do Dia atualizado!`,
+            type: 'success'
+          });
+        }).catch(err => {
+          console.warn('Aviso ao registrar faturamento automático:', err);
+        });
+      }
 
       setStatusToast({
         message: `Situação da cotação ${targetNumero || 'selecionada'} alterada para ${getStatusLabel(newStatus)}.`,
@@ -1111,6 +1239,71 @@ export default function ReportsModule({
   const allConsultaItems: ConsultaItem[] = useMemo(() => {
     return dbQuotesItems;
   }, [dbQuotesItems]);
+
+  // Totais calculados por Situação (KPIs no topo)
+  const totaisPorSituacao = useMemo(() => {
+    const mapa: Record<string, { totalValor: number; qtdItens: number; cotacoesSet: Set<string> }> = {
+      pendente: { totalValor: 0, qtdItens: 0, cotacoesSet: new Set() },
+      aprovado: { totalValor: 0, qtdItens: 0, cotacoesSet: new Set() },
+      rascunho: { totalValor: 0, qtdItens: 0, cotacoesSet: new Set() },
+      faturado: { totalValor: 0, qtdItens: 0, cotacoesSet: new Set() },
+      rejeitado: { totalValor: 0, qtdItens: 0, cotacoesSet: new Set() },
+      cancelado: { totalValor: 0, qtdItens: 0, cotacoesSet: new Set() },
+    };
+
+    allConsultaItems.forEach(item => {
+      const st = normalizeStatus(item.status);
+      if (!mapa[st]) {
+        mapa[st] = { totalValor: 0, qtdItens: 0, cotacoesSet: new Set() };
+      }
+      const val = Number(item.valorGeral) || (Number(item.unitario) || 0) * (Number(item.qtd) || 1) || 0;
+      mapa[st].totalValor += val;
+      mapa[st].qtdItens += 1;
+      const refCot = (item.cotacao || item.cotacaoId || String(item.idVer)).trim();
+      if (refCot) mapa[st].cotacoesSet.add(refCot);
+    });
+
+    return mapa;
+  }, [allConsultaItems]);
+
+  // Indicador consolidado de Faturado / Recebido Hoje
+  const faturadoHojeInfo = useMemo(() => {
+    const hojeIso = getDataHojeIso();
+    let totalHoje = 0;
+    let countHoje = 0;
+    const quotesContadas = new Set<string>();
+
+    // 1. Cotações marcadas como FATURADO com data de hoje
+    allConsultaItems.forEach(item => {
+      const st = normalizeStatus(item.status);
+      if (st === 'faturado') {
+        const itemData = (item.data || '').split('T')[0];
+        if (itemData === hojeIso) {
+          totalHoje += Number(item.valorGeral) || 0;
+          const ref = (item.cotacao || String(item.idVer)).trim();
+          if (ref && !quotesContadas.has(ref)) {
+            quotesContadas.add(ref);
+            countHoje += 1;
+          }
+        }
+      }
+    });
+
+    // 2. Boletos baixados/recebidos na data de hoje
+    boletos.forEach(b => {
+      if (b.status === 'Baixado' && b.dataPagamento === hojeIso) {
+        totalHoje += Number(b.valorParcela) || 0;
+        countHoje += 1;
+      }
+    });
+
+    return { total: totalHoje, count: countHoje };
+  }, [allConsultaItems, boletos]);
+
+  // Alertas de Boletos com Vencimento Hoje e Atrasados
+  const alertasBoletos = useMemo(() => {
+    return obterBoletosVencimentoHoje(boletos);
+  }, [boletos]);
 
 
   // Normaliza texto (minúsculo, sem acentos) para comparações
@@ -2649,40 +2842,62 @@ export default function ReportsModule({
           <div className="filtros-bar btn-no-print">
             
             {/* Botões de Impressão e Ações */}
-            <div className="botoes-impressao flex items-center justify-between gap-2.5 flex-wrap">
-              {/* Grupo de Botões de Relatório / Impressão (Alinhados à Esquerda) */}
-              <div className="flex items-center gap-2.5 flex-wrap">
-                <button className="btn-print" onClick={() => imprimirRelatorioGeral('GERAL')}>
-                  <span>🖨️</span> GERAL
-                </button>
-                <button className="btn-print" onClick={() => imprimirRelatorioGeral('EMPRESA')}>
-                  <span>🏢</span> EMPRESA
-                </button>
-                <button className="btn-print" onClick={() => imprimirRelatorioGeral('PEDIDO')}>
-                  <span>📋</span> PEDIDO
-                </button>
-                <button className="btn-print" onClick={() => imprimirRelatorioGeral('ETIQUETAS')}>
-                  <span>🏷️</span> ETIQUETAS
-                </button>
-                <button className="btn-print" onClick={() => imprimirRelatorioGeral('CORTE')}>
-                  <span>✂️</span> CORTE
-                </button>
-              </div>
-
-              {/* Botão de Exclusão em Massa (Posicionado no Extremo Direito) */}
+            <div className="botoes-impressao grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5 w-full">
+              <button 
+                type="button" 
+                className="btn-print w-full min-w-0 cursor-pointer" 
+                onClick={() => imprimirRelatorioGeral('GERAL')}
+                title="Imprimir Relatório Geral (A4 Inteiro)"
+              >
+                <span>🖨️</span> GERAL
+              </button>
+              <button 
+                type="button" 
+                className="btn-print w-full min-w-0 cursor-pointer" 
+                onClick={() => imprimirRelatorioGeral('EMPRESA')}
+                title="Imprimir Proposta Comercial Resumida"
+              >
+                <span>🏢</span> EMPRESA
+              </button>
+              <button 
+                type="button" 
+                className="btn-print w-full min-w-0 cursor-pointer" 
+                onClick={() => imprimirRelatorioGeral('PEDIDO')}
+                title="Imprimir Pedido (2 Vias A4)"
+              >
+                <span>📋</span> PEDIDO
+              </button>
+              <button 
+                type="button" 
+                className="btn-print w-full min-w-0 cursor-pointer" 
+                onClick={() => imprimirRelatorioGeral('ETIQUETAS')}
+                title="Imprimir Etiquetas (80x80mm)"
+              >
+                <span>🏷️</span> ETIQUETAS
+              </button>
+              <button 
+                type="button" 
+                className="btn-print w-full min-w-0 cursor-pointer" 
+                onClick={() => imprimirRelatorioGeral('CORTE')}
+                title="Imprimir Ordem de Corte"
+              >
+                <span>✂️</span> CORTE
+              </button>
               <button
                 type="button"
                 onClick={() => setIsBulkDeleteOpen(true)}
                 disabled={selectedIds.length === 0}
-                className={`btn-print border transition-all cursor-pointer flex items-center justify-center gap-1.5 ml-auto ${
+                className={`btn-print w-full min-w-0 border transition-all cursor-pointer flex flex-col items-center justify-center ${
                   selectedIds.length > 0
                     ? 'bg-rose-600 hover:bg-rose-700 text-white border-rose-500 shadow-md shadow-rose-600/30'
                     : 'bg-slate-800 text-slate-500 border-slate-700 cursor-not-allowed opacity-60'
                 }`}
                 title={selectedIds.length > 0 ? `Excluir ${selectedIds.length} item(ns) selecionado(s)` : 'Selecione 1 ou mais itens para excluir'}
               >
-                <Trash2 className="w-4 h-4 mb-0.5" />
-                <span>EXCLUIR {selectedIds.length > 0 ? `(${selectedIds.length})` : ''}</span>
+                <span className="flex items-center justify-center">
+                  <Trash2 className="w-4 h-4 mb-0.5" />
+                </span>
+                EXCLUIR {selectedIds.length > 0 ? `(${selectedIds.length})` : ''}
               </button>
             </div>
 
@@ -2837,7 +3052,7 @@ export default function ReportsModule({
                       onChange={(e) => handleSelectAll(e.target.checked)} 
                     />
                   </th>
-                  <th style={{ width: '180px', textAlign: 'center' }}>Ações</th>
+                  <th style={{ width: '205px', textAlign: 'center' }}>Ações</th>
                   <th>Cotação</th>
                   <th style={{ minWidth: '135px', textAlign: 'center' }}>Situação</th>
                   <th>Data</th>
@@ -2918,6 +3133,17 @@ export default function ReportsModule({
                             >
                               <Eye className="w-3 h-3" />
                               <span>Abrir</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                abrirModalBoletosItem(item);
+                              }}
+                              className="p-1 bg-indigo-600/20 hover:bg-indigo-600 text-indigo-400 hover:text-white border border-indigo-500/40 rounded text-[11px] transition-all cursor-pointer flex items-center justify-center shadow-xs"
+                              title="Gerenciar Boletos / Condição de Pagamento desta Cotação"
+                            >
+                              <Barcode className="w-3.5 h-3.5" />
                             </button>
                             <button
                               type="button"
@@ -3378,6 +3604,24 @@ export default function ReportsModule({
                 {renderDocumentosImpressao()}
               </div>
             </div>
+          )}
+
+          {/* ===================================================
+               MODAL DE GESTÃO DE BOLETOS & CONDIÇÃO DE PAGAMENTO
+               =================================================== */}
+          {isBoletosModalOpen && selectedBoletoCotacao && (
+            <BoletosGestaoModal
+              isOpen={isBoletosModalOpen}
+              onClose={() => setIsBoletosModalOpen(false)}
+              cotacaoNumero={selectedBoletoCotacao.cotacaoNumero}
+              clienteNome={selectedBoletoCotacao.clienteNome}
+              valorTotal={selectedBoletoCotacao.valorTotal}
+              cotacaoId={selectedBoletoCotacao.cotacaoId}
+              clienteId={selectedBoletoCotacao.clienteId}
+              boletosExistentes={boletos}
+              onBoletosAtualizados={(atualizados) => setBoletos(atualizados)}
+              onFeedback={(tipo, mensagem) => setDeleteFeedback({ message: mensagem, type: tipo })}
+            />
           )}
 
         </div>

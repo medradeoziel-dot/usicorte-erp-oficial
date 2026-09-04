@@ -713,11 +713,6 @@
 }
 
 .botoes-impressao {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  flex-wrap: wrap;
   width: 100%;
   border-bottom: 1px solid var(--border-color, #1e293b);
   padding-bottom: 12px;

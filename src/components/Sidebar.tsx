@@ -16,6 +16,7 @@ import {
   Building2,
   Scissors,
   Receipt,
+  Barcode,
   X 
 } from 'lucide-react';
 import { getMateriaisEstoque } from '../services/inventoryFinanceService';
@@ -203,6 +204,23 @@ export default function Sidebar({
         >
           <Search className="w-4 h-4 shrink-0 text-emerald-400" />
           <span>🔍 Consulta & Relatório Geral</span>
+        </button>
+
+        <button 
+          onClick={() => trocarTela('movimentacoes')}
+          className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer w-full text-left ${
+            currentScreen === 'movimentacoes' 
+              ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30 font-bold' 
+              : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+          }`}
+        >
+          <div className="flex items-center gap-3">
+            <Barcode className="w-4 h-4 shrink-0 text-indigo-400" />
+            <span>Andamento das Movimentações</span>
+          </div>
+          <span className="text-[9px] bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-1 py-0.5 rounded font-mono font-bold">
+            Boletos
+          </span>
         </button>
 
         <button 
