@@ -17,6 +17,7 @@ import {
   fetchCotacaoById,
   uploadDesenhoStorage, 
   updateItemCortadoDb,
+  updateCotacaoStatusDb,
   deleteCotacaoDb,
   deleteCotacaoItemDb,
   deleteMultipleCotacoesDb,
@@ -49,6 +50,8 @@ import {
   Sparkles,
   AlertTriangle,
   Loader2,
+  ChevronDown,
+  Check,
   X
 } from 'lucide-react';
 
@@ -61,7 +64,45 @@ interface ReportsModuleProps {
   onTabChange?: (tab: 'propostas' | 'consulta') => void;
 }
 
-export type StatusProposta = 'rascunho' | 'pendente' | 'aprovado' | 'rejeitado';
+export type StatusProposta = 'rascunho' | 'pendente' | 'aprovado' | 'faturado' | 'rejeitado' | 'cancelado' | string;
+
+export interface StatusOptionConfig {
+  value: string;
+  label: string;
+  dotClass: string;
+}
+
+export const STATUS_OPTIONS: StatusOptionConfig[] = [
+  { value: 'pendente', label: 'Pendente', dotClass: 'bg-blue-500' },
+  { value: 'aprovado', label: 'Aprovado', dotClass: 'bg-green-500' },
+  { value: 'rascunho', label: 'Rascunho', dotClass: 'bg-yellow-400' },
+  { value: 'faturado', label: 'Faturado', dotClass: 'bg-purple-500' },
+  { value: 'rejeitado', label: 'Rejeitado', dotClass: 'bg-red-500' },
+  { value: 'cancelado', label: 'Cancelado', dotClass: 'bg-slate-100 border border-slate-600' },
+];
+
+export function normalizeStatus(rawStatus?: string): string {
+  if (!rawStatus) return 'pendente';
+  const s = rawStatus.trim().toLowerCase();
+  if (s === 'aprovado') return 'aprovado';
+  if (s === 'faturado') return 'faturado';
+  if (s === 'rascunho') return 'rascunho';
+  if (s === 'rejeitado' || s === 'reprovado') return 'rejeitado';
+  if (s === 'cancelado') return 'cancelado';
+  if (s === 'pendente' || s === 'enviado' || s.includes('analise') || s.includes('análise')) return 'pendente';
+  return s;
+}
+
+export function getStatusOption(rawStatus?: string): StatusOptionConfig {
+  const norm = normalizeStatus(rawStatus);
+  const found = STATUS_OPTIONS.find(o => o.value === norm);
+  if (found) return found;
+  return { value: norm, label: (rawStatus || 'Pendente'), dotClass: 'bg-blue-500' };
+}
+
+export function getStatusLabel(rawStatus?: string): string {
+  return getStatusOption(rawStatus).label;
+}
 
 type PrintModelType = 'A4-inteiro' | 'A4-2vias' | 'etiqueta-80' | 'proposta-resumida' | 'corte';
 
@@ -89,11 +130,15 @@ export interface ConsultaItem {
 // Dados de consulta (inicia vazio para produção)
 const DADOS_CONSULTA_EXEMPLO: ConsultaItem[] = [];
 
-const STATUS_STYLES: Record<StatusProposta, string> = {
-  rascunho: 'bg-slate-200 text-slate-700',
-  pendente: 'bg-amber-200 text-amber-900',
-  aprovado: 'bg-emerald-200 text-emerald-900',
-  rejeitado: 'bg-rose-200 text-rose-900'
+const STATUS_STYLES: Record<string, string> = {
+  rascunho: 'bg-slate-700/50 text-slate-300 border-slate-600',
+  pendente: 'bg-amber-500/20 text-amber-300 border-amber-500/40',
+  aprovado: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40',
+  rejeitado: 'bg-rose-500/20 text-rose-300 border-rose-500/40',
+  reprovado: 'bg-rose-500/20 text-rose-300 border-rose-500/40',
+  cancelado: 'bg-red-950/60 text-red-300 border-red-700/50',
+  em_analise: 'bg-sky-500/20 text-sky-300 border-sky-500/40',
+  'em analise': 'bg-sky-500/20 text-sky-300 border-sky-500/40'
 };
 
 
@@ -302,6 +347,137 @@ export default function ReportsModule({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pasteAreaRef = useRef<HTMLDivElement>(null);
+
+  // Estados para alteração rápida da Situação na tabela de Consulta
+  const [updatingQuoteKey, setUpdatingQuoteKey] = useState<string | null>(null);
+  const [statusToast, setStatusToast] = useState<{ message: string; type: 'success' | 'info' } | null>(null);
+  const [openStatusDropdownId, setOpenStatusDropdownId] = useState<number | 'filtro' | null>(null);
+
+  // Fecha dropdowns de situação ao clicar fora
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('.status-dropdown-wrapper')) {
+        setOpenStatusDropdownId(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Manipulador para alteração rápida do status da "Situação" diretamente na tabela
+  const handleStatusChange = async (item: ConsultaItem, newStatusValue: string) => {
+    const targetNumero = (item.cotacao || '').trim();
+    const targetId = item.cotacaoId ? String(item.cotacaoId).trim() : '';
+    const newStatus = normalizeStatus(newStatusValue);
+    const keyForSpinner = targetNumero || targetId || String(item.idVer);
+
+    // 1. Atualização OTIMISTA Instantânea na UI (Zero Latência)
+    // Se a cotação possuir múltiplos itens agrupados sob o mesmo número, atualiza a situação de todos os itens daquela cotação.
+    setDbQuotesItems(prevItems =>
+      prevItems.map(it => {
+        const isSameQuote =
+          (targetId && it.cotacaoId && String(it.cotacaoId).trim() === targetId) ||
+          (targetNumero && it.cotacao && String(it.cotacao).trim().toLowerCase() === targetNumero.toLowerCase()) ||
+          it.idVer === item.idVer;
+
+        if (isSameQuote) {
+          return { ...it, status: newStatus as StatusProposta };
+        }
+        return it;
+      })
+    );
+
+    // Atualiza também na lista agrupada de cotações distintas
+    setSavedDbQuotes(prev =>
+      prev.map(q => {
+        const isSameQuote =
+          (targetId && q.id && String(q.id).trim() === targetId) ||
+          (targetNumero && q.numero && String(q.numero).trim().toLowerCase() === targetNumero.toLowerCase());
+        return isSameQuote ? { ...q, status: newStatus } : q;
+      })
+    );
+
+    setUpdatingQuoteKey(keyForSpinner);
+
+    try {
+      // 2. Atualização Persistente no Supabase
+      const { error: dbErr } = await updateCotacaoStatusDb(
+        { id: targetId || undefined, numero: targetNumero || undefined },
+        newStatus
+      );
+
+      if (dbErr) {
+        console.warn('Aviso no Supabase ao atualizar status:', dbErr);
+      }
+
+      // 3. Atualização no LocalStorage (s_orcamentos)
+      try {
+        const saved = localStorage.getItem('s_orcamentos');
+        if (saved) {
+          const quotes: Quote[] = JSON.parse(saved);
+          const mappedLabel =
+            newStatus === 'aprovado' ? 'Aprovado' :
+            newStatus === 'reprovado' ? 'Rejeitado' :
+            newStatus === 'cancelado' ? 'Cancelado' :
+            newStatus === 'em_analise' ? 'Pendente' :
+            newStatus === 'pendente' ? 'Enviado' : 'Rascunho';
+
+          const updated = quotes.map(q => {
+            const match =
+              (targetId && q.id && String(q.id).trim() === targetId) ||
+              (targetNumero && q.quoteNumber && String(q.quoteNumber).trim().toLowerCase() === targetNumero.toLowerCase());
+
+            if (match) {
+              return {
+                ...q,
+                status: mappedLabel as any,
+                updatedAt: new Date().toISOString()
+              };
+            }
+            return q;
+          });
+
+          localStorage.setItem('s_orcamentos', JSON.stringify(updated));
+        }
+      } catch (localErr) {
+        console.warn('Aviso ao sincronizar status local:', localErr);
+      }
+
+      // 4. Se a cotação ativa atual for a mesma, atualiza seu status
+      setActiveQuote(prev => {
+        const isSame =
+          (targetId && prev.id && String(prev.id).trim() === targetId) ||
+          (targetNumero && prev.quoteNumber && String(prev.quoteNumber).trim().toLowerCase() === targetNumero.toLowerCase());
+
+        if (isSame) {
+          const mappedLabel =
+            newStatus === 'aprovado' ? 'Aprovado' :
+            newStatus === 'reprovado' ? 'Rejeitado' :
+            newStatus === 'cancelado' ? 'Cancelado' :
+            newStatus === 'em_analise' ? 'Pendente' :
+            newStatus === 'pendente' ? 'Enviado' : 'Rascunho';
+          return { ...prev, status: mappedLabel as any };
+        }
+        return prev;
+      });
+
+      setStatusToast({
+        message: `Situação da cotação ${targetNumero || 'selecionada'} alterada para ${getStatusLabel(newStatus)}.`,
+        type: 'success'
+      });
+      setTimeout(() => setStatusToast(null), 3000);
+    } catch (err) {
+      console.error('Erro ao atualizar situação no Supabase:', err);
+      setStatusToast({
+        message: 'Erro ao registrar alteração no banco de dados.',
+        type: 'info'
+      });
+      setTimeout(() => setStatusToast(null), 3000);
+    } finally {
+      setUpdatingQuoteKey(null);
+    }
+  };
 
   // Busca e carrega uma cotação estritamente por ID no banco de dados com fallback para LocalStorage
   const carregarCotacaoPorId = async (idOuNumero: string) => {
@@ -954,8 +1130,8 @@ export default function ReportsModule({
       // 1) Filtro fixo por nome do cliente
       if (cliente && !normalizar(item.empresa).includes(cliente)) return false;
 
-      // 1.b) Filtro por situação (rascunho / pendente / aprovado / rejeitado)
-      if (statusFiltro !== 'todos' && item.status !== statusFiltro) return false;
+      // 1.b) Filtro por situação (rascunho / pendente / aprovado / reprovado / cancelado / em_analise)
+      if (statusFiltro !== 'todos' && normalizeStatus(item.status) !== normalizeStatus(statusFiltro)) return false;
 
       // 2) Filtro por categoria selecionada
       if (!term) return true;
@@ -2558,19 +2734,74 @@ export default function ReportsModule({
                 /> DATA
               </label>
 
-              <select
-                id="selectStatus"
-                className="input-busca-avancada"
-                value={statusFiltro}
-                onChange={(e) => setStatusFiltro(e.target.value as 'todos' | StatusProposta)}
-                title="Filtrar por situação da proposta"
-              >
-                <option value="todos">SITUAÇÃO: TODAS</option>
-                <option value="rascunho">RASCUNHO</option>
-                <option value="pendente">PENDENTE</option>
-                <option value="aprovado">APROVADO</option>
-                <option value="rejeitado">REJEITADO</option>
-              </select>
+              {/* Filtro por Situação com Visual Padronizado */}
+              <div className="status-dropdown-wrapper relative inline-block">
+                <button
+                  type="button"
+                  id="selectStatus"
+                  onClick={() => setOpenStatusDropdownId(prev => prev === 'filtro' ? null : 'filtro')}
+                  className="h-[37px] px-3 bg-white border border-slate-300 hover:border-blue-400 rounded-md shadow-xs flex items-center justify-between gap-2.5 cursor-pointer transition-all min-w-[180px]"
+                  title="Filtrar por situação da proposta"
+                >
+                  <div className="flex items-center gap-2">
+                    {statusFiltro === 'todos' ? (
+                      <span className="w-2.5 h-2.5 rounded-full bg-slate-300 shrink-0" />
+                    ) : (
+                      <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${getStatusOption(statusFiltro).dotClass}`} />
+                    )}
+                    <span className="text-blue-600 font-semibold text-xs whitespace-nowrap">
+                      {statusFiltro === 'todos' ? 'Todas as Situações' : getStatusOption(statusFiltro).label}
+                    </span>
+                  </div>
+                  <ChevronDown className={`w-3.5 h-3.5 text-blue-600 opacity-70 transition-transform ${openStatusDropdownId === 'filtro' ? 'rotate-180' : ''}`} />
+                </button>
+
+                {openStatusDropdownId === 'filtro' && (
+                  <div className="absolute left-0 top-full mt-1.5 z-50 min-w-[180px] bg-white border border-slate-200 rounded-lg shadow-xl py-1 animate-in fade-in zoom-in-95 duration-100">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStatusFiltro('todos');
+                        setOpenStatusDropdownId(null);
+                      }}
+                      className={`w-full flex items-center justify-between px-3 py-1.5 text-left text-xs transition-colors hover:bg-blue-50 cursor-pointer ${
+                        statusFiltro === 'todos' ? 'bg-blue-50/80 font-bold' : 'font-medium'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-slate-300 shrink-0" />
+                        <span className="text-blue-600">Todas as Situações</span>
+                      </div>
+                      {statusFiltro === 'todos' && <Check className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />}
+                    </button>
+
+                    <div className="h-px bg-slate-100 my-1" />
+
+                    {STATUS_OPTIONS.map((opt) => {
+                      const isSelected = statusFiltro === opt.value;
+                      return (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => {
+                            setStatusFiltro(opt.value as StatusProposta);
+                            setOpenStatusDropdownId(null);
+                          }}
+                          className={`w-full flex items-center justify-between px-3 py-1.5 text-left text-xs transition-colors hover:bg-blue-50 cursor-pointer ${
+                            isSelected ? 'bg-blue-50/80 font-bold' : 'font-medium'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${opt.dotClass}`} />
+                            <span className="text-blue-600">{opt.label}</span>
+                          </div>
+                          {isSelected && <Check className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
 
               <input 
                 type="text" 
@@ -2608,7 +2839,7 @@ export default function ReportsModule({
                   </th>
                   <th style={{ width: '180px', textAlign: 'center' }}>Ações</th>
                   <th>Cotação</th>
-                  <th>Situação</th>
+                  <th style={{ minWidth: '135px', textAlign: 'center' }}>Situação</th>
                   <th>Data</th>
                   <th>Cliente / Empresa</th>
                   <th>Contato</th>
@@ -2629,7 +2860,7 @@ export default function ReportsModule({
                     </td>
                   </tr>
                 ) : (
-                  filteredConsultaItems.map((item) => {
+                  filteredConsultaItems.map((item, idx) => {
                     const isSelected = selectedIds.includes(item.idVer);
                     return (
                       <tr 
@@ -2637,7 +2868,14 @@ export default function ReportsModule({
                         className={isSelected ? 'linha-selecionada cursor-pointer' : 'cursor-pointer hover:bg-slate-800/40'}
                         onClick={(e) => {
                           const target = e.target as HTMLElement;
-                          if (target.tagName !== 'INPUT' && target.tagName !== 'BUTTON' && !target.closest('button')) {
+                          if (
+                            target.tagName !== 'INPUT' && 
+                            target.tagName !== 'BUTTON' && 
+                            target.tagName !== 'SELECT' && 
+                            !target.closest('button') && 
+                            !target.closest('select') &&
+                            !target.closest('.status-dropdown-wrapper')
+                          ) {
                             handleToggleSelect(item.idVer);
                           }
                         }}
@@ -2718,10 +2956,69 @@ export default function ReportsModule({
                           </div>
                         </td>
                         <td><strong>{item.cotacao || '-'}</strong></td>
-                        <td>
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${STATUS_STYLES[item.status]}`}>
-                            {item.status}
-                          </span>
+                        <td style={{ textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
+                          {/* Elemento Interativo de Alteração Rápida de Situação com fundo claro, texto azul e bolinha colorida */}
+                          <div className="status-dropdown-wrapper relative inline-block text-left">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setOpenStatusDropdownId(prev => prev === item.idVer ? null : item.idVer);
+                              }}
+                              disabled={updatingQuoteKey === (item.cotacao || item.cotacaoId || String(item.idVer))}
+                              className="btn-no-print h-[28px] px-2.5 bg-white border border-slate-300 hover:border-blue-400 rounded-md shadow-xs inline-flex items-center gap-2 cursor-pointer transition-all disabled:opacity-60 disabled:cursor-wait"
+                              title="Clique para alterar a situação desta cotação"
+                            >
+                              <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${getStatusOption(item.status).dotClass}`} />
+                              <span className="text-blue-600 font-semibold text-xs whitespace-nowrap">
+                                {getStatusOption(item.status).label}
+                              </span>
+                              {updatingQuoteKey === (item.cotacao || item.cotacaoId || String(item.idVer)) ? (
+                                <Loader2 className="w-3.5 h-3.5 text-blue-600 animate-spin shrink-0 ml-0.5" />
+                              ) : (
+                                <ChevronDown className={`w-3.5 h-3.5 text-blue-600 opacity-70 shrink-0 ml-0.5 transition-transform ${openStatusDropdownId === item.idVer ? 'rotate-180' : ''}`} />
+                              )}
+                            </button>
+
+                            {/* Dropdown Menu com Opções Padronizadas */}
+                            {openStatusDropdownId === item.idVer && (
+                              <div 
+                                className={`absolute left-0 z-50 min-w-[155px] bg-white border border-slate-200 rounded-lg shadow-xl py-1 animate-in fade-in zoom-in-95 duration-100 ${
+                                  idx >= filteredConsultaItems.length - 3 ? 'bottom-full mb-1.5' : 'top-full mt-1.5'
+                                }`}
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                {STATUS_OPTIONS.map((opt) => {
+                                  const isSelected = normalizeStatus(item.status) === opt.value;
+                                  return (
+                                    <button
+                                      key={opt.value}
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setOpenStatusDropdownId(null);
+                                        handleStatusChange(item, opt.value);
+                                      }}
+                                      className={`w-full flex items-center justify-between px-3 py-1.5 text-left text-xs transition-colors hover:bg-blue-50 cursor-pointer ${
+                                        isSelected ? 'bg-blue-50/80 font-bold' : 'font-medium'
+                                      }`}
+                                    >
+                                      <div className="flex items-center gap-2">
+                                        <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${opt.dotClass}`} />
+                                        <span className="text-blue-600">{opt.label}</span>
+                                      </div>
+                                      {isSelected && <Check className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
+
+                            {/* Exibição para Impressão */}
+                            <span className="hidden print:inline-block text-[10px] font-bold text-slate-800">
+                              {getStatusOption(item.status).label}
+                            </span>
+                          </div>
                         </td>
                         <td>{item.data}</td>
                         <td><strong>{item.empresa}</strong></td>
@@ -3367,6 +3664,14 @@ export default function ReportsModule({
         {renderDocumentosImpressao()}
       </div>
         </>
+      )}
+
+      {/* Toast flutuante de confirmação de alteração rápida de Situação */}
+      {statusToast && (
+        <div className="fixed bottom-6 right-6 z-50 bg-slate-900/95 text-slate-100 border border-emerald-500/50 shadow-2xl rounded-xl px-4 py-2.5 flex items-center gap-2.5 text-xs font-semibold animate-in fade-in slide-in-from-bottom-2 duration-200">
+          <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+          <span>{statusToast.message}</span>
+        </div>
       )}
 
     </div>

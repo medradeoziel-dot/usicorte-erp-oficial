@@ -57,7 +57,7 @@ export interface SupabaseCotacao {
   contato?: string;
   telefone?: string;
   email?: string;
-  status: 'rascunho' | 'pendente' | 'aprovado' | 'rejeitado';
+  status: 'rascunho' | 'pendente' | 'aprovado' | 'rejeitado' | 'reprovado' | 'cancelado' | 'em_analise' | string;
   observacoes?: string;
   valor_total: number;
   created_by?: string;
@@ -840,11 +840,49 @@ export async function fetchCotacoesDb(filtroCliente?: string, filtroStatus?: str
   }
 }
 
-export async function updateCotacaoStatusDb(cotacaoId: string, status: 'rascunho' | 'pendente' | 'aprovado' | 'rejeitado') {
-  return await db
-    .from('cotacoes')
-    .update({ status, updated_at: new Date().toISOString() })
-    .eq('id', cotacaoId);
+export async function updateCotacaoStatusDb(
+  cotacaoIdOrObj: string | { id?: string; numero?: string },
+  status: 'rascunho' | 'pendente' | 'aprovado' | 'rejeitado' | 'reprovado' | 'cancelado' | 'em_analise' | string
+) {
+  const targetId = typeof cotacaoIdOrObj === 'string' ? cotacaoIdOrObj : cotacaoIdOrObj.id;
+  const targetNumero = typeof cotacaoIdOrObj === 'object' ? cotacaoIdOrObj.numero : undefined;
+  const statusStr = (status || '').toLowerCase().trim();
+  const payload = { status: statusStr, updated_at: new Date().toISOString() };
+
+  let updateQuery;
+  if (targetId) {
+    updateQuery = db.from('cotacoes').update(payload).eq('id', targetId);
+  } else if (targetNumero) {
+    updateQuery = db.from('cotacoes').update(payload).eq('numero', targetNumero);
+  } else {
+    return { data: null, error: new Error('Sem identificador para atualizar cotação') };
+  }
+
+  let { data, error } = await updateQuery;
+
+  // Se houver restrição no banco de dados (ex: constraint de enum aceitando apenas rascunho/pendente/aprovado/rejeitado)
+  if (error && (error.message?.includes('check') || error.message?.includes('invalid input') || error.code === '23514')) {
+    const fallback = mapQuoteStatusToSupabase(statusStr);
+    const fallbackPayload = { status: fallback, updated_at: new Date().toISOString() };
+    if (targetId) {
+      const retry = await db.from('cotacoes').update(fallbackPayload).eq('id', targetId);
+      error = retry.error;
+    } else if (targetNumero) {
+      const retry = await db.from('cotacoes').update(fallbackPayload).eq('numero', targetNumero);
+      error = retry.error;
+    }
+  }
+
+  // Se a tabela cotacao_itens tiver o campo status ou updated_at, sincroniza os itens pertencentes a essa cotação
+  if (targetId) {
+    try {
+      await db.from('cotacao_itens').update({ updated_at: new Date().toISOString() }).eq('cotacao_id', targetId);
+    } catch (_) {
+      // silencioso se cotacao_itens não tiver os campos
+    }
+  }
+
+  return { data, error };
 }
 
 export async function updateItemCortadoDb(itemId: string | number, cortado: boolean) {
