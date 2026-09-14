@@ -8,6 +8,7 @@ import {
   db,
   SupabaseCotacao
 } from '../lib/db';
+import { executarMigracaoEmergenciaOrcamentos } from '../services/emergencyMigrationService';
 import { 
   formatCurrency, 
   formatNumberBR, 
@@ -113,15 +114,8 @@ export default function SalesModule({
   quoteToEdit,
   onClearQuoteToEdit
 }: SalesModuleProps) {
-  // Saved quotes history (stored in localStorage under 's_orcamentos')
-  const [savedQuotes, setSavedQuotes] = useState<Quote[]>(() => {
-    try {
-      const local = JSON.parse(localStorage.getItem("s_orcamentos") || "[]");
-      return Array.isArray(local) ? local : [];
-    } catch {
-      return [];
-    }
-  });
+  // Saved quotes history (carregado diretamente do Supabase e mantido no estado da aplicação)
+  const [savedQuotes, setSavedQuotes] = useState<Quote[]>([]);
 
   // Rastreia se estamos editando uma cotação existente (armazena o ID do banco e o número original)
   const [editingQuoteId, setEditingQuoteId] = useState<string | null>(() => quoteToEdit?.id || null);
@@ -139,19 +133,9 @@ export default function SalesModule({
       ? config.nextSequential
       : 20;
 
-    let saved: any[] = [];
-    if (quotesList && Array.isArray(quotesList)) {
-      saved = quotesList;
-    } else {
-      try {
-        saved = JSON.parse(localStorage.getItem("s_orcamentos") || "[]");
-      } catch {
-        saved = [];
-      }
-    }
-
+    const listToScan = quotesList && Array.isArray(quotesList) ? quotesList : savedQuotes;
     const existingSet = new Set<string>();
-    saved.forEach((q: any) => {
+    listToScan.forEach((q: any) => {
       const numStr = String(q.quoteNumber || q.numero || q.id || "").trim().toLowerCase();
       if (numStr) existingSet.add(numStr);
     });
@@ -174,26 +158,11 @@ export default function SalesModule({
       return { exists: false };
     }
 
-    // Busca nas cotações salvas em memória
-    let found = savedQuotes.find(
+    // Busca nas cotações salvas em memória (Supabase)
+    const found = savedQuotes.find(
       q => (q.quoteNumber && q.quoteNumber.trim().toLowerCase() === cleanNum) ||
            (q.id && String(q.id).trim().toLowerCase() === cleanNum)
     );
-
-    // Se não achou na memória, checa também no localStorage por segurança
-    if (!found) {
-      try {
-        const local = JSON.parse(localStorage.getItem('s_orcamentos') || '[]');
-        if (Array.isArray(local)) {
-          found = local.find(
-            (q: any) => (q.quoteNumber && String(q.quoteNumber).trim().toLowerCase() === cleanNum) ||
-                        (q.id && String(q.id).trim().toLowerCase() === cleanNum)
-          );
-        }
-      } catch {
-        // ignora
-      }
-    }
 
     return {
       exists: !!found,
@@ -314,57 +283,17 @@ export default function SalesModule({
     }
   }, []);
 
-  // Load saved quotes on mount (LocalStorage + Supabase)
+  // Load saved quotes on mount (Supabase primário e desvinculação do s_orcamentos do localStorage)
   useEffect(() => {
     async function loadQuotes() {
-      let localQuotes: Quote[] = [];
-      const saved = localStorage.getItem('s_orcamentos');
-      if (saved) {
-        try {
-          let parsedQuotes = JSON.parse(saved);
-          if (Array.isArray(parsedQuotes)) {
-            // Sanitiza registros legados
-            const cleanedQuotes = parsedQuotes.filter((q: any) => {
-              const str = String(q.quoteNumber || q.numero || q.id || '');
-              return !str.includes('021935') && !str.includes('21935');
-            });
-            if (cleanedQuotes.length !== parsedQuotes.length) {
-              localStorage.setItem('s_orcamentos', JSON.stringify(cleanedQuotes));
-              parsedQuotes = cleanedQuotes;
-            }
-
-            // Deduplica e sanitiza o localQuotes inicial
-            const localMap = new Map<string, Quote>();
-            parsedQuotes.forEach((lq: any) => {
-              const key = String(lq.quoteNumber || lq.id || '').trim().toLowerCase();
-              if (key && !localMap.has(key)) {
-                localMap.set(key, {
-                  ...lq,
-                  date: getSafeISODate(lq.date || lq.createdAt),
-                  createdAt: lq.createdAt && !isNaN(new Date(lq.createdAt).getTime()) ? lq.createdAt : new Date().toISOString(),
-                  updatedAt: lq.updatedAt && !isNaN(new Date(lq.updatedAt).getTime()) ? lq.updatedAt : new Date().toISOString()
-                });
-              }
-            });
-            localQuotes = Array.from(localMap.values());
-            setSavedQuotes(localQuotes);
-          }
-        } catch (e) {
-          console.error('Error loading saved quotes from localStorage:', e);
-        }
-      }
-
-      // Consulta cotações salvas no Supabase
       try {
         const dbQuotes = await fetchCotacoesDb();
-        if (dbQuotes && dbQuotes.length > 0) {
-          // Mapeia cotações vindas do Supabase com validação e fallback seguro de data
-          const mappedDbQuotes: Quote[] = dbQuotes
-            .filter(q => {
-              const num = String(q.numero || q.id || '');
-              return !num.includes('021935') && !num.includes('21935');
-            })
-            .map(q => {
+        const mappedDbQuotes: Quote[] = (dbQuotes || [])
+          .filter(q => {
+            const num = String(q.numero || q.id || '');
+            return !num.includes('021935') && !num.includes('21935');
+          })
+          .map(q => {
             const safeDateIso = getSafeISODate(q.data || q.created_at);
             const safeCreatedAt = q.created_at && !isNaN(new Date(q.created_at).getTime())
               ? new Date(q.created_at).toISOString()
@@ -410,62 +339,99 @@ export default function SalesModule({
             };
           });
 
-          // Deduplicação: Prioridade total aos dados do Supabase sobre o localStorage
-          const quotesMap = new Map<string, Quote>();
-          const seenKeys = new Set<string>();
+        // Atualiza estado do módulo com os orçamentos vindos diretamente do Supabase
+        setSavedQuotes(mappedDbQuotes);
 
-          const extractKeys = (q: Quote) => {
-            const keys: string[] = [];
-            if (q.id) keys.push(String(q.id).trim().toLowerCase());
-            if (q.quoteNumber) keys.push(String(q.quoteNumber).trim().toLowerCase());
-            return keys;
-          };
+        // Rotina de migração e sincronização de emergência:
+        // Verifica se existem orçamentos locais em 's_orcamentos', envia para o Supabase (INSERT/UPSERT),
+        // e SOMENTE limpa 's_orcamentos' após confirmação de gravação no banco de dados.
+        try {
+          const migRes = await executarMigracaoEmergenciaOrcamentos();
+          if (migRes.migratedCount > 0) {
+            // Se houve novos orçamentos gravados no Supabase, recarrega para atualizar a lista
+            const freshDb = await fetchCotacoesDb();
+            if (freshDb && freshDb.length > 0) {
+              const freshMapped: Quote[] = freshDb
+                .filter(q => {
+                  const num = String(q.numero || q.id || '');
+                  return !num.includes('021935') && !num.includes('21935');
+                })
+                .map(q => {
+                  const safeDateIso = getSafeISODate(q.data || q.created_at);
+                  const safeCreatedAt = q.created_at && !isNaN(new Date(q.created_at).getTime())
+                    ? new Date(q.created_at).toISOString()
+                    : (q.data && !isNaN(new Date(q.data).getTime()) ? new Date(q.data).toISOString() : new Date().toISOString());
+                  const safeUpdatedAt = q.updated_at && !isNaN(new Date(q.updated_at).getTime())
+                    ? new Date(q.updated_at).toISOString()
+                    : safeCreatedAt;
 
-          // 1. Insere todas as cotações do Supabase no mapa
-          mappedDbQuotes.forEach(q => {
-            const primaryKey = String(q.quoteNumber || q.id).trim().toLowerCase();
-            quotesMap.set(primaryKey, q);
-            extractKeys(q).forEach(k => seenKeys.add(k));
-          });
-
-          // 2. Insere cotações do LocalStorage apenas se não existirem no Supabase (por ID ou número)
-          localQuotes.forEach(lq => {
-            const keys = extractKeys(lq);
-            const existsInSupabase = keys.some(k => seenKeys.has(k));
-            if (!existsInSupabase) {
-              const primaryKey = String(lq.quoteNumber || lq.id).trim().toLowerCase();
-              const sanitizedLq: Quote = {
-                ...lq,
-                date: getSafeISODate(lq.date || lq.createdAt),
-                createdAt: lq.createdAt && !isNaN(new Date(lq.createdAt).getTime()) ? lq.createdAt : new Date().toISOString(),
-                updatedAt: lq.updatedAt && !isNaN(new Date(lq.updatedAt).getTime()) ? lq.updatedAt : new Date().toISOString()
-              };
-              quotesMap.set(primaryKey, sanitizedLq);
-              keys.forEach(k => seenKeys.add(k));
+                  return {
+                    id: q.id || q.numero || `db-quote-${Date.now()}`,
+                    quoteNumber: q.numero || q.id || 'COT-SEM-NUMERO',
+                    clientName: q.cliente_nome || 'Cliente Balcão',
+                    contactPerson: q.contato || '',
+                    clientPhone: q.telefone || '',
+                    clientEmail: q.email || '',
+                    date: safeDateIso,
+                    validityDays: 10,
+                    paymentTerms: 'À Vista',
+                    status: mapSupabaseStatusToQuote(q.status),
+                    observations: q.observacoes || '',
+                    discount: 0,
+                    shipping: 0,
+                    subtotalTotal: Number(q.valor_total) || 0,
+                    grandTotal: Number(q.valor_total) || 0,
+                    createdAt: safeCreatedAt,
+                    updatedAt: safeUpdatedAt,
+                    items: (q.cotacao_itens || []).map((it, idx) => ({
+                      id: String(it.id || idx),
+                      date: safeDateIso,
+                      companyName: q.cliente_nome || 'Cliente Balcão',
+                      description: it.descricao || it.produto || 'Item',
+                      constant: '0.00785',
+                      constantName: it.produto || 'Material',
+                      measure: it.medida || '',
+                      diameter: '',
+                      widthLength: '',
+                      unitPrice: Number(it.valor_unitario) || 0,
+                      quantity: Number(it.quantidade) || 1,
+                      subtotal: Number(it.valor_total) || ((Number(it.valor_unitario) || 0) * (Number(it.quantidade) || 1)),
+                      notes: it.observacao || '',
+                      drawingImage: it.desenho_url || undefined
+                    }))
+                  };
+                });
+              setSavedQuotes(freshMapped);
             }
-          });
-
-          const combined = Array.from(quotesMap.values());
-          setSavedQuotes(combined);
-          localStorage.setItem('s_orcamentos', JSON.stringify(combined));
-
-          // Preserva estritamente o número da cotação se estiver em edição
-          setNumeroCotacao(prevNum => {
-            if (editingQuoteNumberRef.current || editingQuoteIdRef.current || editingOriginalQuoteNumber) {
-              return editingQuoteNumberRef.current || prevNum;
-            }
-            if (!prevNum) {
-              return generateNextQuoteNumber(combined);
-            }
-            return prevNum;
-          });
+          }
+        } catch (migErr) {
+          console.warn('Aviso ao sincronizar emergência em SalesModule:', migErr);
         }
+
+        // Preserva estritamente o número da cotação se estiver em edição
+        setNumeroCotacao(prevNum => {
+          if (editingQuoteNumberRef.current || editingQuoteIdRef.current || editingOriginalQuoteNumber) {
+            return editingQuoteNumberRef.current || prevNum;
+          }
+          if (!prevNum) {
+            return generateNextQuoteNumber(mappedDbQuotes);
+          }
+          return prevNum;
+        });
       } catch (err) {
-        console.warn('Banco Supabase em modo cotações offline:', err);
+        console.warn('Erro ao consultar cotações do Supabase:', err);
       }
     }
 
     loadQuotes();
+
+    const handleMigrated = () => {
+      loadQuotes();
+    };
+    window.addEventListener('cotacoes_migradas_emergencia', handleMigrated);
+    return () => {
+      window.removeEventListener('cotacoes_migradas_emergencia', handleMigrated);
+    };
   }, []);
 
   // Atualiza automaticamente o número do orçamento quando as configurações da empresa forem salvas (somente se não estiver em edição)
@@ -1615,7 +1581,7 @@ export default function SalesModule({
     }
 
     setSavedQuotes(updatedQuotes);
-    localStorage.setItem('s_orcamentos', JSON.stringify(updatedQuotes));
+    try { localStorage.removeItem('s_orcamentos'); } catch {}
     setEditingOriginalQuoteNumber(cleanNum);
     editingQuoteNumberRef.current = cleanNum;
 
@@ -1631,26 +1597,31 @@ export default function SalesModule({
       }
     }
 
-    // Persiste e atualiza no Supabase (executando UPDATE via ID)
+    // Persiste e atualiza diretamente no Supabase
     saveCotacaoDb(currentQuoteObject).then(res => {
       if (res.data?.id) {
+        currentQuoteObject.id = res.data.id;
         setEditingQuoteId(res.data.id);
         editingQuoteIdRef.current = res.data.id;
       }
       if (res.error) {
-        console.warn('Cotação salva localmente; aviso no Supabase:', res.error);
-        setSuccessMessage(isEditing || existsIndex >= 0 ? `Orçamento ${cleanNum} atualizado no histórico (local)!` : `Orçamento ${cleanNum} salvo no histórico (local)!`);
+        console.warn('Aviso ao gravar no Supabase:', res.error);
+        setErrorMessage(`Aviso ao gravar no Supabase: ${res.error.message || 'Falha de comunicação'}`);
       } else {
-        setSuccessMessage(isEditing || existsIndex >= 0 ? `Orçamento ${cleanNum} atualizado com sucesso e sincronizado! ⚡` : `Orçamento ${cleanNum} salvo com sucesso e sincronizado! ⚡`);
+        setSuccessMessage(isEditing || existsIndex >= 0 ? `Orçamento ${cleanNum} atualizado diretamente no Supabase! ⚡` : `Orçamento ${cleanNum} gravado diretamente no Supabase! ⚡`);
       }
-    }).catch(() => {
-      setSuccessMessage(isEditing || existsIndex >= 0 ? `Orçamento ${cleanNum} atualizado com sucesso!` : `Orçamento ${cleanNum} salvo com sucesso!`);
+    }).catch((err) => {
+      console.error('Erro na gravação direta no Supabase:', err);
+      setErrorMessage(`Erro ao gravar no Supabase: ${err?.message || 'Falha de rede'}`);
     });
 
-    setTimeout(() => setSuccessMessage(null), 3500);
+    setTimeout(() => {
+      setSuccessMessage(null);
+      setErrorMessage(null);
+    }, 4000);
   };
 
-  // Aprovar cotação com 1 clique (baixa estoque + gera contas a receber + UPDATE)
+  // Aprovar cotação com 1 clique (baixa estoque + gera contas a receber + UPDATE direto no Supabase)
   const handleApproveAndDeductQuote = () => {
     setQuoteStatus('Aprovado');
     if (items.length === 0) {
@@ -1745,7 +1716,7 @@ export default function SalesModule({
     }
 
     setSavedQuotes(updatedQuotes);
-    localStorage.setItem('s_orcamentos', JSON.stringify(updatedQuotes));
+    try { localStorage.removeItem('s_orcamentos'); } catch {}
     setEditingOriginalQuoteNumber(cleanNum);
     editingQuoteNumberRef.current = cleanNum;
 
@@ -1753,6 +1724,7 @@ export default function SalesModule({
     const baixaRes = baixarEstoquePorCotacao(currentQuoteObject);
     const finRes = gerarContasReceberPorCotacao(currentQuoteObject);
 
+    // Gravação direta no Supabase
     saveCotacaoDb(currentQuoteObject).then(res => {
       if (res.data?.id) {
         setEditingQuoteId(res.data.id);
@@ -1760,7 +1732,7 @@ export default function SalesModule({
       }
     }).catch(() => {});
 
-    setSuccessMessage(`✅ Cotação ${cleanNum} APROVADA! ${baixaRes.itensBaixados} itens baixados no Estoque (${baixaRes.pesoTotalBaixadoKg} kg) e R$ ${formatCurrency(grandTotal)} lançado no Contas a Receber!`);
+    setSuccessMessage(`✅ Cotação ${cleanNum} APROVADA e salva diretamente no Supabase! ${baixaRes.itensBaixados} itens baixados no Estoque (${baixaRes.pesoTotalBaixadoKg} kg) e R$ ${formatCurrency(grandTotal)} lançado no Contas a Receber!`);
     setTimeout(() => setSuccessMessage(null), 5000);
   };
 
@@ -1834,7 +1806,7 @@ export default function SalesModule({
     const quoteToDelete = savedQuotes.find(q => q.id === id || q.quoteNumber === id);
     const updated = savedQuotes.filter(q => q.id !== id && q.quoteNumber !== id);
     setSavedQuotes(updated);
-    localStorage.setItem('s_orcamentos', JSON.stringify(updated));
+    try { localStorage.removeItem('s_orcamentos'); } catch {}
 
     if (quoteToDelete) {
       try {

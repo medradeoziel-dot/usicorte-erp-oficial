@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Quote } from './types';
 import { INITIAL_QUOTE } from './data/initialData';
 import { useClients } from './hooks/useClients';
 import { useClock } from './hooks/useClock';
+import { executarMigracaoEmergenciaOrcamentos } from './services/emergencyMigrationService';
 import TopBar from './components/TopBar';
 import Sidebar from './components/Sidebar';
 import FooterBar from './components/FooterBar';
@@ -22,7 +23,7 @@ import FechamentoCotacoesModule from './components/FechamentoCotacoesModule';
 import AndamentoMovimentacoesModule from './components/AndamentoMovimentacoesModule';
 import UsicorteCalculatorModal from './components/UsicorteCalculatorModal';
 import { MaterialProfile } from './utils/calculator';
-import { Users, FileCode } from 'lucide-react';
+import { Users, FileCode, CheckCircle2, AlertTriangle, X } from 'lucide-react';
 
 export type ScreenType = 'home' | 'clientes' | 'produtos' | 'orcamento' | 'ordem_servico' | 'vendas' | 'relatorios' | 'estoque' | 'financeiro' | 'fechamento' | 'movimentacoes' | 'empresa' | 'php';
 
@@ -52,6 +53,49 @@ export default function App() {
   const [isLoginOpen, setIsLoginOpen] = useState<boolean>(() => !sessionStorage.getItem('usuario_logado'));
   const [isQuickCalcOpen, setIsQuickCalcOpen] = useState<boolean>(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
+  const [migrationAlert, setMigrationAlert] = useState<{
+    type: 'success' | 'warning' | 'info';
+    message: string;
+  } | null>(null);
+
+  // 1. Leitura do LocalStorage ao carregar o sistema:
+  // 2. Envio para o Supabase (INSERT/UPSERT) dos orçamentos locais
+  // 3. Limpeza Segura: Somente após confirmar sucesso no Supabase, limpa 's_orcamentos'
+  useEffect(() => {
+    let isMounted = true;
+    async function rodarMigracaoEmergencia() {
+      try {
+        const resultado = await executarMigracaoEmergenciaOrcamentos();
+        if (!isMounted) return;
+
+        if (resultado.migratedCount > 0) {
+          setMigrationAlert({
+            type: 'success',
+            message: `⚡ Sincronização de Emergência: ${resultado.migratedCount} orçamento(s) local(is) gravado(s) com sucesso no Supabase! Limite de armazenamento local liberado com segurança.`
+          });
+          setTimeout(() => {
+            if (isMounted) setMigrationAlert(null);
+          }, 8000);
+        } else if (resultado.failedCount > 0) {
+          setMigrationAlert({
+            type: 'warning',
+            message: `⚠️ Atenção: ${resultado.failedCount} orçamento(s) não puderam ser gravados no Supabase devido a conexão e foram preservados no dispositivo para não haver perda de dados.`
+          });
+          setTimeout(() => {
+            if (isMounted) setMigrationAlert(null);
+          }, 10000);
+        }
+      } catch (err) {
+        console.warn('Erro ao verificar/migrar orçamentos locais na inicialização:', err);
+      }
+    }
+
+    rodarMigracaoEmergencia();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const trocarTela = (nomeTela: ScreenType, tab?: 'propostas' | 'consulta') => {
     setCurrentScreen(nomeTela);
@@ -99,6 +143,33 @@ export default function App() {
         trocarTela={trocarTela}
         setIsLoginOpen={setIsLoginOpen}
       />
+
+      {migrationAlert && (
+        <div 
+          id="migration-alert-banner"
+          className={`px-4 py-2.5 flex items-center justify-between text-xs font-medium z-30 transition-all shrink-0 ${
+            migrationAlert.type === 'success'
+              ? 'bg-emerald-950/90 border-b border-emerald-600/40 text-emerald-200'
+              : 'bg-amber-950/90 border-b border-amber-600/40 text-amber-200'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            {migrationAlert.type === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 animate-pulse" />
+            ) : (
+              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+            )}
+            <span>{migrationAlert.message}</span>
+          </div>
+          <button
+            onClick={() => setMigrationAlert(null)}
+            className="text-slate-400 hover:text-white p-1 rounded hover:bg-white/10 transition-colors cursor-pointer"
+            title="Fechar aviso"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       <div className="flex flex-1 relative overflow-hidden">
         <Sidebar 

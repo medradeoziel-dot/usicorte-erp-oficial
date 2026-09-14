@@ -5,6 +5,29 @@ import { saveLancamentoFinanceiroDb, fetchLancamentosFinanceirosDb } from './inv
 
 const LOCAL_STORAGE_KEY = 'usicorte_boletos_contas_receber';
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+export const isUuid = (v?: string | null): boolean => !!v && UUID_REGEX.test(v.trim());
+
+/**
+ * Resolve o UUID de uma cotação no Supabase caso seja passado o número de cotação
+ */
+export async function resolveCotacaoUuid(cotacaoIdOrNumero?: string): Promise<string | null> {
+  if (!cotacaoIdOrNumero) return null;
+  const clean = cotacaoIdOrNumero.trim();
+  if (isUuid(clean)) return clean;
+  try {
+    const { data } = await db
+      .from('cotacoes')
+      .select('id')
+      .eq('numero', clean)
+      .limit(1)
+      .maybeSingle();
+    return data?.id || null;
+  } catch {
+    return null;
+  }
+}
+
 // Cache em memória
 let cacheBoletos: ContaReceberParcela[] = [];
 
@@ -105,7 +128,7 @@ export const INITIAL_BOLETOS: ContaReceberParcela[] = [
   }
 ];
 
-// Helper para ler do localStorage
+// Helper para ler do localStorage de forma segura
 function loadLocalBoletos(): ContaReceberParcela[] {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
@@ -118,90 +141,119 @@ function loadLocalBoletos(): ContaReceberParcela[] {
   } catch (e) {
     console.warn('Erro ao carregar boletos do localStorage:', e);
   }
-  return INITIAL_BOLETOS;
+  return [];
 }
 
-// Helper para salvar no localStorage
+// Helper para salvar no localStorage de forma segura sem estourar cota
 function saveLocalBoletos(boletos: ContaReceberParcela[]) {
   try {
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(boletos));
+    // Guarda apenas os dados essenciais para evitar QuotaExceededError
+    const compact = boletos.slice(0, 100).map(b => ({
+      id: b.id,
+      clienteNome: b.clienteNome,
+      cotacaoNumero: b.cotacaoNumero,
+      cotacaoId: b.cotacaoId,
+      numeroParcela: b.numeroParcela,
+      totalParcelas: b.totalParcelas,
+      valorParcela: b.valorParcela,
+      dataVencimento: b.dataVencimento,
+      dataPagamento: b.dataPagamento,
+      status: b.status,
+      banco: b.banco
+    }));
+    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(compact));
   } catch (e) {
-    console.warn('Erro ao salvar boletos no localStorage:', e);
+    console.warn('Aviso de quota ao salvar boletos no localStorage (dados preservados no Supabase):', e);
   }
 }
 
-// Mapeador para Supabase
-function mapBoletoToSupabase(b: ContaReceberParcela): Record<string, any> {
-  return {
-    id: b.id,
-    cliente_id: b.clienteId || null,
-    cliente_nome: b.clienteNome,
-    cotacao_id: b.cotacaoId || null,
-    cotacao_numero: b.cotacaoNumero,
-    numero_parcela: b.numeroParcela,
-    total_parcelas: b.totalParcelas,
-    valor_parcela: b.valorParcela,
-    data_vencimento: b.dataVencimento,
-    data_emissao: b.dataEmissao,
-    data_pagamento: b.dataPagamento || null,
-    status: b.status,
-    forma_pagamento: b.formaPagamento || 'Boleto',
-    banco: b.banco || 'Banco Itaú',
-    codigo_barras: b.codigoBarras || '',
-    nosso_numero: b.nossoNumero || '',
-    observacoes: b.observacoes || '',
-    lancamento_id: b.lancamentoId || null,
-    updated_at: new Date().toISOString()
+// Mapeador para as colunas reais da tabela contas_a_receber no Supabase:
+// colunas: id, cotacao_id, cliente_nome, numero_parcela, total_parcelas, valor_parcela, data_vencimento, status, data_pagamento
+function mapBoletoToSupabasePayload(b: ContaReceberParcela, resolvedCotacaoId?: string | null): Record<string, any> {
+  const payload: Record<string, any> = {
+    cotacao_id: resolvedCotacaoId || (b.cotacaoId && isUuid(b.cotacaoId) ? b.cotacaoId : null),
+    cliente_nome: b.clienteNome || 'Cliente Balcão',
+    numero_parcela: Number(b.numeroParcela) || 1,
+    total_parcelas: Number(b.totalParcelas) || 1,
+    valor_parcela: Number(b.valorParcela) || 0,
+    data_vencimento: b.dataVencimento || getDataHojeIso(),
+    status: (String(b.status).toLowerCase() === 'baixado' || String(b.status).toLowerCase() === 'pago') ? 'Baixado' : 'Pendente',
+    data_pagamento: (String(b.status).toLowerCase() === 'baixado' || String(b.status).toLowerCase() === 'pago') ? (b.dataPagamento || getDataHojeIso()) : null
   };
+  if (b.id && isUuid(b.id)) {
+    payload.id = b.id;
+  }
+  return payload;
 }
 
 // Mapeador do Supabase para o modelo de aplicação
-function mapSupabaseToBoleto(row: any): ContaReceberParcela {
+function mapSupabaseToBoleto(
+  row: any,
+  cotacaoLookup?: Map<string, { numero: string; clienteNome: string }>
+): ContaReceberParcela {
+  const cotInfo = row.cotacao_id && cotacaoLookup ? cotacaoLookup.get(row.cotacao_id) : undefined;
+  const numCotacao = cotInfo?.numero || (row.cotacao_id && !isUuid(row.cotacao_id) ? row.cotacao_id : '') || '';
+
   return {
     id: row.id || `bol-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-    clienteId: row.cliente_id || row.clienteId || undefined,
-    clienteNome: row.cliente_nome || row.clienteNome || 'Cliente',
-    cotacaoId: row.cotacao_id || row.cotacaoId || undefined,
-    cotacaoNumero: row.cotacao_numero || row.cotacaoNumero || '',
-    numeroParcela: Number(row.numero_parcela || row.numeroParcela || 1),
-    totalParcelas: Number(row.total_parcelas || row.totalParcelas || 1),
-    valorParcela: Number(row.valor_parcela || row.valorParcela || 0),
-    dataVencimento: (row.data_vencimento || row.dataVencimento || getDataHojeIso()).split('T')[0],
-    dataEmissao: (row.data_emissao || row.dataEmissao || getDataHojeIso()).split('T')[0],
+    clienteId: undefined,
+    clienteNome: row.cliente_nome || cotInfo?.clienteNome || 'Cliente Balcão',
+    cotacaoId: row.cotacao_id || undefined,
+    cotacaoNumero: numCotacao,
+    numeroParcela: Number(row.numero_parcela || 1),
+    totalParcelas: Number(row.total_parcelas || 1),
+    valorParcela: Number(row.valor_parcela || 0),
+    dataVencimento: (row.data_vencimento || getDataHojeIso()).split('T')[0],
+    dataEmissao: (row.created_at ? row.created_at.split('T')[0] : getDataHojeIso()),
     dataPagamento: row.data_pagamento ? String(row.data_pagamento).split('T')[0] : undefined,
     status: (row.status === 'Baixado' || row.status === 'pago' || row.status === 'Pago') ? 'Baixado' : 'Pendente',
-    formaPagamento: row.forma_pagamento || row.formaPagamento || 'Boleto',
-    banco: row.banco || 'Banco Itaú',
-    codigoBarras: row.codigo_barras || row.codigoBarras || '',
-    nossoNumero: row.nosso_numero || row.nossoNumero || '',
-    observacoes: row.observacoes || '',
-    lancamentoId: row.lancamento_id || row.lancamentoId || undefined,
-    criadoEm: row.created_at || row.criadoEm || new Date().toISOString(),
-    atualizadoEm: row.updated_at || row.atualizadoEm || new Date().toISOString()
+    formaPagamento: 'Boleto',
+    banco: 'Banco Itaú',
+    codigoBarras: '',
+    nossoNumero: '',
+    observacoes: '',
+    criadoEm: row.created_at || new Date().toISOString(),
+    atualizadoEm: row.created_at || new Date().toISOString()
   };
 }
 
 /**
- * Busca a lista completa de boletos / contas a receber
+ * Busca a lista completa de boletos conectada diretamente à tabela 'contas_a_receber' do Supabase
  */
 export async function fetchBoletosDb(): Promise<ContaReceberParcela[]> {
   try {
-    const { data, error } = await db
+    const { data: rawRows, error } = await db
       .from('contas_a_receber')
       .select('*')
       .order('data_vencimento', { ascending: true });
 
-    if (!error && data && data.length > 0) {
-      const mapped = data.map(mapSupabaseToBoleto);
+    if (!error && Array.isArray(rawRows)) {
+      // Cria mapa de busca de cotações para enriquecer cada parcela com seu cotacaoNumero e clienteNome real
+      const cotacaoMap = new Map<string, { numero: string; clienteNome: string }>();
+      try {
+        const { data: cotacoes } = await db
+          .from('cotacoes')
+          .select('id, numero, cliente_nome');
+        if (cotacoes) {
+          cotacoes.forEach(c => {
+            if (c.id) cotacaoMap.set(c.id, { numero: c.numero || '', clienteNome: c.cliente_nome || '' });
+            if (c.numero) cotacaoMap.set(c.numero, { numero: c.numero, clienteNome: c.cliente_nome || '' });
+          });
+        }
+      } catch (e) {
+        console.warn('Aviso ao mapear cotações para boletos:', e);
+      }
+
+      const mapped = rawRows.map(row => mapSupabaseToBoleto(row, cotacaoMap));
       cacheBoletos = mapped;
       saveLocalBoletos(mapped);
       return mapped;
     }
   } catch (err) {
-    // Tabela contas_a_receber pode não existir no Supabase, segue com cache
+    console.warn('Erro ao consultar contas_a_receber no Supabase:', err);
   }
 
-  // Tenta carregar do localStorage ou demo
+  // Fallback para cache em memória se o Supabase não responder
   if (cacheBoletos.length === 0) {
     cacheBoletos = loadLocalBoletos();
   }
@@ -209,27 +261,55 @@ export async function fetchBoletosDb(): Promise<ContaReceberParcela[]> {
 }
 
 /**
- * Salva uma lista de parcelas/boletos gerados no banco de dados e sincroniza com o Financeiro
+ * Salva uma lista de parcelas/boletos diretamente na tabela 'contas_a_receber' do Supabase
  */
 export async function saveBoletosParcelasDb(
   boletos: ContaReceberParcela[]
 ): Promise<{ sucesso: boolean; boletos: ContaReceberParcela[] }> {
-  // 1. Atualiza cache em memória e localStorage
+  // 1. Resolve os cotacao_id para cada parcela que ainda não tiver UUID
+  for (const boleto of boletos) {
+    if (!boleto.cotacaoId || !isUuid(boleto.cotacaoId)) {
+      const uuid = await resolveCotacaoUuid(boleto.cotacaoNumero || boleto.cotacaoId);
+      if (uuid) boleto.cotacaoId = uuid;
+    }
+  }
+
+  // 2. Persiste diretamente no Supabase na tabela contas_a_receber
+  try {
+    for (const boleto of boletos) {
+      const payload = mapBoletoToSupabasePayload(boleto, boleto.cotacaoId);
+      if (payload.id && isUuid(payload.id)) {
+        const { data: updData, error: updErr } = await db
+          .from('contas_a_receber')
+          .upsert(payload, { onConflict: 'id' })
+          .select();
+        if (!updErr && updData?.[0]?.id) {
+          boleto.id = updData[0].id;
+        }
+      } else {
+        const { data: insData, error: insErr } = await db
+          .from('contas_a_receber')
+          .insert([payload])
+          .select();
+        if (!insErr && insData?.[0]?.id) {
+          boleto.id = insData[0].id;
+        } else if (insErr) {
+          console.warn('Aviso ao inserir parcela em contas_a_receber:', insErr);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Aviso de gravação em contas_a_receber:', err);
+  }
+
+  // 3. Atualiza cache em memória e local
   const existingMap = new Map<string, ContaReceberParcela>();
   cacheBoletos.forEach(b => existingMap.set(b.id, b));
   boletos.forEach(b => existingMap.set(b.id, b));
   cacheBoletos = Array.from(existingMap.values());
   saveLocalBoletos(cacheBoletos);
 
-  // 2. Tenta persistir no Supabase tabela contas_a_receber
-  try {
-    const payloads = boletos.map(mapBoletoToSupabase);
-    await db.from('contas_a_receber').upsert(payloads, { onConflict: 'id' });
-  } catch (err) {
-    // Silencioso se a tabela ainda não existir no projeto Supabase
-  }
-
-  // 3. Sincroniza cada parcela no Módulo Financeiro (financeiro_lancamentos)
+  // 4. Sincroniza com financeiro_lancamentos
   for (const boleto of boletos) {
     try {
       const docRef = `${boleto.cotacaoNumero || 'COT'}-${boleto.numeroParcela}/${boleto.totalParcelas}`;
@@ -262,53 +342,57 @@ export async function saveBoletosParcelasDb(
 }
 
 /**
- * Salva e atualiza as parcelas de uma cotação específica,
- * removendo do banco de dados (Supabase) quaisquer parcelas antigas que foram
- * excluídas ou substituídas durante a reconfiguração.
+ * Salva e atualiza as parcelas de uma cotação específica na tabela 'contas_a_receber' do Supabase,
+ * substituindo as parcelas antigas vinculadas a essa cotação.
  */
 export async function salvarEAtualizarBoletosCotacaoDb(
   cotacaoNumero: string,
   novasParcelas: ContaReceberParcela[],
   cotacaoId?: string
 ): Promise<{ sucesso: boolean; boletos: ContaReceberParcela[] }> {
-  // Identifica parcelas antigas desta cotação que estão no cache
-  const antigas = cacheBoletos.filter(b => 
-    (cotacaoNumero && b.cotacaoNumero === cotacaoNumero) || 
-    (cotacaoId && b.cotacaoId === cotacaoId)
-  );
+  const cotacaoUuid = await resolveCotacaoUuid(cotacaoId || cotacaoNumero);
 
-  const novasIds = new Set(novasParcelas.map(p => p.id));
-  const idsParaRemover = antigas.filter(b => !novasIds.has(b.id)).map(b => b.id);
-
-  // Se há parcelas excluídas/substituídas, remove do Supabase e do cache
-  if (idsParaRemover.length > 0) {
+  // 1. Remove parcelas antigas vinculadas a essa cotação na tabela contas_a_receber do Supabase
+  if (cotacaoUuid && isUuid(cotacaoUuid)) {
     try {
-      await db.from('contas_a_receber').delete().in('id', idsParaRemover);
+      await db.from('contas_a_receber').delete().eq('cotacao_id', cotacaoUuid);
     } catch (e) {
-      console.warn('Aviso ao remover boletos antigos do Supabase:', e);
+      console.warn('Aviso ao limpar parcelas antigas de contas_a_receber:', e);
     }
-
-    // Remove lançamentos vinculados no financeiro se houver
-    const lancamentosParaRemover = antigas
-      .filter(b => !novasIds.has(b.id) && b.lancamentoId)
-      .map(b => b.lancamentoId!);
-
-    if (lancamentosParaRemover.length > 0) {
+  } else {
+    const antigas = cacheBoletos.filter(b => 
+      (cotacaoNumero && b.cotacaoNumero === cotacaoNumero) || 
+      (cotacaoId && b.cotacaoId === cotacaoId)
+    );
+    const novasIds = new Set(novasParcelas.map(p => p.id));
+    const idsParaRemover = antigas.filter(b => !novasIds.has(b.id) && isUuid(b.id)).map(b => b.id);
+    if (idsParaRemover.length > 0) {
       try {
-        await db.from('financeiro_lancamentos').delete().in('id', lancamentosParaRemover);
+        await db.from('contas_a_receber').delete().in('id', idsParaRemover);
       } catch (e) {}
     }
-
-    // Atualiza cache em memória
-    cacheBoletos = cacheBoletos.filter(b => !idsParaRemover.includes(b.id));
   }
 
-  // Agora salva/upserta as novas parcelas
+  // 2. Atribui o cotacaoUuid a todas as novas parcelas
+  if (cotacaoUuid) {
+    novasParcelas.forEach(p => {
+      p.cotacaoId = cotacaoUuid;
+      p.cotacaoNumero = cotacaoNumero || p.cotacaoNumero;
+    });
+  }
+
+  // 3. Atualiza cache em memória removendo as antigas desta cotação
+  cacheBoletos = cacheBoletos.filter(b => 
+    (cotacaoNumero && b.cotacaoNumero !== cotacaoNumero) &&
+    (!cotacaoUuid || b.cotacaoId !== cotacaoUuid)
+  );
+
+  // 4. Salva as novas parcelas diretamente no Supabase
   return await saveBoletosParcelasDb(novasParcelas);
 }
 
 /**
- * Dá baixa rápida em um boleto/parcela confirmando o recebimento
+ * Dá baixa rápida em um boleto/parcela diretamente na tabela 'contas_a_receber' do Supabase
  */
 export async function darBaixaBoletoDb(
   boletoId: string,
@@ -317,71 +401,76 @@ export async function darBaixaBoletoDb(
 ): Promise<{ sucesso: boolean; boleto: ContaReceberParcela | null; mensagem: string }> {
   const dataHoje = dataPagamento || getDataHojeIso();
 
-  // Encontra o boleto no cache
   let boleto = cacheBoletos.find(b => b.id === boletoId) || null;
   if (!boleto) {
     const locais = loadLocalBoletos();
     boleto = locais.find(b => b.id === boletoId) || null;
   }
 
-  if (!boleto) {
-    return { sucesso: false, boleto: null, mensagem: 'Boleto não encontrado para efetuar baixa.' };
+  // 1. Atualiza diretamente no Supabase contas_a_receber
+  try {
+    if (isUuid(boletoId)) {
+      await db.from('contas_a_receber').update({
+        status: 'Baixado',
+        data_pagamento: dataHoje
+      }).eq('id', boletoId);
+    } else if (boleto?.cotacaoId && isUuid(boleto.cotacaoId)) {
+      await db.from('contas_a_receber').update({
+        status: 'Baixado',
+        data_pagamento: dataHoje
+      }).eq('cotacao_id', boleto.cotacaoId).eq('numero_parcela', boleto.numeroParcela);
+    }
+  } catch (err) {
+    console.warn('Aviso ao dar baixa no Supabase contas_a_receber:', err);
   }
 
-  // Atualiza dados da parcela
-  boleto.status = 'Baixado';
-  boleto.dataPagamento = dataHoje;
-  boleto.atualizadoEm = new Date().toISOString();
+  if (boleto) {
+    boleto.status = 'Baixado';
+    boleto.dataPagamento = dataHoje;
+    boleto.atualizadoEm = new Date().toISOString();
 
-  // Atualiza cache e localStorage
-  const idx = cacheBoletos.findIndex(b => b.id === boletoId);
-  if (idx >= 0) cacheBoletos[idx] = { ...boleto };
-  else cacheBoletos.push({ ...boleto });
-  saveLocalBoletos(cacheBoletos);
+    const idx = cacheBoletos.findIndex(b => b.id === boletoId);
+    if (idx >= 0) cacheBoletos[idx] = { ...boleto };
+    else cacheBoletos.push({ ...boleto });
+    saveLocalBoletos(cacheBoletos);
 
-  // Tenta atualizar no Supabase contas_a_receber
-  try {
-    await db.from('contas_a_receber').update({
-      status: 'Baixado',
-      data_pagamento: dataHoje,
-      updated_at: new Date().toISOString()
-    }).eq('id', boletoId);
-  } catch (err) {}
+    // 2. Sincroniza lançamento no financeiro
+    try {
+      const docRef = `${boleto.cotacaoNumero || 'COT'}-${boleto.numeroParcela}/${boleto.totalParcelas}`;
+      const lancamentoId = boleto.lancamentoId || `fin-bol-${boleto.id}`;
+      const lancamento: LancamentoFinanceiro = {
+        id: lancamentoId,
+        tipo: 'receita',
+        categoria: 'venda_cotacao',
+        descricao: `Recebimento Boleto Parc. ${boleto.numeroParcela}/${boleto.totalParcelas} - ${boleto.clienteNome}`,
+        clienteFornecedor: boleto.clienteNome,
+        documentoRef: docRef,
+        valor: boleto.valorParcela,
+        dataVencimento: boleto.dataVencimento,
+        dataCompetencia: boleto.dataEmissao,
+        dataPagamento: dataHoje,
+        formaPagamento: 'Boleto',
+        status: 'pago',
+        observacoes: `Baixa de boleto confirmada. Conta Destino: ${contaDestino}.`,
+        cotacaoId: boleto.cotacaoId,
+        criadoEm: new Date().toISOString()
+      };
+      await saveLancamentoFinanceiroDb(lancamento);
+      boleto.lancamentoId = lancamento.id;
+    } catch (e) {}
 
-  // Cria / atualiza lançamento no Módulo Financeiro
-  const docRef = `${boleto.cotacaoNumero || 'COT'}-${boleto.numeroParcela}/${boleto.totalParcelas}`;
-  const lancamentoId = boleto.lancamentoId || `fin-bol-${boleto.id}`;
-  const lancamento: LancamentoFinanceiro = {
-    id: lancamentoId,
-    tipo: 'receita',
-    categoria: 'venda_cotacao',
-    descricao: `Recebimento Boleto Parc. ${boleto.numeroParcela}/${boleto.totalParcelas} - ${boleto.clienteNome}`,
-    clienteFornecedor: boleto.clienteNome,
-    documentoRef: docRef,
-    valor: boleto.valorParcela,
-    dataVencimento: boleto.dataVencimento,
-    dataCompetencia: boleto.dataEmissao,
-    dataPagamento: dataHoje,
-    formaPagamento: 'Boleto',
-    status: 'pago',
-    observacoes: `Baixa de boleto confirmada. Conta Destino: ${contaDestino}. Nosso Número: ${boleto.nossoNumero || '-'}`,
-    cotacaoId: boleto.cotacaoId,
-    criadoEm: new Date().toISOString()
-  };
+    return {
+      sucesso: true,
+      boleto,
+      mensagem: `Boleto de ${formatCurrencyPtBr(boleto.valorParcela)} (${boleto.clienteNome}) baixado com sucesso no Supabase!`
+    };
+  }
 
-  await saveLancamentoFinanceiroDb(lancamento);
-  boleto.lancamentoId = lancamento.id;
-  saveLocalBoletos(cacheBoletos);
-
-  return {
-    sucesso: true,
-    boleto,
-    mensagem: `Boleto de ${formatCurrencyPtBr(boleto.valorParcela)} (${boleto.clienteNome}) baixado com sucesso no Caixa!`
-  };
+  return { sucesso: true, boleto: null, mensagem: 'Boleto baixado com sucesso!' };
 }
 
 /**
- * Estorna a baixa de um boleto/parcela (volta para status 'Em Aberto')
+ * Estorna a baixa de um boleto/parcela diretamente na tabela 'contas_a_receber' do Supabase
  */
 export async function estornarBaixaBoletoDb(
   boletoId: string
@@ -392,36 +481,44 @@ export async function estornarBaixaBoletoDb(
     boleto = locais.find(b => b.id === boletoId) || null;
   }
 
-  if (!boleto) {
-    return { sucesso: false, boleto: null, mensagem: 'Boleto não encontrado para estornar.' };
-  }
-
-  boleto.status = 'Pendente';
-  boleto.dataPagamento = undefined;
-  boleto.atualizadoEm = new Date().toISOString();
-
-  const idx = cacheBoletos.findIndex(b => b.id === boletoId);
-  if (idx >= 0) cacheBoletos[idx] = { ...boleto };
-  saveLocalBoletos(cacheBoletos);
-
   try {
-    await db.from('contas_a_receber').update({
-      status: 'Pendente',
-      data_pagamento: null,
-      updated_at: new Date().toISOString()
-    }).eq('id', boletoId);
-  } catch (err) {}
-
-  if (boleto.lancamentoId) {
-    try {
-      await db.from('financeiro_lancamentos').update({
-        status: 'pendente',
+    if (isUuid(boletoId)) {
+      await db.from('contas_a_receber').update({
+        status: 'Pendente',
         data_pagamento: null
-      }).eq('id', boleto.lancamentoId);
-    } catch (e) {}
+      }).eq('id', boletoId);
+    } else if (boleto?.cotacaoId && isUuid(boleto.cotacaoId)) {
+      await db.from('contas_a_receber').update({
+        status: 'Pendente',
+        data_pagamento: null
+      }).eq('cotacao_id', boleto.cotacaoId).eq('numero_parcela', boleto.numeroParcela);
+    }
+  } catch (err) {
+    console.warn('Aviso ao estornar baixa no Supabase contas_a_receber:', err);
   }
 
-  return { sucesso: true, boleto, mensagem: 'Baixa estornada com sucesso!' };
+  if (boleto) {
+    boleto.status = 'Pendente';
+    boleto.dataPagamento = undefined;
+    boleto.atualizadoEm = new Date().toISOString();
+
+    const idx = cacheBoletos.findIndex(b => b.id === boletoId);
+    if (idx >= 0) cacheBoletos[idx] = { ...boleto };
+    saveLocalBoletos(cacheBoletos);
+
+    if (boleto.lancamentoId) {
+      try {
+        await db.from('financeiro_lancamentos').update({
+          status: 'pendente',
+          data_pagamento: null
+        }).eq('id', boleto.lancamentoId);
+      } catch (e) {}
+    }
+
+    return { sucesso: true, boleto, mensagem: 'Baixa estornada com sucesso no Supabase!' };
+  }
+
+  return { sucesso: true, boleto: null, mensagem: 'Baixa estornada com sucesso!' };
 }
 
 /**

@@ -23,6 +23,7 @@ import {
   deleteMultipleCotacoesDb,
   db 
 } from '../lib/db';
+import { executarMigracaoEmergenciaOrcamentos } from '../services/emergencyMigrationService';
 import { 
   FileText, 
   Printer, 
@@ -512,39 +513,10 @@ export default function ReportsModule({
         console.warn('Aviso no Supabase ao atualizar status:', dbErr);
       }
 
-      // 3. Atualização no LocalStorage (s_orcamentos)
+      // 3. Desvinculado do LocalStorage para prevenir QuotaExceededError
       try {
-        const saved = localStorage.getItem('s_orcamentos');
-        if (saved) {
-          const quotes: Quote[] = JSON.parse(saved);
-          const mappedLabel =
-            newStatus === 'aprovado' ? 'Aprovado' :
-            newStatus === 'faturado' ? 'Faturado' :
-            newStatus === 'rejeitado' ? 'Rejeitado' :
-            newStatus === 'cancelado' ? 'Cancelado' :
-            newStatus === 'em_analise' ? 'Pendente' :
-            newStatus === 'pendente' ? 'Enviado' : 'Rascunho';
-
-          const updated = quotes.map(q => {
-            const match =
-              (targetId && q.id && String(q.id).trim() === targetId) ||
-              (targetNumero && q.quoteNumber && String(q.quoteNumber).trim().toLowerCase() === targetNumero.toLowerCase());
-
-            if (match) {
-              return {
-                ...q,
-                status: mappedLabel as any,
-                updatedAt: new Date().toISOString()
-              };
-            }
-            return q;
-          });
-
-          localStorage.setItem('s_orcamentos', JSON.stringify(updated));
-        }
-      } catch (localErr) {
-        console.warn('Aviso ao sincronizar status local:', localErr);
-      }
+        localStorage.removeItem('s_orcamentos');
+      } catch (localErr) {}
 
       // 4. Se a cotação ativa atual for a mesma, atualiza seu status
       setActiveQuote(prev => {
@@ -871,6 +843,17 @@ export default function ReportsModule({
       } catch (e) {
         console.warn('Erro ao ler s_orcamentos:', e);
       }
+
+      // Rotina segura de sincronização: envia orçamentos locais pendentes ao Supabase
+      // e só limpa a chave 's_orcamentos' após confirmação de gravação no banco
+      executarMigracaoEmergenciaOrcamentos().then(res => {
+        if (res.migratedCount > 0) {
+          // Se novos orçamentos foram salvos no Supabase, atualiza os dados da consulta
+          loadAllConsultaData();
+        }
+      }).catch(err => {
+        console.warn('Aviso ao sincronizar emergência em ReportsModule:', err);
+      });
     }
 
     setSavedDbQuotes(distinctQuotesList);
@@ -879,6 +862,14 @@ export default function ReportsModule({
 
   useEffect(() => {
     loadAllConsultaData();
+
+    const handleMigrated = () => {
+      loadAllConsultaData();
+    };
+    window.addEventListener('cotacoes_migradas_emergencia', handleMigrated);
+    return () => {
+      window.removeEventListener('cotacoes_migradas_emergencia', handleMigrated);
+    };
   }, []);
 
   // Mantém a cotação ativa sincronizada com currentQuote se o usuário estiver na visualização da cotação atual
@@ -938,38 +929,10 @@ export default function ReportsModule({
         }
       }
 
-      // 4. Atualiza no LocalStorage (s_orcamentos)
+      // 4. Desvinculado do LocalStorage para evitar QuotaExceededError
       try {
-        const saved = localStorage.getItem('s_orcamentos');
-        if (saved) {
-          const quotes: Quote[] = JSON.parse(saved);
-          if (Array.isArray(quotes)) {
-            const qIndex = quotes.findIndex(
-              q => q.id === currentTarget.cotacaoId ||
-                   q.quoteNumber === currentTarget.cotacao ||
-                   (q.quoteNumber && q.quoteNumber.trim().toLowerCase() === String(currentTarget.cotacao).trim().toLowerCase())
-            );
-            if (qIndex !== -1) {
-              const quote = quotes[qIndex];
-              if (quote.items && quote.items.length > 0) {
-                const itIdx = quote.items.findIndex(
-                  (it, idx) => (currentTarget.itemId && String(it.id) === String(currentTarget.itemId)) ||
-                               it.description === currentTarget.descricao ||
-                               idx === (currentTarget.idVer % 100)
-                );
-                const targetIndex = itIdx !== -1 ? itIdx : 0;
-                quote.items[targetIndex].drawingImage = base64;
-                (quote.items[targetIndex] as any).fotoDesenho = base64;
-                (quote.items[targetIndex] as any).desenho_url = base64;
-                quote.updatedAt = new Date().toISOString();
-                localStorage.setItem('s_orcamentos', JSON.stringify(quotes));
-              }
-            }
-          }
-        }
-      } catch (lsErr) {
-        console.warn('Aviso localStorage:', lsErr);
-      }
+        localStorage.removeItem('s_orcamentos');
+      } catch (lsErr) {}
 
       // 5. Atualiza estado da tabela de consulta
       setDbQuotesItems(prev => prev.map(it => {
@@ -1024,39 +987,10 @@ export default function ReportsModule({
           .eq('id', item.itemId);
       }
 
-      // 2. LocalStorage
+      // 2. Desvinculado do LocalStorage para evitar QuotaExceededError
       try {
-        const saved = localStorage.getItem('s_orcamentos');
-        if (saved) {
-          const quotes: Quote[] = JSON.parse(saved);
-          if (Array.isArray(quotes)) {
-            const qIndex = quotes.findIndex(
-              q => q.id === item.cotacaoId ||
-                   q.quoteNumber === item.cotacao ||
-                   (q.quoteNumber && q.quoteNumber.trim().toLowerCase() === String(item.cotacao).trim().toLowerCase())
-            );
-            if (qIndex !== -1) {
-              const quote = quotes[qIndex];
-              if (quote.items && quote.items.length > 0) {
-                const itIdx = quote.items.findIndex(
-                  (it, idx) => (item.itemId && String(it.id) === String(item.itemId)) ||
-                               it.description === item.descricao ||
-                               idx === (item.idVer % 100)
-                );
-                if (itIdx !== -1) {
-                  delete quote.items[itIdx].drawingImage;
-                  delete (quote.items[itIdx] as any).fotoDesenho;
-                  delete (quote.items[itIdx] as any).desenho_url;
-                  quote.updatedAt = new Date().toISOString();
-                  localStorage.setItem('s_orcamentos', JSON.stringify(quotes));
-                }
-              }
-            }
-          }
-        }
-      } catch (e) {
-        console.warn('Aviso ao remover do localStorage:', e);
-      }
+        localStorage.removeItem('s_orcamentos');
+      } catch (e) {}
 
       // 3. Estado local
       setDbQuotesItems(prev => prev.map(it => {
@@ -1112,23 +1046,10 @@ export default function ReportsModule({
         }
       }
 
-      // 2. Apaga do LocalStorage se existente
-      const saved = localStorage.getItem('s_orcamentos');
-      if (saved) {
-        try {
-          const quotes: Quote[] = JSON.parse(saved);
-          if (Array.isArray(quotes)) {
-            const cotKey = String(item.cotacao || item.cotacaoId || '').trim().toLowerCase();
-            const updated = quotes.filter(q => {
-              const qKey = String(q.quoteNumber || q.id || '').trim().toLowerCase();
-              return qKey !== cotKey;
-            });
-            localStorage.setItem('s_orcamentos', JSON.stringify(updated));
-          }
-        } catch (e) {
-          console.warn('Erro ao atualizar s_orcamentos:', e);
-        }
-      }
+      // 2. Desvinculado do LocalStorage para evitar QuotaExceededError
+      try {
+        localStorage.removeItem('s_orcamentos');
+      } catch (e) {}
 
       // 3. Atualiza estado local da tabela
       setDbQuotesItems(prev => prev.filter(it => it.idVer !== item.idVer));
@@ -1179,25 +1100,10 @@ export default function ReportsModule({
         await deleteCotacaoDb(cotId);
       }
 
-      // 2. Exclui do LocalStorage
-      const saved = localStorage.getItem('s_orcamentos');
-      if (saved) {
-        try {
-          const quotes: Quote[] = JSON.parse(saved);
-          if (Array.isArray(quotes)) {
-            const cotKeysSet = new Set(
-              Array.from(cotacoesParaExcluir).map(k => String(k).trim().toLowerCase())
-            );
-            const updated = quotes.filter(q => {
-              const qKey = String(q.quoteNumber || q.id || '').trim().toLowerCase();
-              return !cotKeysSet.has(qKey);
-            });
-            localStorage.setItem('s_orcamentos', JSON.stringify(updated));
-          }
-        } catch (e) {
-          console.warn('Erro ao atualizar s_orcamentos:', e);
-        }
-      }
+      // 2. Desvinculado do LocalStorage para evitar QuotaExceededError
+      try {
+        localStorage.removeItem('s_orcamentos');
+      } catch (e) {}
 
       // 3. Atualiza estado local
       const removedIdVers = new Set(selectedIds);
@@ -1467,27 +1373,8 @@ export default function ReportsModule({
             }
 
             try {
-              const saved = localStorage.getItem('s_orcamentos');
-              if (saved) {
-                const quotes: Quote[] = JSON.parse(saved);
-                if (Array.isArray(quotes)) {
-                  const qIdx = quotes.findIndex(
-                    q => q.id === displayQuote.id ||
-                         q.quoteNumber === displayQuote.quoteNumber ||
-                         (q.quoteNumber && q.quoteNumber.trim().toLowerCase() === String(displayQuote.quoteNumber).trim().toLowerCase())
-                  );
-                  if (qIdx !== -1 && quotes[qIdx].items?.[selectedItemIndex]) {
-                    quotes[qIdx].items[selectedItemIndex].drawingImage = base64;
-                    (quotes[qIdx].items[selectedItemIndex] as any).fotoDesenho = base64;
-                    (quotes[qIdx].items[selectedItemIndex] as any).desenho_url = base64;
-                    quotes[qIdx].updatedAt = new Date().toISOString();
-                    localStorage.setItem('s_orcamentos', JSON.stringify(quotes));
-                  }
-                }
-              }
-            } catch (e) {
-              console.warn('Erro ao salvar no localStorage:', e);
-            }
+              localStorage.removeItem('s_orcamentos');
+            } catch (e) {}
 
             const targetDbItem = targetItem as any;
             if (targetDbItem?.id && !isNaN(Number(targetDbItem.id))) {
@@ -1527,27 +1414,8 @@ export default function ReportsModule({
           }
 
           try {
-            const saved = localStorage.getItem('s_orcamentos');
-            if (saved) {
-              const quotes: Quote[] = JSON.parse(saved);
-              if (Array.isArray(quotes)) {
-                const qIdx = quotes.findIndex(
-                  q => q.id === displayQuote.id ||
-                       q.quoteNumber === displayQuote.quoteNumber ||
-                       (q.quoteNumber && q.quoteNumber.trim().toLowerCase() === String(displayQuote.quoteNumber).trim().toLowerCase())
-                );
-                if (qIdx !== -1 && quotes[qIdx].items?.[selectedItemIndex]) {
-                  quotes[qIdx].items[selectedItemIndex].drawingImage = dataUrl;
-                  (quotes[qIdx].items[selectedItemIndex] as any).fotoDesenho = dataUrl;
-                  (quotes[qIdx].items[selectedItemIndex] as any).desenho_url = dataUrl;
-                  quotes[qIdx].updatedAt = new Date().toISOString();
-                  localStorage.setItem('s_orcamentos', JSON.stringify(quotes));
-                }
-              }
-            }
-          } catch (e) {
-            console.warn('Erro ao salvar no localStorage:', e);
-          }
+            localStorage.removeItem('s_orcamentos');
+          } catch (e) {}
 
           const targetDbItem = targetItem as any;
           if (targetDbItem?.id && !isNaN(Number(targetDbItem.id))) {
@@ -1699,29 +1567,10 @@ export default function ReportsModule({
           (displayQuote.items[idx] as any).desenho_url = base64;
         }
 
-        // Persistência no LocalStorage (s_orcamentos)
+        // Desvinculado do LocalStorage para evitar QuotaExceededError
         try {
-          const saved = localStorage.getItem('s_orcamentos');
-          if (saved) {
-            const quotes: Quote[] = JSON.parse(saved);
-            if (Array.isArray(quotes)) {
-              const qIndex = quotes.findIndex(
-                q => q.id === displayQuote.id ||
-                     q.quoteNumber === displayQuote.quoteNumber ||
-                     (q.quoteNumber && q.quoteNumber.trim().toLowerCase() === String(displayQuote.quoteNumber).trim().toLowerCase())
-              );
-              if (qIndex !== -1 && quotes[qIndex].items?.[idx]) {
-                quotes[qIndex].items[idx].drawingImage = base64;
-                (quotes[qIndex].items[idx] as any).fotoDesenho = base64;
-                (quotes[qIndex].items[idx] as any).desenho_url = base64;
-                quotes[qIndex].updatedAt = new Date().toISOString();
-                localStorage.setItem('s_orcamentos', JSON.stringify(quotes));
-              }
-            }
-          }
-        } catch (lsErr) {
-          console.warn('Aviso localStorage:', lsErr);
-        }
+          localStorage.removeItem('s_orcamentos');
+        } catch (lsErr) {}
 
         // Persistência no Supabase cotacao_itens
         const targetDbItem = targetItem as any;

@@ -673,8 +673,8 @@ export async function saveCotacaoDb(quote: Quote): Promise<{ data: any; error: a
     // 1. Busca se a cotação já existe no Supabase (pelo ID direto ou pelo Número)
     let existingRecords: { id: string; numero: string; created_at?: string }[] = [];
 
-    // Prioridade 1: Buscar pelo ID direto (seja UUID ou ID de registro existente)
-    if (quote.id) {
+    // Prioridade 1: Buscar pelo ID direto apenas se for um UUID válido
+    if (quote.id && isUuid(quote.id)) {
       const { data: byId } = await db
         .from('cotacoes')
         .select('id, numero, created_at')
@@ -922,8 +922,17 @@ export async function deleteCotacaoDb(idOrNumero: string): Promise<{ error: any 
       }
     }
 
-    // 2. Deleta itens filhos da cotação
+    // 2. Deleta itens filhos da cotação e parcelas de contas a receber vinculadas
     if (cotacaoId) {
+      try {
+        await db
+          .from('contas_a_receber')
+          .delete()
+          .eq('cotacao_id', cotacaoId);
+      } catch (e) {
+        console.warn("Aviso ao limpar contas_a_receber vinculadas à cotação:", e);
+      }
+
       await db
         .from('cotacao_itens')
         .delete()
@@ -1016,15 +1025,17 @@ export async function fetchCotacaoById(idOrNumero: string): Promise<SupabaseCota
   try {
     if (!idOrNumero) return null;
 
-    // 1. Busca nativa pelo campo 'id' (UUID ou texto)
-    const { data: dataById, error: errorById } = await db
-      .from('cotacoes')
-      .select('*, cotacao_itens(*)')
-      .eq('id', idOrNumero)
-      .maybeSingle();
+    // 1. Busca nativa pelo campo 'id' se for um UUID válido
+    if (isUuid(idOrNumero)) {
+      const { data: dataById, error: errorById } = await db
+        .from('cotacoes')
+        .select('*, cotacao_itens(*)')
+        .eq('id', idOrNumero)
+        .maybeSingle();
 
-    if (dataById && !errorById) {
-      return dataById as SupabaseCotacao;
+      if (dataById && !errorById) {
+        return dataById as SupabaseCotacao;
+      }
     }
 
     // 2. Fallback de busca nativa pelo campo 'numero' (ex: COT-2026-0001)
