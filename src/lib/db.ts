@@ -57,7 +57,8 @@ export interface SupabaseCotacao {
   contato?: string;
   telefone?: string;
   email?: string;
-  status: 'rascunho' | 'pendente' | 'aprovado' | 'rejeitado' | 'reprovado' | 'cancelado' | 'em_analise' | string;
+  status: 'rascunho' | 'pendente' | 'aprovado' | 'rejeitado' | 'reprovado' | 'cancelado' | 'em_analise' | 'faturado' | string;
+  situacao?: string;
   observacoes?: string;
   valor_total: number;
   created_by?: string;
@@ -639,25 +640,31 @@ export async function deleteClienteDb(id: string): Promise<{ error: any }> {
    3. COTAÇÕES E ITENS (TABELAS: cotacoes & cotacao_itens)
    ========================================================================= */
 
-export function mapQuoteStatusToSupabase(status: string): 'rascunho' | 'pendente' | 'aprovado' | 'rejeitado' {
+export function mapQuoteStatusToSupabase(status: string): 'rascunho' | 'pendente' | 'aprovado' | 'rejeitado' | 'faturado' {
   const st = (status || '').toLowerCase();
-  if (st.includes('aprovado') || st.includes('faturado')) return 'aprovado';
+  if (st.includes('faturad')) return 'faturado';
+  if (st.includes('aprovado')) return 'aprovado';
   if (st.includes('rejeitado') || st.includes('cancelado')) return 'rejeitado';
   if (st.includes('pendente') || st.includes('enviado')) return 'pendente';
   return 'rascunho';
 }
 
-export function mapSupabaseStatusToQuote(status: string): 'Rascunho' | 'Enviado' | 'Aprovado' | 'Faturado' | 'Cancelado' {
-  const st = (status || '').toLowerCase();
+export function mapSupabaseStatusToQuote(status?: string, situacao?: string): 'Rascunho' | 'Enviado' | 'Aprovado' | 'Faturado' | 'Cancelado' {
+  const sit = (situacao || '').toLowerCase().trim();
+  if (sit === 'faturado' || sit === 'faturada' || sit === 'baixado' || sit === 'baixada') return 'Faturado';
+
+  const st = (status || '').toLowerCase().trim();
+  if (st === 'faturado' || st === 'faturada' || st === 'baixado' || st === 'baixada') return 'Faturado';
   if (st === 'aprovado') return 'Aprovado';
-  if (st === 'rejeitado') return 'Cancelado';
-  if (st === 'pendente') return 'Enviado';
+  if (st === 'rejeitado' || st === 'cancelado') return 'Cancelado';
+  if (st === 'pendente' || st === 'enviado') return 'Enviado';
   return 'Rascunho';
 }
 
 export async function saveCotacaoDb(quote: Quote): Promise<{ data: any; error: any }> {
   try {
-    const cotacaoPayload = {
+    const isFaturado = String(quote.status || '').toLowerCase().includes('faturad') || String((quote as any).situacao || '').toUpperCase() === 'FATURADO';
+    const cotacaoPayload: any = {
       numero: quote.quoteNumber,
       data: quote.date || new Date().toISOString().split('T')[0],
       cliente_nome: quote.clientName || 'Cliente Balcão',
@@ -665,6 +672,7 @@ export async function saveCotacaoDb(quote: Quote): Promise<{ data: any; error: a
       telefone: quote.clientPhone || '',
       email: quote.clientEmail || '',
       status: mapQuoteStatusToSupabase(quote.status),
+      situacao: isFaturado ? 'FATURADO' : ((quote as any).situacao || 'ATIVA'),
       observacoes: quote.observations || '',
       valor_total: quote.grandTotal || quote.subtotalTotal || 0,
       cliente_id: quote.clientId && isUuid(quote.clientId) ? quote.clientId : undefined
@@ -847,11 +855,22 @@ export async function updateCotacaoStatusDb(
   const targetId = typeof cotacaoIdOrObj === 'string' ? cotacaoIdOrObj : cotacaoIdOrObj.id;
   const targetNumero = typeof cotacaoIdOrObj === 'object' ? cotacaoIdOrObj.numero : undefined;
   const statusStr = (status || '').toLowerCase().trim();
-  const payload = { status: statusStr, updated_at: new Date().toISOString() };
+  const situacaoStr = statusStr === 'faturado' ? 'FATURADO' : 
+                      statusStr === 'aprovado' ? 'APROVADO' : 
+                      statusStr === 'pendente' ? 'PENDENTE' : 
+                      statusStr === 'rascunho' ? 'RASCUNHO' : statusStr.toUpperCase();
+
+  const payload: any = { 
+    status: statusStr, 
+    situacao: situacaoStr,
+    updated_at: new Date().toISOString() 
+  };
 
   let updateQuery;
-  if (targetId) {
+  if (targetId && isUuid(targetId)) {
     updateQuery = db.from('cotacoes').update(payload).eq('id', targetId);
+  } else if (targetId) {
+    updateQuery = db.from('cotacoes').update(payload).or(`id.eq.${targetId},numero.eq.${targetId}`);
   } else if (targetNumero) {
     updateQuery = db.from('cotacoes').update(payload).eq('numero', targetNumero);
   } else {
@@ -860,16 +879,42 @@ export async function updateCotacaoStatusDb(
 
   let { data, error } = await updateQuery;
 
+  // Se a coluna situacao não existir na tabela, tenta atualizar apenas status
+  if (error && (error.message?.toLowerCase().includes('situacao') || error.code === '42703')) {
+    const payloadNoSituacao = { status: statusStr, updated_at: new Date().toISOString() };
+    if (targetId && isUuid(targetId)) {
+      updateQuery = db.from('cotacoes').update(payloadNoSituacao).eq('id', targetId);
+    } else if (targetId) {
+      updateQuery = db.from('cotacoes').update(payloadNoSituacao).or(`id.eq.${targetId},numero.eq.${targetId}`);
+    } else if (targetNumero) {
+      updateQuery = db.from('cotacoes').update(payloadNoSituacao).eq('numero', targetNumero);
+    }
+    const res = await updateQuery;
+    data = res.data;
+    error = res.error;
+  }
+
   // Se houver restrição no banco de dados (ex: constraint de enum aceitando apenas rascunho/pendente/aprovado/rejeitado)
   if (error && (error.message?.includes('check') || error.message?.includes('invalid input') || error.code === '23514')) {
     const fallback = mapQuoteStatusToSupabase(statusStr);
-    const fallbackPayload = { status: fallback, updated_at: new Date().toISOString() };
-    if (targetId) {
+    const fallbackPayload: any = { status: fallback, situacao: situacaoStr, updated_at: new Date().toISOString() };
+    if (targetId && isUuid(targetId)) {
       const retry = await db.from('cotacoes').update(fallbackPayload).eq('id', targetId);
+      error = retry.error;
+    } else if (targetId) {
+      const retry = await db.from('cotacoes').update(fallbackPayload).or(`id.eq.${targetId},numero.eq.${targetId}`);
       error = retry.error;
     } else if (targetNumero) {
       const retry = await db.from('cotacoes').update(fallbackPayload).eq('numero', targetNumero);
       error = retry.error;
+    }
+    if (error && (error.message?.toLowerCase().includes('situacao') || error.code === '42703')) {
+      const finalFallback = { status: fallback, updated_at: new Date().toISOString() };
+      if (targetId && isUuid(targetId)) {
+        await db.from('cotacoes').update(finalFallback).eq('id', targetId);
+      } else if (targetNumero) {
+        await db.from('cotacoes').update(finalFallback).eq('numero', targetNumero);
+      }
     }
   }
 
@@ -880,6 +925,75 @@ export async function updateCotacaoStatusDb(
     } catch (_) {
       // silencioso se cotacao_itens não tiver os campos
     }
+  }
+
+  return { data, error };
+}
+
+/**
+ * Atualiza explicitamente a situação da cotação (ex: 'FATURADO') na tabela cotacoes do Supabase
+ */
+export async function atualizarSituacaoCotacaoDb(
+  cotacaoIdOrObj: string | { id?: string; numero?: string },
+  situacao: string = 'FATURADO'
+) {
+  const targetId = typeof cotacaoIdOrObj === 'string' ? cotacaoIdOrObj : cotacaoIdOrObj.id;
+  const targetNumero = typeof cotacaoIdOrObj === 'object' ? cotacaoIdOrObj.numero : undefined;
+
+  const situacaoUpper = (situacao || 'FATURADO').toUpperCase().trim();
+  const statusLower = situacaoUpper === 'FATURADO' ? 'faturado' : situacaoUpper.toLowerCase();
+
+  const payload: any = {
+    situacao: situacaoUpper,
+    status: statusLower,
+    updated_at: new Date().toISOString()
+  };
+
+  let updateQuery;
+  if (targetId && isUuid(targetId)) {
+    updateQuery = db.from('cotacoes').update(payload).eq('id', targetId);
+  } else if (targetId) {
+    updateQuery = db.from('cotacoes').update(payload).or(`id.eq.${targetId},numero.eq.${targetId}`);
+  } else if (targetNumero) {
+    updateQuery = db.from('cotacoes').update(payload).eq('numero', targetNumero);
+  } else {
+    return { data: null, error: new Error('Sem identificador para atualizar cotação') };
+  }
+
+  let { data, error } = await updateQuery;
+
+  // Se der erro porque a coluna 'situacao' não existe na tabela cotacoes
+  if (error && (error.message?.toLowerCase().includes('situacao') || error.code === '42703')) {
+    const fallbackPayload = { status: statusLower, updated_at: new Date().toISOString() };
+    if (targetId && isUuid(targetId)) {
+      updateQuery = db.from('cotacoes').update(fallbackPayload).eq('id', targetId);
+    } else if (targetId) {
+      updateQuery = db.from('cotacoes').update(fallbackPayload).or(`id.eq.${targetId},numero.eq.${targetId}`);
+    } else if (targetNumero) {
+      updateQuery = db.from('cotacoes').update(fallbackPayload).eq('numero', targetNumero);
+    }
+    const res = await updateQuery;
+    error = res.error;
+    data = res.data;
+  }
+
+  // Se der erro de check constraint no status (ex: constraint de enum aceitando apenas rascunho/pendente/aprovado/rejeitado)
+  if (error && (error.message?.includes('check') || error.code === '23514')) {
+    const fallbackPayload2: any = {
+      situacao: situacaoUpper,
+      status: 'aprovado',
+      updated_at: new Date().toISOString()
+    };
+    if (targetId && isUuid(targetId)) {
+      updateQuery = db.from('cotacoes').update(fallbackPayload2).eq('id', targetId);
+    } else if (targetId) {
+      updateQuery = db.from('cotacoes').update(fallbackPayload2).or(`id.eq.${targetId},numero.eq.${targetId}`);
+    } else if (targetNumero) {
+      updateQuery = db.from('cotacoes').update(fallbackPayload2).eq('numero', targetNumero);
+    }
+    const res2 = await updateQuery;
+    error = res2.error;
+    data = res2.data;
   }
 
   return { data, error };

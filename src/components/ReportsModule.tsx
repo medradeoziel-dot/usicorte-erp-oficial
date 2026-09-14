@@ -112,6 +112,15 @@ export function normalizeStatus(rawStatus?: string): string {
 }
 
 export function getStatusOption(rawStatus?: string): StatusOptionConfig {
+  if (rawStatus === 'ativas') {
+    return { value: 'ativas', label: 'Em Aberto / Ativas', dotClass: 'bg-sky-500' };
+  }
+  if (rawStatus === 'todos') {
+    return { value: 'todos', label: 'Todas as Situações', dotClass: 'bg-slate-400' };
+  }
+  if (rawStatus === 'faturado') {
+    return { value: 'faturado', label: 'Faturado', dotClass: 'bg-purple-500' };
+  }
   const norm = normalizeStatus(rawStatus);
   const found = STATUS_OPTIONS.find(o => o.value === norm);
   if (found) return found;
@@ -347,8 +356,8 @@ export default function ReportsModule({
   const [inputBusca, setInputBusca] = useState<string>('');
   // Campo dedicado: NOME DO CLIENTE (filtra sempre, combinado com a busca acima)
   const [clienteBusca, setClienteBusca] = useState<string>('');
-  // Filtro por situação da proposta (para não misturar no fechamento)
-  const [statusFiltro, setStatusFiltro] = useState<'todos' | StatusProposta>('todos');
+  // Filtro padrão por situação da proposta: inicia selecionado em "Em Aberto / Ativas" (exibindo apenas Pendente, Aprovado, Rascunho)
+  const [statusFiltro, setStatusFiltro] = useState<string>('ativas');
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [dbQuotesItems, setDbQuotesItems] = useState<ConsultaItem[]>([]);
 
@@ -758,26 +767,29 @@ export default function ReportsModule({
 
           // Adiciona SOMENTE os itens da versão mais recente desta cotação
           (q.cotacao_itens || []).forEach((it, itIdx) => {
-            itemsList.push({
-              idVer: 30000 + qIdx * 100 + itIdx,
-              data: formatSafeDate(q.data || q.created_at),
-              empresa: q.cliente_nome || 'Cliente Balcão',
-              contato: q.contato || '-',
-              produto: it.produto || 'Peça',
-              medida: it.medida || '',
-              descricao: it.descricao || 'Item UsiCorte',
-              valor: formatCurrency(it.valor_unitario || 0),
-              qtd: it.quantidade || 1,
-              unitario: it.valor_unitario || 0,
-              valorGeral: it.valor_total || ((it.valor_unitario || 0) * (it.quantidade || 1)),
-              cotacao: q.numero,
-              cotacaoId: q.id,
-              itemId: it.id,
-              observacao: it.observacao || (it as any).notes || (it as any).obs || '',
-              obs: it.observacao || (it as any).notes || (it as any).obs || '',
-              status: q.status as StatusProposta,
-              desenhoUrl: it.desenho_url || undefined
-            });
+              const isFaturadoQuote = String(q.situacao || '').toUpperCase() === 'FATURADO' || String(q.status || '').toLowerCase() === 'faturado';
+              const computedQuoteStatus = isFaturadoQuote ? 'faturado' : (q.status as StatusProposta);
+
+              itemsList.push({
+                idVer: 30000 + qIdx * 100 + itIdx,
+                data: formatSafeDate(q.data || q.created_at),
+                empresa: q.cliente_nome || 'Cliente Balcão',
+                contato: q.contato || '-',
+                produto: it.produto || 'Peça',
+                medida: it.medida || '',
+                descricao: it.descricao || 'Item UsiCorte',
+                valor: formatCurrency(it.valor_unitario || 0),
+                qtd: it.quantidade || 1,
+                unitario: it.valor_unitario || 0,
+                valorGeral: it.valor_total || ((it.valor_unitario || 0) * (it.quantidade || 1)),
+                cotacao: q.numero,
+                cotacaoId: q.id,
+                itemId: it.id,
+                observacao: it.observacao || (it as any).notes || (it as any).obs || '',
+                obs: it.observacao || (it as any).notes || (it as any).obs || '',
+                status: computedQuoteStatus,
+                desenhoUrl: it.desenho_url || undefined
+              });
           });
         });
       }
@@ -814,28 +826,33 @@ export default function ReportsModule({
 
               (q.items || []).forEach((it, itIdx) => {
                 const obsText = it.notes || it.observacao || (it as any).obs || '';
-                itemsList.push({
-                  idVer: 20000 + qIdx * 100 + itIdx,
-                  data: formatSafeDate(q.date || q.createdAt),
-                  empresa: q.clientName || 'Cliente Balcão',
-                  contato: q.contactPerson || '-',
-                  produto: it.constantName || it.description || 'Material',
-                  medida: formatarMedidasLimpa(it),
-                  descricao: it.description || 'Peça UsiCorte',
-                  valor: formatCurrency(it.unitPrice || 0),
-                  qtd: it.quantity || 1,
-                  unitario: it.unitPrice || 0,
-                  valorGeral: (it.unitPrice || 0) * (it.quantity || 1),
-                  cotacao: q.quoteNumber || `COT-${qIdx + 1}`,
-                  cotacaoId: q.id,
-                  itemId: it.id,
-                  observacao: obsText,
-                  obs: obsText,
-                  status: (q.status?.toLowerCase().includes('aprov') ? 'aprovado' :
-                           q.status?.toLowerCase().includes('canc') ? 'rejeitado' :
-                           q.status?.toLowerCase().includes('env') ? 'pendente' : 'rascunho') as StatusProposta,
-                  desenhoUrl: it.drawingImage || (it as any).fotoDesenho || (it as any).desenho_url || undefined
-                });
+                  const isFaturadoLocal = (q.status || '').toLowerCase().includes('faturad') || ((q as any).situacao || '').toUpperCase() === 'FATURADO' || q.paymentStatus === 'Pago';
+                  const computedLocalStatus = isFaturadoLocal ? 'faturado' :
+                    (q.status?.toLowerCase().includes('aprov') ? 'aprovado' :
+                     q.status?.toLowerCase().includes('canc') ? 'cancelado' :
+                     q.status?.toLowerCase().includes('rej') ? 'rejeitado' :
+                     q.status?.toLowerCase().includes('env') ? 'pendente' : 'rascunho');
+
+                  itemsList.push({
+                    idVer: 20000 + qIdx * 100 + itIdx,
+                    data: formatSafeDate(q.date || q.createdAt),
+                    empresa: q.clientName || 'Cliente Balcão',
+                    contato: q.contactPerson || '-',
+                    produto: it.constantName || it.description || 'Material',
+                    medida: formatarMedidasLimpa(it),
+                    descricao: it.description || 'Peça UsiCorte',
+                    valor: formatCurrency(it.unitPrice || 0),
+                    qtd: it.quantity || 1,
+                    unitario: it.unitPrice || 0,
+                    valorGeral: (it.unitPrice || 0) * (it.quantity || 1),
+                    cotacao: q.quoteNumber || `COT-${qIdx + 1}`,
+                    cotacaoId: q.id,
+                    itemId: it.id,
+                    observacao: obsText,
+                    obs: obsText,
+                    status: computedLocalStatus as StatusProposta,
+                    desenhoUrl: it.drawingImage || (it as any).fotoDesenho || (it as any).desenho_url || undefined
+                  });
               });
             }
           });
@@ -1229,8 +1246,24 @@ export default function ReportsModule({
       // 1) Filtro fixo por nome do cliente
       if (cliente && !normalizar(item.empresa).includes(cliente)) return false;
 
-      // 1.b) Filtro por situação (rascunho / pendente / aprovado / reprovado / cancelado / em_analise)
-      if (statusFiltro !== 'todos' && normalizeStatus(item.status) !== normalizeStatus(statusFiltro)) return false;
+      // 1.b) Filtro por situação da proposta
+      const normStatus = normalizeStatus(item.status);
+      if (statusFiltro === 'ativas') {
+        // "Em Aberto / Ativas" (Padrão ao abrir a tela: exibe apenas Pendente, Aprovado, Rascunho)
+        // Cotações marcadas como FATURADO saem automaticamente da listagem principal
+        if (normStatus !== 'pendente' && normStatus !== 'aprovado' && normStatus !== 'rascunho') {
+          return false;
+        }
+      } else if (statusFiltro === 'faturado') {
+        // "Faturado" (Para consultar apenas orçamentos baixados/faturados)
+        if (normStatus !== 'faturado') {
+          return false;
+        }
+      } else if (statusFiltro === 'todos') {
+        // "Todas as Situações" (Para ver todo o histórico consolidado)
+      } else {
+        if (normStatus !== normalizeStatus(statusFiltro)) return false;
+      }
 
       // 2) Filtro por categoria selecionada
       if (!term) return true;
@@ -2804,24 +2837,57 @@ export default function ReportsModule({
                   type="button"
                   id="selectStatus"
                   onClick={() => setOpenStatusDropdownId(prev => prev === 'filtro' ? null : 'filtro')}
-                  className="h-[37px] px-3 bg-white border border-slate-300 hover:border-blue-400 rounded-md shadow-xs flex items-center justify-between gap-2.5 cursor-pointer transition-all min-w-[180px]"
+                  className="h-[37px] px-3 bg-white border border-slate-300 hover:border-blue-400 rounded-md shadow-xs flex items-center justify-between gap-2.5 cursor-pointer transition-all min-w-[195px]"
                   title="Filtrar por situação da proposta"
                 >
                   <div className="flex items-center gap-2">
-                    {statusFiltro === 'todos' ? (
-                      <span className="w-2.5 h-2.5 rounded-full bg-slate-300 shrink-0" />
-                    ) : (
-                      <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${getStatusOption(statusFiltro).dotClass}`} />
-                    )}
+                    <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${getStatusOption(statusFiltro).dotClass}`} />
                     <span className="text-blue-600 font-semibold text-xs whitespace-nowrap">
-                      {statusFiltro === 'todos' ? 'Todas as Situações' : getStatusOption(statusFiltro).label}
+                      {getStatusOption(statusFiltro).label}
                     </span>
                   </div>
                   <ChevronDown className={`w-3.5 h-3.5 text-blue-600 opacity-70 transition-transform ${openStatusDropdownId === 'filtro' ? 'rotate-180' : ''}`} />
                 </button>
 
                 {openStatusDropdownId === 'filtro' && (
-                  <div className="absolute left-0 top-full mt-1.5 z-50 min-w-[180px] bg-white border border-slate-200 rounded-lg shadow-xl py-1 animate-in fade-in zoom-in-95 duration-100">
+                  <div className="absolute left-0 top-full mt-1.5 z-50 min-w-[210px] bg-white border border-slate-200 rounded-lg shadow-xl py-1 animate-in fade-in zoom-in-95 duration-100">
+                    {/* 1. Em Aberto / Ativas (Padrão ao abrir a tela) */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStatusFiltro('ativas');
+                        setOpenStatusDropdownId(null);
+                      }}
+                      className={`w-full flex items-center justify-between px-3 py-1.5 text-left text-xs transition-colors hover:bg-blue-50 cursor-pointer ${
+                        statusFiltro === 'ativas' ? 'bg-blue-50/80 font-bold' : 'font-medium'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-sky-500 shrink-0" />
+                        <span className="text-blue-600">Em Aberto / Ativas</span>
+                      </div>
+                      {statusFiltro === 'ativas' && <Check className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />}
+                    </button>
+
+                    {/* 2. Faturado (Para consultar apenas orçamentos baixados/faturados) */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStatusFiltro('faturado');
+                        setOpenStatusDropdownId(null);
+                      }}
+                      className={`w-full flex items-center justify-between px-3 py-1.5 text-left text-xs transition-colors hover:bg-blue-50 cursor-pointer ${
+                        statusFiltro === 'faturado' ? 'bg-blue-50/80 font-bold' : 'font-medium'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-purple-500 shrink-0" />
+                        <span className="text-blue-600">Faturado</span>
+                      </div>
+                      {statusFiltro === 'faturado' && <Check className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />}
+                    </button>
+
+                    {/* 3. Todas as Situações (Para ver todo o histórico consolidado) */}
                     <button
                       type="button"
                       onClick={() => {
@@ -2833,7 +2899,7 @@ export default function ReportsModule({
                       }`}
                     >
                       <div className="flex items-center gap-2">
-                        <span className="w-2.5 h-2.5 rounded-full bg-slate-300 shrink-0" />
+                        <span className="w-2.5 h-2.5 rounded-full bg-slate-400 shrink-0" />
                         <span className="text-blue-600">Todas as Situações</span>
                       </div>
                       {statusFiltro === 'todos' && <Check className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />}
@@ -2841,7 +2907,8 @@ export default function ReportsModule({
 
                     <div className="h-px bg-slate-100 my-1" />
 
-                    {STATUS_OPTIONS.map((opt) => {
+                    {/* Filtros específicos por situação individual */}
+                    {STATUS_OPTIONS.filter(opt => opt.value !== 'faturado').map((opt) => {
                       const isSelected = statusFiltro === opt.value;
                       return (
                         <button

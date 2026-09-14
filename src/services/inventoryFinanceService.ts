@@ -7,7 +7,7 @@ import {
   Quote, 
   OrdemServico 
 } from '../types';
-import { db, fetchCotacoesDb, SupabaseCotacao } from '../lib/db';
+import { db, fetchCotacoesDb, SupabaseCotacao, atualizarSituacaoCotacaoDb } from '../lib/db';
 
 // Materiais Iniciais Padrão UsiCorte / Caldeiraria
 export const INITIAL_MATERIAIS: MaterialEstoque[] = [
@@ -1136,7 +1136,7 @@ export async function darBaixaMultiplasCotacoesDb(
   // Salva no financeiro do Supabase
   await saveLancamentoFinanceiroDb(novoLancamento);
 
-  // Atualiza status das cotações no Supabase
+  // Atualiza status e situação das cotações no Supabase
   for (const c of cotacoes) {
     const registro: RegistroPagamentoCotacao = {
       status: 'Pago',
@@ -1155,13 +1155,23 @@ export async function darBaixaMultiplasCotacoesDb(
     if (c.id) {
       cachePagamentosMap[c.id.trim().toLowerCase()] = registro;
       cachePagamentosMap[c.id] = registro;
-      try {
-        await db.from('cotacoes').update({
-          status: 'aprovado',
-          updated_at: new Date().toISOString()
-        }).eq('id', c.id);
-      } catch (err) {}
     }
+
+    // 1. Atualização automática do campo 'situacao' da cotação para 'FATURADO' na tabela 'cotacoes' do Supabase
+    try {
+      await atualizarSituacaoCotacaoDb(
+        { id: c.id, numero: c.numero },
+        'FATURADO'
+      );
+    } catch (err) {
+      console.warn('Aviso ao atualizar situacao da cotação para FATURADO no Supabase:', err);
+    }
+  }
+
+  // Notifica o sistema para recarregar cotações e atualizar filtros em tempo real
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('cotacoes_migradas_emergencia'));
+    window.dispatchEvent(new CustomEvent('cotacao_status_alterado'));
   }
 
   return {

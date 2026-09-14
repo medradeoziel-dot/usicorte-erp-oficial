@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Client, Quote, FormaPagamentoFinanceiro, LancamentoFinanceiro } from '../types';
-import { fetchCotacoesDb, SupabaseCotacao } from '../lib/db';
+import { fetchCotacoesDb, SupabaseCotacao, atualizarSituacaoCotacaoDb } from '../lib/db';
 import { formatCurrency, formatSafeDate } from '../utils/calculator';
 import { 
   getPagamentosCotacoesMap, 
@@ -135,7 +135,8 @@ export default function FechamentoCotacoesModule({
             itensResumo = q.observacoes || 'Itens industriais de corte';
           }
 
-          const pag = pagamentosMap[numKey] || (q.id ? pagamentosMap[q.id.trim().toLowerCase()] : undefined) || { status: 'Pendente' as const };
+          const isFaturado = String(q.situacao || '').toUpperCase() === 'FATURADO' || String(q.status || '').toLowerCase() === 'faturado';
+          const pag = pagamentosMap[numKey] || (q.id ? pagamentosMap[q.id.trim().toLowerCase()] : undefined) || (isFaturado ? { status: 'Pago' as const } : { status: 'Pendente' as const });
 
           resultList.push({
             id: q.id,
@@ -149,7 +150,7 @@ export default function FechamentoCotacoesModule({
             pesoKg: pesoTotal,
             qtdItens: qtdItens || 1,
             itensResumo: itensResumo.slice(0, 180),
-            statusCotacao: q.status || 'aprovado',
+            statusCotacao: isFaturado ? 'faturado' : (q.status || 'aprovado'),
             pagamento: pag
           });
         });
@@ -452,7 +453,7 @@ export default function FechamentoCotacoesModule({
   };
 
   // Ação: Reverter Baixa para 'Pendente' se necessário
-  const handleReverterParaPendente = (q: ExtratoCotacaoItem) => {
+  const handleReverterParaPendente = async (q: ExtratoCotacaoItem) => {
     if (!confirm(`Deseja reverter a cotação ${q.numero} para o status PENDENTE DE PAGAMENTO?`)) return;
 
     const map = getPagamentosCotacoesMap();
@@ -460,6 +461,17 @@ export default function FechamentoCotacoesModule({
     delete map[key];
     if (q.id) delete map[q.id.trim().toLowerCase()];
     salvarPagamentosCotacoesMap(map);
+
+    try {
+      await atualizarSituacaoCotacaoDb({ id: q.id, numero: q.numero }, 'PENDENTE');
+    } catch (e) {
+      console.warn('Aviso ao reverter situação no Supabase:', e);
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('cotacoes_migradas_emergencia'));
+      window.dispatchEvent(new CustomEvent('cotacao_status_alterado'));
+    }
 
     loadQuotesData();
   };
