@@ -336,6 +336,17 @@ export interface CompanyFiscalData {
   proximo_numero_cotacao?: number;
   prefixo_cotacao?: string;
 
+  // 6. Informações para Pagamento & Chave PIX (Dinâmico)
+  chavePix?: string; // Chave PIX
+  tipoChavePix?: string; // Tipo da Chave (Ex: CNPJ / E-mail)
+  favorecidoPix?: string; // Favorecido / Titular do PIX
+  bancoNome?: string; // Banco (Nome do Banco)
+  bancoAgencia?: string; // Agência
+  bancoConta?: string; // Conta Corrente
+  bancoTitular?: string; // Titular / Razão Social do Banco
+  bancoCnpj?: string; // CNPJ do Banco
+  instrucoesPagamento?: string; // Texto de Observação / Instrução (Ex: WhatsApp/E-mail para envio de comprovante)
+
   // Aliases em português para integração direta com Supabase
   tipo_pessoa?: string;
   razao_social?: string;
@@ -356,6 +367,15 @@ export interface CompanyFiscalData {
   logo_url?: string;
   nome_responsavel?: string;
   documento_responsavel?: string;
+  chave_pix?: string;
+  tipo_chave_pix?: string;
+  favorecido_pix?: string;
+  banco_nome?: string;
+  banco_agencia?: string;
+  banco_conta?: string;
+  banco_titular?: string;
+  banco_cnpj?: string;
+  instrucoes_pagamento?: string;
   updated_at?: string;
 }
 

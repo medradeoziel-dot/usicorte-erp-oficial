@@ -1,8 +1,8 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import CompanyHeader from './CompanyHeader';
 import { CompanyFiscalData, Client } from '../types';
 import { formatCurrency, formatSafeDate } from '../utils/calculator';
-import { getLocalCompanyData, DEFAULT_COMPANY_DATA } from '../services/companyService';
+import { getLocalCompanyData, fetchCompanyData, DEFAULT_COMPANY_DATA } from '../services/companyService';
 import { RegistroPagamentoCotacao } from '../services/inventoryFinanceService';
 
 export interface ExtratoCotacaoItem {
@@ -42,7 +42,27 @@ export default function ExtratoCobrancaPrint({
   chavePixCustom,
   dadosBancariosCustom
 }: ExtratoCobrancaPrintProps) {
-  const companyData: CompanyFiscalData = getLocalCompanyData() || DEFAULT_COMPANY_DATA;
+  const [companyData, setCompanyData] = useState<CompanyFiscalData>(() => getLocalCompanyData() || DEFAULT_COMPANY_DATA);
+
+  useEffect(() => {
+    let isMounted = true;
+    fetchCompanyData().then((data) => {
+      if (isMounted && data) {
+        setCompanyData(data);
+      }
+    });
+
+    const handleUpdate = (e: any) => {
+      if (isMounted && e?.detail) {
+        setCompanyData(e.detail);
+      }
+    };
+    window.addEventListener('company-data-updated', handleUpdate);
+    return () => {
+      isMounted = false;
+      window.removeEventListener('company-data-updated', handleUpdate);
+    };
+  }, []);
 
   // Totais
   const totalValor = cotacoes.reduce((acc, c) => acc + (Number(c.valor) || 0), 0);
@@ -71,8 +91,23 @@ export default function ExtratoCobrancaPrint({
     ? `Até ${formatSafeDate(periodoFim)}`
     : 'Consolidado Geral';
 
-  const chavePix = chavePixCustom || companyData.cnpj || '25.038.430/0001-23';
-  const dadosBancarios = dadosBancariosCustom || 'Banco: BANCO DO BRASIL | Agência: 0037-X | Conta Corrente: 45.890-1';
+  // 💳 Dados Bancários & PIX Dinâmicos da Empresa Emitente
+  const chavePix = (chavePixCustom || companyData.chavePix || companyData.chave_pix || '').trim();
+  const tipoChavePix = (companyData.tipoChavePix || companyData.tipo_chave_pix || '').trim();
+  const favorecidoPix = (companyData.favorecidoPix || companyData.favorecido_pix || '').trim();
+
+  const bancoNome = (companyData.bancoNome || companyData.banco_nome || '').trim();
+  const bancoAgencia = (companyData.bancoAgencia || companyData.banco_agencia || '').trim();
+  const bancoConta = (companyData.bancoConta || companyData.banco_conta || '').trim();
+  const bancoTitular = (companyData.bancoTitular || companyData.banco_titular || '').trim();
+  const bancoCnpj = (companyData.bancoCnpj || companyData.banco_cnpj || '').trim();
+
+  const instrucoesPagamento = (companyData.instrucoesPagamento || companyData.instrucoes_pagamento || '').trim();
+
+  const hasPix = Boolean(chavePix || tipoChavePix || favorecidoPix);
+  const hasBank = Boolean(dadosBancariosCustom || bancoNome || bancoAgencia || bancoConta || bancoTitular || bancoCnpj);
+  const hasInstructions = Boolean(instrucoesPagamento);
+  const hasPaymentInfo = hasPix || hasBank || hasInstructions;
 
   return (
     <div className="secao-extrato bg-white text-black p-6 sm:p-8 max-w-[850px] mx-auto font-sans leading-relaxed text-xs">
@@ -241,44 +276,75 @@ export default function ExtratoCobrancaPrint({
         </div>
       </div>
 
-      {/* 5. DADOS PARA PAGAMENTO (CHAVE PIX E DADOS BANCÁRIOS) */}
-      <div className="border border-slate-300 rounded-lg p-3.5 mb-4 bg-slate-50">
-        <div className="text-[11px] font-bold uppercase tracking-wider text-slate-900 border-b border-slate-300 pb-1 mb-2 flex items-center gap-1.5">
-          <span>💳 Informações para Pagamento & Chave PIX</span>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-          <div className="bg-white border border-slate-200 rounded p-2.5">
-            <div className="text-[10px] font-bold uppercase text-slate-600 mb-0.5">Chave PIX Oficial</div>
-            <div className="text-sm font-mono font-black text-slate-900 select-all">
-              {chavePix}
-            </div>
-            <div className="text-[10px] text-slate-600 mt-1">
-              Favorecido: <strong>{companyData.corporateName || DEFAULT_COMPANY_DATA.corporateName}</strong>
-            </div>
-            <div className="text-[9.5px] text-slate-500 mt-0.5">
-              Tipo da Chave: CNPJ / E-mail ({companyData.email || 'financeirousicorte@gmail.com'})
-            </div>
+      {/* 5. DADOS PARA PAGAMENTO (CHAVE PIX E DADOS BANCÁRIOS DINÂMICOS) */}
+      {hasPaymentInfo && (
+        <div className="border border-slate-300 rounded-lg p-3.5 mb-4 bg-slate-50">
+          <div className="text-[11px] font-bold uppercase tracking-wider text-slate-900 border-b border-slate-300 pb-1 mb-2 flex items-center gap-1.5">
+            <span>💳 Informações para Pagamento & Chave PIX</span>
           </div>
 
-          <div className="bg-white border border-slate-200 rounded p-2.5">
-            <div className="text-[10px] font-bold uppercase text-slate-600 mb-0.5">Dados Bancários / Transferência</div>
-            <div className="text-xs text-slate-900 font-semibold leading-relaxed">
-              {dadosBancarios}
-            </div>
-            <div className="text-[10px] text-slate-600 mt-1">
-              Titular: <strong>{companyData.corporateName || DEFAULT_COMPANY_DATA.corporateName}</strong>
-            </div>
-            <div className="text-[9.5px] text-slate-500 mt-0.5">
-              CNPJ: {companyData.cnpj || DEFAULT_COMPANY_DATA.cnpj}
-            </div>
-          </div>
-        </div>
+          <div className={`grid grid-cols-1 ${hasPix && hasBank ? 'md:grid-cols-2' : ''} gap-3 text-xs`}>
+            {/* Bloco PIX */}
+            {hasPix && (
+              <div className="bg-white border border-slate-200 rounded p-2.5">
+                <div className="text-[10px] font-bold uppercase text-slate-600 mb-0.5">Chave PIX Oficial</div>
+                {chavePix && (
+                  <div className="text-sm font-mono font-black text-slate-900 select-all">
+                    {chavePix}
+                  </div>
+                )}
+                {tipoChavePix && (
+                  <div className="text-[9.5px] text-slate-600 mt-1">
+                    Tipo da Chave: <strong>{tipoChavePix}</strong>
+                  </div>
+                )}
+                {favorecidoPix && (
+                  <div className="text-[9.5px] text-slate-600 mt-0.5">
+                    Favorecido: <strong>{favorecidoPix}</strong>
+                  </div>
+                )}
+              </div>
+            )}
 
-        <div className="mt-2.5 text-[10px] text-slate-600 italic bg-amber-50 border border-amber-200 rounded p-2 text-center">
-          📌 <strong>Importante:</strong> Após efetuar o pagamento, favor encaminhar o comprovante para o WhatsApp <strong>(14) 99880-9362 / (14) 99819-6873</strong> ou e-mail <strong>financeirousicorte@gmail.com</strong> para rápida conciliação e baixa no sistema.
+            {/* Bloco Dados Bancários */}
+            {hasBank && (
+              <div className="bg-white border border-slate-200 rounded p-2.5">
+                <div className="text-[10px] font-bold uppercase text-slate-600 mb-0.5">Dados Bancários / Transferência</div>
+                {dadosBancariosCustom ? (
+                  <div className="text-xs text-slate-900 font-semibold leading-relaxed">
+                    {dadosBancariosCustom}
+                  </div>
+                ) : (
+                  <div className="text-xs text-slate-900 space-y-0.5 leading-relaxed">
+                    {bancoNome && <div>Banco: <strong>{bancoNome}</strong></div>}
+                    <div className="flex flex-wrap gap-x-3">
+                      {bancoAgencia && <span>Agência: <strong>{bancoAgencia}</strong></span>}
+                      {bancoConta && <span>Conta: <strong>{bancoConta}</strong></span>}
+                    </div>
+                  </div>
+                )}
+                {bancoTitular && (
+                  <div className="text-[9.5px] text-slate-600 mt-1">
+                    Titular: <strong>{bancoTitular}</strong>
+                  </div>
+                )}
+                {bancoCnpj && (
+                  <div className="text-[9.5px] text-slate-500 mt-0.5">
+                    CNPJ: <strong>{bancoCnpj}</strong>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Texto de Observação / Instrução de Pagamento */}
+          {instrucoesPagamento && (
+            <div className="mt-2.5 text-[10px] text-slate-700 bg-amber-50 border border-amber-200 rounded p-2 leading-relaxed">
+              📌 <strong>Importante:</strong> {instrucoesPagamento}
+            </div>
+          )}
         </div>
-      </div>
+      )}
 
       {/* 6. OBSERVAÇÕES E RODAPÉ DO EXTRATO */}
       {observacoesExtrato && (
