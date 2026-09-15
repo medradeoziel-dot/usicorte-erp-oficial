@@ -17,7 +17,27 @@ export type StatusCotacao = 'rascunho' | 'pendente' | 'aprovado' | 'rejeitado';
 
 /* ---- helper: só aceita UUID de verdade ---- */
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const isUuid = (v?: string | null): v is string => !!v && UUID_RE.test(v.trim());
+export const isUuid = (v?: string | null): v is string => !!v && UUID_RE.test(v.trim());
+
+/**
+ * Resolve o UUID de uma cotação no Supabase caso seja passado o número de cotação
+ */
+export async function resolveCotacaoUuid(cotacaoIdOrNumero?: string): Promise<string | null> {
+  if (!cotacaoIdOrNumero) return null;
+  const clean = cotacaoIdOrNumero.trim();
+  if (isUuid(clean)) return clean;
+  try {
+    const { data } = await db
+      .from('cotacoes')
+      .select('id')
+      .eq('numero', clean)
+      .limit(1)
+      .maybeSingle();
+    return data?.id || null;
+  } catch {
+    return null;
+  }
+}
 
 export interface SupabaseCliente {
   id?: string;
@@ -65,6 +85,15 @@ export interface SupabaseCotacao {
   created_at?: string;
   updated_at?: string;
   cotacao_itens?: SupabaseCotacaoItem[];
+  // Pagamento & Faturamento:
+  status_pagamento?: string;
+  data_pagamento?: string | null;
+  forma_pagamento?: string;
+  valor_pago?: number;
+  conta_destino?: string;
+  observacoes_baixa?: string;
+  lancamento_financeiro_id?: string;
+  baixado_em?: string | null;
 }
 
 export interface SupabaseCotacaoItem {
@@ -941,62 +970,205 @@ export async function atualizarSituacaoCotacaoDb(
   const targetNumero = typeof cotacaoIdOrObj === 'object' ? cotacaoIdOrObj.numero : undefined;
 
   const situacaoUpper = (situacao || 'FATURADO').toUpperCase().trim();
-  const statusLower = situacaoUpper === 'FATURADO' ? 'faturado' : situacaoUpper.toLowerCase();
+  const isFaturado = situacaoUpper === 'FATURADO';
 
-  const payload: any = {
-    situacao: situacaoUpper,
-    status: statusLower,
+  return await atualizarStatusPagamentoCotacaoDb(
+    { id: targetId, numero: targetNumero },
+    {
+      status_pagamento: isFaturado ? 'PAGO' : 'Pendente',
+      situacao: situacaoUpper,
+      data_pagamento: isFaturado ? new Date().toISOString().split('T')[0] : null
+    }
+  );
+}
+
+/**
+ * 1. Atualização direta na Tabela 'cotacoes':
+ * Ao clicar em 'Dar Baixa nas Selecionadas', faz o UPDATE direto na tabela 'cotacoes' alterando as colunas:
+ * - status_pagamento = 'PAGO'
+ * - situacao = 'FATURADO'
+ * - data_pagamento = [Data Atual]
+ * Também atualiza forma_pagamento, valor_pago, conta_destino, observacoes_baixa e baixado_em.
+ */
+export async function atualizarStatusPagamentoCotacaoDb(
+  cotacaoIdOrObj: string | { id?: string; numero?: string },
+  dados?: {
+    status_pagamento?: string; // 'PAGO' | 'Pendente'
+    situacao?: string; // 'FATURADO' | 'APROVADO'
+    data_pagamento?: string | null; // YYYY-MM-DD
+    forma_pagamento?: string;
+    valor_pago?: number;
+    conta_destino?: string;
+    observacoes_baixa?: string;
+    lancamento_financeiro_id?: string;
+  }
+) {
+  let targetId = typeof cotacaoIdOrObj === 'string' ? cotacaoIdOrObj : cotacaoIdOrObj?.id;
+  const targetNumero = typeof cotacaoIdOrObj === 'object' ? cotacaoIdOrObj?.numero : undefined;
+
+  // Resolve UUID se targetId não for UUID válido
+  if (targetId && !isUuid(targetId)) {
+    const resolved = await resolveCotacaoUuid(targetId);
+    if (resolved) targetId = resolved;
+  } else if (!targetId && targetNumero) {
+    const resolved = await resolveCotacaoUuid(targetNumero);
+    if (resolved) targetId = resolved;
+  }
+
+  const statusPagamento = dados?.status_pagamento || 'PAGO';
+  const situacao = dados?.situacao || (statusPagamento === 'PAGO' ? 'FATURADO' : 'APROVADO');
+  const dataHoje = dados?.data_pagamento !== undefined 
+    ? dados.data_pagamento 
+    : (statusPagamento === 'PAGO' ? new Date().toISOString().split('T')[0] : null);
+
+  const payloadCompleto: any = {
+    status_pagamento: statusPagamento,
+    situacao: situacao,
+    data_pagamento: dataHoje,
     updated_at: new Date().toISOString()
   };
 
+  if (dados?.forma_pagamento) payloadCompleto.forma_pagamento = dados.forma_pagamento;
+  if (dados?.valor_pago !== undefined) payloadCompleto.valor_pago = dados.valor_pago;
+  if (dados?.conta_destino) payloadCompleto.conta_destino = dados.conta_destino;
+  if (dados?.observacoes_baixa !== undefined) payloadCompleto.observacoes_baixa = dados.observacoes_baixa;
+  if (dados?.lancamento_financeiro_id) payloadCompleto.lancamento_financeiro_id = dados.lancamento_financeiro_id;
+  if (statusPagamento === 'PAGO') {
+    payloadCompleto.baixado_em = new Date().toISOString();
+  } else {
+    payloadCompleto.baixado_em = null;
+  }
+
   let updateQuery;
   if (targetId && isUuid(targetId)) {
-    updateQuery = db.from('cotacoes').update(payload).eq('id', targetId);
-  } else if (targetId) {
-    updateQuery = db.from('cotacoes').update(payload).or(`id.eq.${targetId},numero.eq.${targetId}`);
+    updateQuery = db.from('cotacoes').update(payloadCompleto).eq('id', targetId);
   } else if (targetNumero) {
-    updateQuery = db.from('cotacoes').update(payload).eq('numero', targetNumero);
+    updateQuery = db.from('cotacoes').update(payloadCompleto).eq('numero', targetNumero);
   } else {
-    return { data: null, error: new Error('Sem identificador para atualizar cotação') };
+    return { data: null, error: new Error('Sem identificador válido para a cotação') };
   }
 
   let { data, error } = await updateQuery;
 
-  // Se der erro porque a coluna 'situacao' não existe na tabela cotacoes
-  if (error && (error.message?.toLowerCase().includes('situacao') || error.code === '42703')) {
-    const fallbackPayload = { status: statusLower, updated_at: new Date().toISOString() };
+  // Se a coluna 'situacao' não existir na tabela cotacoes (PGRST204 ou 42703), tenta sem ela
+  if (error && (error.message?.toLowerCase().includes('situacao') || error.code === '42703' || error.code === 'PGRST204')) {
+    const { situacao: _, ...payloadSemSituacao } = payloadCompleto;
     if (targetId && isUuid(targetId)) {
-      updateQuery = db.from('cotacoes').update(fallbackPayload).eq('id', targetId);
-    } else if (targetId) {
-      updateQuery = db.from('cotacoes').update(fallbackPayload).or(`id.eq.${targetId},numero.eq.${targetId}`);
+      updateQuery = db.from('cotacoes').update(payloadSemSituacao).eq('id', targetId);
     } else if (targetNumero) {
-      updateQuery = db.from('cotacoes').update(fallbackPayload).eq('numero', targetNumero);
+      updateQuery = db.from('cotacoes').update(payloadSemSituacao).eq('numero', targetNumero);
     }
     const res = await updateQuery;
-    error = res.error;
     data = res.data;
+    error = res.error;
   }
 
-  // Se der erro de check constraint no status (ex: constraint de enum aceitando apenas rascunho/pendente/aprovado/rejeitado)
-  if (error && (error.message?.includes('check') || error.code === '23514')) {
-    const fallbackPayload2: any = {
-      situacao: situacaoUpper,
-      status: 'aprovado',
-      updated_at: new Date().toISOString()
-    };
-    if (targetId && isUuid(targetId)) {
-      updateQuery = db.from('cotacoes').update(fallbackPayload2).eq('id', targetId);
-    } else if (targetId) {
-      updateQuery = db.from('cotacoes').update(fallbackPayload2).or(`id.eq.${targetId},numero.eq.${targetId}`);
-    } else if (targetNumero) {
-      updateQuery = db.from('cotacoes').update(fallbackPayload2).eq('numero', targetNumero);
+  // Sincroniza também no cache local 's_orcamentos' se presente
+  try {
+    const localStr = localStorage.getItem('s_orcamentos');
+    if (localStr) {
+      const orcs = JSON.parse(localStr);
+      let alterou = false;
+      const updated = orcs.map((o: any) => {
+        const match = (targetId && (o.id === targetId || o.quoteNumber === targetId)) ||
+                      (targetNumero && o.quoteNumber === targetNumero);
+        if (match) {
+          alterou = true;
+          return {
+            ...o,
+            paymentStatus: statusPagamento === 'PAGO' ? 'Pago' : 'Pendente',
+            paymentDate: dataHoje || undefined,
+            paymentMethod: dados?.forma_pagamento || o.paymentMethod,
+            status: statusPagamento === 'PAGO' ? 'Faturado' : (o.status === 'Faturado' ? 'Aprovado' : o.status)
+          };
+        }
+        return o;
+      });
+      if (alterou) {
+        localStorage.setItem('s_orcamentos', JSON.stringify(updated));
+      }
     }
-    const res2 = await updateQuery;
-    error = res2.error;
-    data = res2.data;
+  } catch {
+    // Silencioso em caso de localStorage indisponível
   }
 
   return { data, error };
+}
+
+/**
+ * 2. Evitar Duplicidades em 'contas_a_receber':
+ * Antes de inserir um pagamento em 'contas_a_receber', verifica se já existe
+ * um registro para aquele 'cotacao_id'.
+ * Se já existir, faz um UPDATE no registro existente em vez de criar um novo INSERT.
+ */
+export async function sincronizarPagamentoContaReceberDb(params: {
+  cotacaoId?: string;
+  cotacaoNumero?: string;
+  clienteNome?: string;
+  valor: number;
+  dataPagamento?: string | null;
+  status?: string; // 'Baixado' | 'Pendente'
+}) {
+  try {
+    let cotacaoUuid: string | null = null;
+    if (params.cotacaoId && isUuid(params.cotacaoId)) {
+      cotacaoUuid = params.cotacaoId;
+    } else {
+      cotacaoUuid = await resolveCotacaoUuid(params.cotacaoId || params.cotacaoNumero);
+    }
+
+    const dataHoje = params.dataPagamento || new Date().toISOString().split('T')[0];
+    const statusFinal = params.status || 'Baixado';
+
+    // 1. Verifica se já existe um registro para aquele 'cotacao_id'
+    let existingId: string | null = null;
+    if (cotacaoUuid && isUuid(cotacaoUuid)) {
+      const { data: found } = await db
+        .from('contas_a_receber')
+        .select('id, cotacao_id, numero_parcela, status')
+        .eq('cotacao_id', cotacaoUuid)
+        .limit(1)
+        .maybeSingle();
+
+      if (found?.id) {
+        existingId = found.id;
+      }
+    }
+
+    // 2. Se já existir, faz um UPDATE no registro existente em vez de criar um novo INSERT
+    if (existingId) {
+      const { data, error } = await db
+        .from('contas_a_receber')
+        .update({
+          status: statusFinal,
+          data_pagamento: statusFinal === 'Baixado' ? dataHoje : null,
+          cliente_nome: params.clienteNome || undefined,
+          valor_parcela: Number(params.valor) || undefined
+        })
+        .eq('id', existingId);
+
+      return { data, error, operacao: 'UPDATE' as const };
+    }
+
+    // 3. Se NÃO existir, faz o INSERT do pagamento
+    const { data, error } = await db
+      .from('contas_a_receber')
+      .insert([{
+        cotacao_id: cotacaoUuid && isUuid(cotacaoUuid) ? cotacaoUuid : null,
+        cliente_nome: params.clienteNome || 'Cliente Balcão',
+        numero_parcela: 1,
+        total_parcelas: 1,
+        valor_parcela: Number(params.valor) || 0,
+        data_vencimento: dataHoje,
+        status: statusFinal,
+        data_pagamento: statusFinal === 'Baixado' ? dataHoje : null
+      }]);
+
+    return { data, error, operacao: 'INSERT' as const };
+  } catch (err) {
+    console.warn('Erro ao sincronizar contas_a_receber sem duplicidade:', err);
+    return { data: null, error: err, operacao: 'ERRO' as const };
+  }
 }
 
 export async function updateItemCortadoDb(itemId: string | number, cortado: boolean) {

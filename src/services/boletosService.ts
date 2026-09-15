@@ -287,14 +287,40 @@ export async function saveBoletosParcelasDb(
           boleto.id = updData[0].id;
         }
       } else {
-        const { data: insData, error: insErr } = await db
-          .from('contas_a_receber')
-          .insert([payload])
-          .select();
-        if (!insErr && insData?.[0]?.id) {
-          boleto.id = insData[0].id;
-        } else if (insErr) {
-          console.warn('Aviso ao inserir parcela em contas_a_receber:', insErr);
+        // Antes de inserir um pagamento em 'contas_a_receber', verifique se já existe um registro para aquele 'cotacao_id'
+        let existingId: string | null = null;
+        if (boleto.cotacaoId && isUuid(boleto.cotacaoId)) {
+          const { data: existingList } = await db
+            .from('contas_a_receber')
+            .select('id, cotacao_id, numero_parcela')
+            .eq('cotacao_id', boleto.cotacaoId);
+
+          const found = existingList?.find((e: any) => Number(e.numero_parcela) === Number(boleto.numeroParcela)) || existingList?.[0];
+          if (found?.id) {
+            existingId = found.id;
+          }
+        }
+
+        if (existingId) {
+          // Se já existir, faça um UPDATE no registro existente em vez de criar um novo INSERT
+          const { data: updExisting, error: updExistingErr } = await db
+            .from('contas_a_receber')
+            .update(payload)
+            .eq('id', existingId)
+            .select();
+          if (!updExistingErr && updExisting?.[0]?.id) {
+            boleto.id = updExisting[0].id;
+          }
+        } else {
+          const { data: insData, error: insErr } = await db
+            .from('contas_a_receber')
+            .insert([payload])
+            .select();
+          if (!insErr && insData?.[0]?.id) {
+            boleto.id = insData[0].id;
+          } else if (insErr) {
+            console.warn('Aviso ao inserir parcela em contas_a_receber:', insErr);
+          }
         }
       }
     }

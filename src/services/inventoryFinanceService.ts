@@ -7,7 +7,14 @@ import {
   Quote, 
   OrdemServico 
 } from '../types';
-import { db, fetchCotacoesDb, SupabaseCotacao, atualizarSituacaoCotacaoDb } from '../lib/db';
+import { 
+  db, 
+  fetchCotacoesDb, 
+  SupabaseCotacao, 
+  atualizarSituacaoCotacaoDb,
+  atualizarStatusPagamentoCotacaoDb,
+  sincronizarPagamentoContaReceberDb
+} from '../lib/db';
 
 // Materiais Iniciais Padrão UsiCorte / Caldeiraria
 export const INITIAL_MATERIAIS: MaterialEstoque[] = [
@@ -1157,14 +1164,41 @@ export async function darBaixaMultiplasCotacoesDb(
       cachePagamentosMap[c.id] = registro;
     }
 
-    // 1. Atualização automática do campo 'situacao' da cotação para 'FATURADO' na tabela 'cotacoes' do Supabase
+    // 1. Atualização direta na Tabela 'cotacoes':
+    // Ao clicar em 'Dar Baixa nas Selecionadas', faça o UPDATE direto na tabela 'cotacoes' alterando:
+    // status_pagamento = 'PAGO', situacao = 'FATURADO', data_pagamento = [Data Atual]
     try {
-      await atualizarSituacaoCotacaoDb(
+      await atualizarStatusPagamentoCotacaoDb(
         { id: c.id, numero: c.numero },
-        'FATURADO'
+        {
+          status_pagamento: 'PAGO',
+          situacao: 'FATURADO',
+          data_pagamento: dataHoje,
+          forma_pagamento: dados.formaPagamento,
+          valor_pago: Number(c.valor) || 0,
+          conta_destino: dados.contaDestino || 'Conta Banco do Brasil - Principal',
+          observacoes_baixa: dados.observacoes || '',
+          lancamento_financeiro_id: novoLancamento.id
+        }
       );
     } catch (err) {
-      console.warn('Aviso ao atualizar situacao da cotação para FATURADO no Supabase:', err);
+      console.warn('Aviso ao atualizar tabela cotacoes para PAGO/FATURADO no Supabase:', err);
+    }
+
+    // 2. Evitar Duplicidades em 'contas_a_receber':
+    // Antes de inserir um pagamento em 'contas_a_receber', verifique se já existe um registro para aquele 'cotacao_id'.
+    // Se já existir, faça um UPDATE no registro existente em vez de criar um novo INSERT.
+    try {
+      await sincronizarPagamentoContaReceberDb({
+        cotacaoId: c.id,
+        cotacaoNumero: c.numero,
+        clienteNome: c.cliente,
+        valor: Number(c.valor) || 0,
+        dataPagamento: dataHoje,
+        status: 'Baixado'
+      });
+    } catch (errCr) {
+      console.warn('Aviso ao sincronizar contas_a_receber sem duplicidade:', errCr);
     }
   }
 
@@ -1172,6 +1206,7 @@ export async function darBaixaMultiplasCotacoesDb(
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('cotacoes_migradas_emergencia'));
     window.dispatchEvent(new CustomEvent('cotacao_status_alterado'));
+    window.dispatchEvent(new CustomEvent('cotacoes_atualizadas'));
   }
 
   return {

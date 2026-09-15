@@ -1,6 +1,12 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Client, Quote, FormaPagamentoFinanceiro, LancamentoFinanceiro } from '../types';
-import { fetchCotacoesDb, SupabaseCotacao, atualizarSituacaoCotacaoDb } from '../lib/db';
+import { 
+  fetchCotacoesDb, 
+  SupabaseCotacao, 
+  atualizarSituacaoCotacaoDb,
+  atualizarStatusPagamentoCotacaoDb,
+  sincronizarPagamentoContaReceberDb
+} from '../lib/db';
 import { formatCurrency, formatSafeDate } from '../utils/calculator';
 import { 
   getPagamentosCotacoesMap, 
@@ -135,8 +141,35 @@ export default function FechamentoCotacoesModule({
             itensResumo = q.observacoes || 'Itens industriais de corte';
           }
 
-          const isFaturado = String(q.situacao || '').toUpperCase() === 'FATURADO' || String(q.status || '').toLowerCase() === 'faturado';
-          const pag = pagamentosMap[numKey] || (q.id ? pagamentosMap[q.id.trim().toLowerCase()] : undefined) || (isFaturado ? { status: 'Pago' as const } : { status: 'Pendente' as const });
+          // 1. Leitura direta das colunas da tabela 'cotacoes' do Supabase
+          const statusPagamentoUpper = String((q as any).status_pagamento || '').trim().toUpperCase();
+          const isPagoNaTabela = statusPagamentoUpper === 'PAGO' ||
+                                 String(q.situacao || '').trim().toUpperCase() === 'FATURADO' ||
+                                 String(q.status || '').trim().toLowerCase() === 'faturado';
+
+          const dataPagamentoFromTable = (q as any).data_pagamento 
+            ? String((q as any).data_pagamento).split('T')[0] 
+            : undefined;
+
+          let pag: RegistroPagamentoCotacao;
+          if (isPagoNaTabela) {
+            pag = {
+              status: 'Pago',
+              dataPagamento: dataPagamentoFromTable || pagamentosMap[numKey]?.dataPagamento || (q.data ? String(q.data).split('T')[0] : new Date().toISOString().split('T')[0]),
+              formaPagamento: (q as any).forma_pagamento || pagamentosMap[numKey]?.formaPagamento || 'PIX',
+              observacoes: (q as any).observacoes_baixa || pagamentosMap[numKey]?.observacoes,
+              valorPago: Number((q as any).valor_pago) || Number(q.valor_total) || 0
+            };
+          } else if (statusPagamentoUpper === 'PENDENTE') {
+            pag = {
+              status: 'Pendente',
+              formaPagamento: (q as any).forma_pagamento || 'PIX'
+            };
+          } else {
+            pag = pagamentosMap[numKey] || (q.id ? pagamentosMap[q.id.trim().toLowerCase()] : undefined) || {
+              status: 'Pendente'
+            };
+          }
 
           resultList.push({
             id: q.id,
@@ -150,7 +183,7 @@ export default function FechamentoCotacoesModule({
             pesoKg: pesoTotal,
             qtdItens: qtdItens || 1,
             itensResumo: itensResumo.slice(0, 180),
-            statusCotacao: isFaturado ? 'faturado' : (q.status || 'aprovado'),
+            statusCotacao: isPagoNaTabela ? 'faturado' : (q.status || 'aprovado'),
             pagamento: pag
           });
         });
@@ -216,6 +249,20 @@ export default function FechamentoCotacoesModule({
 
   useEffect(() => {
     loadQuotesData();
+
+    const handleAtualizacao = () => {
+      loadQuotesData();
+    };
+
+    window.addEventListener('cotacoes_migradas_emergencia', handleAtualizacao);
+    window.addEventListener('cotacao_status_alterado', handleAtualizacao);
+    window.addEventListener('cotacoes_atualizadas', handleAtualizacao);
+
+    return () => {
+      window.removeEventListener('cotacoes_migradas_emergencia', handleAtualizacao);
+      window.removeEventListener('cotacao_status_alterado', handleAtualizacao);
+      window.removeEventListener('cotacoes_atualizadas', handleAtualizacao);
+    };
   }, []);
 
   // Limpeza de classes de impressão ao desmontar
@@ -433,15 +480,41 @@ export default function FechamentoCotacoesModule({
       });
 
       if (res.sucesso) {
+        // 3. Sincronização em Tempo Real:
+        // Atualiza imediatamente o estado de allQuotes para refletir status 'PAGO' sem necessidade de F5
+        setAllQuotes(prev => prev.map(item => {
+          const match = cotacoesParaBaixar.some(cb => 
+            (cb.id && item.id && cb.id === item.id) || 
+            (cb.numero && item.numero && cb.numero.trim().toLowerCase() === item.numero.trim().toLowerCase())
+          );
+          if (match) {
+            return {
+              ...item,
+              statusCotacao: 'faturado',
+              pagamento: {
+                status: 'Pago',
+                dataPagamento: dataPagamentoBaixa,
+                formaPagamento: formaPagamentoBaixa,
+                observacoes: observacoesBaixa,
+                valorPago: item.valor
+              }
+            };
+          }
+          return item;
+        }));
+
+        setSelectedKeys(new Set());
+
         setFeedbackMensagem({
           tipo: 'success',
           texto: res.mensagem,
           lancamento: res.lancamento || undefined
         });
 
-        // Recarrega os dados e mantém seleções
-        await loadQuotesData();
         setIsBaixaModalOpen(false);
+
+        // Recarrega os dados diretamente do Supabase
+        await loadQuotesData();
       } else {
         alert(res.mensagem || 'Não foi possível concluir a baixa.');
       }
@@ -463,17 +536,50 @@ export default function FechamentoCotacoesModule({
     salvarPagamentosCotacoesMap(map);
 
     try {
-      await atualizarSituacaoCotacaoDb({ id: q.id, numero: q.numero }, 'PENDENTE');
+      await atualizarStatusPagamentoCotacaoDb(
+        { id: q.id, numero: q.numero },
+        {
+          status_pagamento: 'Pendente',
+          situacao: 'APROVADO',
+          data_pagamento: null,
+          valor_pago: 0
+        }
+      );
+      await sincronizarPagamentoContaReceberDb({
+        cotacaoId: q.id,
+        cotacaoNumero: q.numero,
+        clienteNome: q.cliente,
+        valor: q.valor,
+        dataPagamento: null,
+        status: 'Pendente'
+      });
     } catch (e) {
       console.warn('Aviso ao reverter situação no Supabase:', e);
     }
 
+    // Atualiza imediatamente o estado de allQuotes
+    setAllQuotes(prev => prev.map(item => {
+      const match = (q.id && item.id === q.id) || 
+                    (q.numero && item.numero && q.numero.trim().toLowerCase() === item.numero.trim().toLowerCase());
+      if (match) {
+        return {
+          ...item,
+          statusCotacao: 'aprovado',
+          pagamento: {
+            status: 'Pendente'
+          }
+        };
+      }
+      return item;
+    }));
+
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('cotacoes_migradas_emergencia'));
       window.dispatchEvent(new CustomEvent('cotacao_status_alterado'));
+      window.dispatchEvent(new CustomEvent('cotacoes_atualizadas'));
     }
 
-    loadQuotesData();
+    await loadQuotesData();
   };
 
   return (
