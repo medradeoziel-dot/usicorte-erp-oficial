@@ -48,7 +48,11 @@ import {
 import {
   getQuoteSequentialConfig,
   incrementQuoteSequentialConfig,
-  setQuoteSequentialConfig
+  setQuoteSequentialConfig,
+  fetchEmitenteNumberingConfig,
+  resolveNextUniqueQuoteNumber,
+  updateEmitenteNextSequential,
+  incrementEmitenteQuoteSequential
 } from '../services/companyService';
 import QuotePrintModal from './QuotePrintModal';
 import QuoteHistoryModal from './QuoteHistoryModal';
@@ -89,6 +93,7 @@ import {
   Search,
   Check,
   Lock,
+  Loader2,
   X,
   Ruler,
   Upload,
@@ -131,7 +136,7 @@ export default function SalesModule({
     const prefix = config.prefix || `COT-${new Date().getFullYear()}-`;
     let targetSeq = typeof config.nextSequential === 'number' && !isNaN(config.nextSequential)
       ? config.nextSequential
-      : 20;
+      : 140;
 
     const listToScan = quotesList && Array.isArray(quotesList) ? quotesList : savedQuotes;
     const existingSet = new Set<string>();
@@ -148,8 +153,25 @@ export default function SalesModule({
     return `${prefix}${String(targetSeq).padStart(6, "0")}`;
   };
 
-  // Validação em tempo real se o número de cotação já existe no sistema
-  const checkQuoteNumberExists = (num: string, originalNum?: string | null): { exists: boolean; existingQuote?: Quote } => {
+  // Sugestão sequencial oficial da aba Emitente
+  const [autoSuggestedNumber, setAutoSuggestedNumber] = useState<string>('');
+  const [autoSuggestedSeq, setAutoSuggestedSeq] = useState<number>(140);
+  const [isCheckingDbDuplicate, setIsCheckingDbDuplicate] = useState<boolean>(false);
+  const [dbDuplicateResult, setDbDuplicateResult] = useState<{
+    checkedNum: string;
+    exists: boolean;
+    clientName?: string;
+  } | null>(null);
+
+  const [numeroCotacao, setNumeroCotacao] = useState<string>(() => {
+    if (quoteToEdit) {
+      return quoteToEdit.quoteNumber || quoteToEdit.id || generateNextQuoteNumber();
+    }
+    return generateNextQuoteNumber();
+  });
+
+  // Validação em tempo real se o número de cotação já existe no sistema (memória + Supabase)
+  const checkQuoteNumberExists = (num: string, originalNum?: string | null): { exists: boolean; existingQuote?: Quote; clientName?: string } => {
     const cleanNum = num.trim().toLowerCase();
     if (!cleanNum) return { exists: false };
 
@@ -158,24 +180,118 @@ export default function SalesModule({
       return { exists: false };
     }
 
-    // Busca nas cotações salvas em memória (Supabase)
+    // 1. Busca nas cotações salvas em memória
     const found = savedQuotes.find(
       q => (q.quoteNumber && q.quoteNumber.trim().toLowerCase() === cleanNum) ||
            (q.id && String(q.id).trim().toLowerCase() === cleanNum)
     );
+    if (found) {
+      return {
+        exists: true,
+        existingQuote: found,
+        clientName: found.clientName
+      };
+    }
+
+    // 2. Checagem do resultado da consulta do Supabase para números digitados manualmente
+    if (dbDuplicateResult && dbDuplicateResult.checkedNum.toLowerCase() === cleanNum) {
+      if (dbDuplicateResult.exists) {
+        return {
+          exists: true,
+          clientName: dbDuplicateResult.clientName
+        };
+      }
+    }
 
     return {
-      exists: !!found,
-      existingQuote: found
+      exists: false
     };
   };
 
-  const [numeroCotacao, setNumeroCotacao] = useState<string>(() => {
-    if (quoteToEdit) {
-      return quoteToEdit.quoteNumber || quoteToEdit.id || generateNextQuoteNumber();
+  // 1. Leitura da Numeração da Aba Emitente:
+  // Ao abrir a tela de Vendas para criar um 'Novo Orçamento', busca as configurações diretamente da tabela 'emitente' no Supabase
+  // e verifica se o número gerado já existe na tabela 'cotacoes' para sugerir o próximo sequencial livre
+  useEffect(() => {
+    if (!editingQuoteNumberRef.current && !editingQuoteIdRef.current && !editingOriginalQuoteNumber) {
+      resolveNextUniqueQuoteNumber(savedQuotes).then(res => {
+        if (res?.quoteNumber) {
+          setAutoSuggestedNumber(res.quoteNumber);
+          setAutoSuggestedSeq(res.sequential);
+          setNumeroCotacao(res.quoteNumber);
+        }
+      }).catch(err => {
+        console.warn('Aviso ao sincronizar numeração inicial do emitente:', err);
+      });
     }
-    return generateNextQuoteNumber();
-  });
+  }, []);
+
+  // 2. Validação contra Duplicidade no Supabase:
+  // Sempre que um número for digitado manualmente ou alterado, consulta diretamente a tabela 'cotacoes' com debounce
+  useEffect(() => {
+    const cleanNum = numeroCotacao.trim();
+    if (!cleanNum) {
+      setDbDuplicateResult(null);
+      setIsCheckingDbDuplicate(false);
+      return;
+    }
+
+    // Se estiver editando a cotação original e o número não mudou, está livre
+    if (editingOriginalQuoteNumber && cleanNum.toLowerCase() === editingOriginalQuoteNumber.trim().toLowerCase()) {
+      setDbDuplicateResult({ checkedNum: cleanNum, exists: false });
+      setIsCheckingDbDuplicate(false);
+      return;
+    }
+
+    // Checagem imediata nas cotações em memória
+    const localFound = savedQuotes.find(
+      q => (q.quoteNumber && q.quoteNumber.trim().toLowerCase() === cleanNum.toLowerCase()) ||
+           (q.id && String(q.id).trim().toLowerCase() === cleanNum.toLowerCase())
+    );
+    if (localFound) {
+      setDbDuplicateResult({
+        checkedNum: cleanNum,
+        exists: true,
+        clientName: localFound.clientName
+      });
+      setIsCheckingDbDuplicate(false);
+      return;
+    }
+
+    // Consulta assíncrona ao Supabase (tabela 'cotacoes')
+    setIsCheckingDbDuplicate(true);
+    const timer = setTimeout(async () => {
+      try {
+        const { data, error } = await db
+          .from('cotacoes')
+          .select('id, numero, cliente_nome')
+          .ilike('numero', cleanNum)
+          .limit(1)
+          .maybeSingle();
+
+        if (!error && data) {
+          // Se for o próprio registro que está sendo editado no banco
+          if (editingQuoteId && (data.id === editingQuoteId || String(data.id) === String(editingQuoteId))) {
+            setDbDuplicateResult({ checkedNum: cleanNum, exists: false });
+          } else {
+            setDbDuplicateResult({
+              checkedNum: cleanNum,
+              exists: true,
+              clientName: data.cliente_nome
+            });
+          }
+        } else {
+          setDbDuplicateResult({ checkedNum: cleanNum, exists: false });
+        }
+      } catch (err) {
+        console.warn('Aviso ao verificar duplicidade no Supabase:', err);
+        setDbDuplicateResult({ checkedNum: cleanNum, exists: false });
+      } finally {
+        setIsCheckingDbDuplicate(false);
+      }
+    }, 280);
+
+    return () => clearTimeout(timer);
+  }, [numeroCotacao, editingOriginalQuoteNumber, editingQuoteId, savedQuotes]);
   const [selectedClientId, setSelectedClientId] = useState<string>('');
   const [clientName, setClientName] = useState<string>('');
   const [clientDocument, setClientDocument] = useState<string>('');
@@ -408,16 +524,16 @@ export default function SalesModule({
           console.warn('Aviso ao sincronizar emergência em SalesModule:', migErr);
         }
 
-        // Preserva estritamente o número da cotação se estiver em edição
-        setNumeroCotacao(prevNum => {
-          if (editingQuoteNumberRef.current || editingQuoteIdRef.current || editingOriginalQuoteNumber) {
-            return editingQuoteNumberRef.current || prevNum;
-          }
-          if (!prevNum) {
-            return generateNextQuoteNumber(mappedDbQuotes);
-          }
-          return prevNum;
-        });
+        // 1 & 2. Se NÃO estiver em modo edição, busca a numeração viva da tabela 'emitente' e protege contra duplicidade na tabela 'cotacoes'
+        if (!editingQuoteNumberRef.current && !editingQuoteIdRef.current && !editingOriginalQuoteNumber) {
+          resolveNextUniqueQuoteNumber(mappedDbQuotes).then(res => {
+            if (res?.quoteNumber) {
+              setAutoSuggestedNumber(res.quoteNumber);
+              setAutoSuggestedSeq(res.sequential);
+              setNumeroCotacao(prev => (!prev || prev === res.quoteNumber || prev === autoSuggestedNumber ? res.quoteNumber : prev));
+            }
+          }).catch(() => {});
+        }
       } catch (err) {
         console.warn('Erro ao consultar cotações do Supabase:', err);
       }
@@ -438,7 +554,13 @@ export default function SalesModule({
   useEffect(() => {
     const handleCompanyUpdate = () => {
       if (!editingQuoteNumberRef.current && !editingQuoteIdRef.current && !editingOriginalQuoteNumber) {
-        setNumeroCotacao(generateNextQuoteNumber(savedQuotes));
+        resolveNextUniqueQuoteNumber(savedQuotes).then(res => {
+          if (res?.quoteNumber) {
+            setAutoSuggestedNumber(res.quoteNumber);
+            setAutoSuggestedSeq(res.sequential);
+            setNumeroCotacao(prev => (!prev || prev === res.quoteNumber || prev === autoSuggestedNumber ? res.quoteNumber : prev));
+          }
+        }).catch(() => {});
       }
     };
     window.addEventListener('company-data-updated', handleCompanyUpdate);
@@ -1495,7 +1617,7 @@ export default function SalesModule({
     }
 
     const isEditing = !!(editingQuoteId || editingOriginalQuoteNumber);
-    const cleanNum = isEditing && editingOriginalQuoteNumber ? editingOriginalQuoteNumber.trim() : numeroCotacao.trim();
+    const cleanNum = numeroCotacao.trim();
     if (!cleanNum) {
       setErrorMessage('Informe um número válido para a cotação.');
       setTimeout(() => setErrorMessage(null), 3500);
@@ -1505,9 +1627,9 @@ export default function SalesModule({
     // VALIDAÇÃO DE DUPLICIDADE: Não permitir gravar se já existir aquela cotação (exceto quando em modo edição da mesma)
     const duplicateCheck = checkQuoteNumberExists(cleanNum, editingOriginalQuoteNumber);
     if (duplicateCheck.exists) {
-      const clientMsg = duplicateCheck.existingQuote?.clientName ? ` (${duplicateCheck.existingQuote.clientName})` : '';
+      const clientMsg = duplicateCheck.clientName ? ` (${duplicateCheck.clientName})` : '';
       setErrorMessage(
-        `⚠️ A cotação "${cleanNum}" já existe no sistema${clientMsg}! Não é permitido salvar números duplicados. Inicie um "Novo Orçamento".`
+        `⚠️ A cotação "${cleanNum}" já existe no sistema${clientMsg}! Não é permitido salvar números duplicados. Escolha outro número.`
       );
       setTimeout(() => setErrorMessage(null), 6000);
       return;
@@ -1561,23 +1683,26 @@ export default function SalesModule({
         ...currentQuoteObject,
         id: savedQuotes[existsIndex].id || targetId
       };
-    } else if (isEditing) {
-      updatedQuotes = [currentQuoteObject, ...savedQuotes];
     } else {
       updatedQuotes = [currentQuoteObject, ...savedQuotes];
-      // Incrementa automaticamente o próximo número sequencial nas configurações da empresa apenas para cotação nova
-      const match = cleanNum.match(/(\d+)$/);
-      if (match) {
-        const usedNum = parseInt(match[1], 10);
-        const cfg = getQuoteSequentialConfig();
-        if (usedNum >= cfg.nextSequential) {
-          setQuoteSequentialConfig(usedNum + 1);
-        } else {
-          incrementQuoteSequentialConfig();
-        }
-      } else {
-        incrementQuoteSequentialConfig();
-      }
+    }
+
+    // 3. Preservação da Sequência Automática:
+    // Ao salvar um orçamento com número digitado manualmente, mantenha a sequência do 'proximo_numero_sequencial' da aba Emitente intacta.
+    // Somente avança a numeração do emitente (+1) se o usuário utilizou a numeração sequencial automática sugerida (não editada).
+    const isAutoSequential = !isEditing && autoSuggestedNumber && cleanNum.toLowerCase() === autoSuggestedNumber.trim().toLowerCase();
+
+    if (isAutoSequential) {
+      incrementEmitenteQuoteSequential(autoSuggestedSeq).catch(err => {
+        console.warn('Erro ao atualizar proximo_numero_sequencial no Supabase:', err);
+      });
+      const nextSeq = autoSuggestedSeq + 1;
+      setAutoSuggestedSeq(nextSeq);
+      const prefix = cleanNum.replace(/\d+$/, '');
+      const nextNumStr = `${prefix}${String(nextSeq).padStart(6, '0')}`;
+      setAutoSuggestedNumber(nextNumStr);
+    } else {
+      console.log(`[Cotação] Número manual "${cleanNum}" gravado. Sequência do emitente preservada intacta.`);
     }
 
     setSavedQuotes(updatedQuotes);
@@ -1631,7 +1756,7 @@ export default function SalesModule({
     }
 
     const isEditing = !!(editingQuoteId || editingOriginalQuoteNumber);
-    const cleanNum = isEditing && editingOriginalQuoteNumber ? editingOriginalQuoteNumber.trim() : numeroCotacao.trim();
+    const cleanNum = numeroCotacao.trim();
     if (!cleanNum) {
       setErrorMessage('Informe um número válido para a cotação.');
       setTimeout(() => setErrorMessage(null), 3500);
@@ -1641,7 +1766,7 @@ export default function SalesModule({
     // VALIDAÇÃO DE DUPLICIDADE: Não permitir gravar se já existir aquela cotação
     const duplicateCheck = checkQuoteNumberExists(cleanNum, editingOriginalQuoteNumber);
     if (duplicateCheck.exists) {
-      const clientMsg = duplicateCheck.existingQuote?.clientName ? ` (${duplicateCheck.existingQuote.clientName})` : '';
+      const clientMsg = duplicateCheck.clientName ? ` (${duplicateCheck.clientName})` : '';
       setErrorMessage(
         `⚠️ A cotação "${cleanNum}" já existe no sistema${clientMsg}! Não é permitido aprovar/gravar números duplicados.`
       );
@@ -1697,22 +1822,26 @@ export default function SalesModule({
         ...currentQuoteObject,
         id: savedQuotes[existsIndex].id || targetId
       };
-    } else if (isEditing) {
-      updatedQuotes = [currentQuoteObject, ...savedQuotes];
     } else {
       updatedQuotes = [currentQuoteObject, ...savedQuotes];
-      const match = cleanNum.match(/(\d+)$/);
-      if (match) {
-        const usedNum = parseInt(match[1], 10);
-        const cfg = getQuoteSequentialConfig();
-        if (usedNum >= cfg.nextSequential) {
-          setQuoteSequentialConfig(usedNum + 1);
-        } else {
-          incrementQuoteSequentialConfig();
-        }
-      } else {
-        incrementQuoteSequentialConfig();
-      }
+    }
+
+    // 3. Preservação da Sequência Automática:
+    // Ao salvar um orçamento com número digitado manualmente, mantenha a sequência do 'proximo_numero_sequencial' da aba Emitente intacta.
+    // Somente avança a numeração do emitente (+1) se o usuário utilizou a numeração sequencial automática sugerida (não editada).
+    const isAutoSequential = !isEditing && autoSuggestedNumber && cleanNum.toLowerCase() === autoSuggestedNumber.trim().toLowerCase();
+
+    if (isAutoSequential) {
+      incrementEmitenteQuoteSequential(autoSuggestedSeq).catch(err => {
+        console.warn('Erro ao atualizar proximo_numero_sequencial no Supabase:', err);
+      });
+      const nextSeq = autoSuggestedSeq + 1;
+      setAutoSuggestedSeq(nextSeq);
+      const prefix = cleanNum.replace(/\d+$/, '');
+      const nextNumStr = `${prefix}${String(nextSeq).padStart(6, '0')}`;
+      setAutoSuggestedNumber(nextNumStr);
+    } else {
+      console.log(`[Cotação] Número manual "${cleanNum}" aprovado. Sequência do emitente preservada intacta.`);
     }
 
     setSavedQuotes(updatedQuotes);
@@ -1736,16 +1865,17 @@ export default function SalesModule({
     setTimeout(() => setSuccessMessage(null), 5000);
   };
 
-  // New clean quote - SOMENTE aqui é gerado novo número sequencial
-  const handleNewQuote = () => {
+  // New clean quote - busca as configurações de numeração diretamente da tabela 'emitente' no Supabase
+  const handleNewQuote = async () => {
     setEditingQuoteId(null);
     setEditingOriginalQuoteNumber(null);
     setEditingQuoteCreatedAt(null);
     editingQuoteIdRef.current = null;
     editingQuoteNumberRef.current = null;
 
-    const newId = generateNextQuoteNumber(savedQuotes);
-    setNumeroCotacao(newId);
+    // Número provisório rápido local enquanto busca o número oficial no Supabase
+    const quickId = generateNextQuoteNumber(savedQuotes);
+    setNumeroCotacao(quickId);
     setSelectedClientId('');
     setClientName('');
     setClientDocument('');
@@ -1763,8 +1893,20 @@ export default function SalesModule({
     setShippingAmount(0);
     setObservations('Preços com impostos inclusos. Material sujeito a conferência no ato do recebimento.');
     resetItemForm();
-    setSuccessMessage(`Novo orçamento iniciado! Número gerado: ${newId}`);
-    setTimeout(() => setSuccessMessage(null), 2500);
+
+    // 1 & 2: Busca configurações na tabela 'emitente' e protege contra duplicidade na tabela 'cotacoes'
+    try {
+      const res = await resolveNextUniqueQuoteNumber(savedQuotes);
+      const targetNum = res.quoteNumber;
+      setAutoSuggestedNumber(targetNum);
+      setAutoSuggestedSeq(res.sequential);
+      setNumeroCotacao(targetNum);
+      setSuccessMessage(`Novo orçamento iniciado! Sugestão sequencial: ${targetNum}`);
+      setTimeout(() => setSuccessMessage(null), 2500);
+    } catch (err) {
+      setSuccessMessage(`Novo orçamento iniciado! Número gerado: ${quickId}`);
+      setTimeout(() => setSuccessMessage(null), 2500);
+    }
   };
 
   // Load a quote from history modal / edit action - MANTÉM FIXO o número e ID original
@@ -1969,34 +2111,42 @@ export default function SalesModule({
 
           <div className="flex items-center gap-3">
             {(() => {
+              const cleanNum = numeroCotacao.trim();
               const duplicateStatus = checkQuoteNumberExists(numeroCotacao, editingOriginalQuoteNumber);
               const isDuplicate = duplicateStatus.exists;
               const isEditing = !!(editingQuoteId || editingOriginalQuoteNumber);
+              const isCustomNumber = !!(autoSuggestedNumber && cleanNum && cleanNum.toLowerCase() !== autoSuggestedNumber.trim().toLowerCase());
 
               return (
-                <div className={`px-3 py-2 border rounded-xl min-w-[240px] transition-all ${
+                <div className={`px-3 py-2 border rounded-xl min-w-[260px] transition-all ${
                   isDuplicate 
                     ? 'bg-rose-50 border-rose-300 ring-2 ring-rose-500/20' 
-                    : isEditing
-                    ? 'bg-amber-50/70 border-amber-300'
+                    : isCheckingDbDuplicate
+                    ? 'bg-indigo-50/50 border-indigo-200'
+                    : isCustomNumber
+                    ? 'bg-amber-50/50 border-amber-200 focus-within:border-amber-500 focus-within:bg-white'
                     : 'bg-slate-50 border-slate-200 focus-within:border-indigo-500 focus-within:bg-white'
                 }`}>
                   <div className="flex items-center justify-between gap-1 mb-1">
-                    <label className="text-[10px] text-slate-500 font-bold block uppercase tracking-wider">
-                      {isEditing ? 'Cotação Nº (Preservado)' : 'Cotação Nº'}
+                    <label htmlFor="quote-number-input" className="text-[10px] text-slate-500 font-bold block uppercase tracking-wider">
+                      Cotação Nº {isCustomNumber && <span className="text-amber-600 font-normal lowercase">(manual)</span>}
                     </label>
                     <div className="flex items-center gap-1">
-                      {isDuplicate ? (
-                        <span className="text-[9px] font-black text-rose-700 bg-rose-100 border border-rose-300 px-1.5 py-0.5 rounded-md flex items-center gap-0.5 animate-pulse" title={`Cotação já cadastrada para: ${duplicateStatus.existingQuote?.clientName || 'Cliente'}`}>
+                      {isCheckingDbDuplicate ? (
+                        <span className="text-[9px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded-md flex items-center gap-1">
+                          <Loader2 className="w-2.5 h-2.5 animate-spin text-indigo-600" /> Verificando...
+                        </span>
+                      ) : isDuplicate ? (
+                        <span className="text-[9px] font-black text-rose-700 bg-rose-100 border border-rose-300 px-1.5 py-0.5 rounded-md flex items-center gap-0.5 animate-pulse" title={`Cotação já cadastrada para: ${duplicateStatus.clientName || 'Outro cliente'}`}>
                           <AlertCircle className="w-2.5 h-2.5" /> Já Existe!
                         </span>
-                      ) : isEditing ? (
-                        <span className="text-[9px] font-bold text-amber-900 bg-amber-100 border border-amber-300 px-1.5 py-0.5 rounded-md flex items-center gap-1">
-                          <Lock className="w-2.5 h-2.5 text-amber-700" /> Em Edição
+                      ) : cleanNum ? (
+                        <span className="text-[9px] font-bold text-emerald-700 bg-emerald-100 border border-emerald-300 px-1.5 py-0.5 rounded-md flex items-center gap-0.5" title="Número livre e pronto para salvar">
+                          <Check className="w-2.5 h-2.5" /> Disponível
                         </span>
                       ) : (
-                        <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-md flex items-center gap-0.5" title="Número gerado para Novo Orçamento">
-                          <Check className="w-2.5 h-2.5" /> Novo
+                        <span className="text-[9px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded-md">
+                          Vazio
                         </span>
                       )}
                     </div>
@@ -2007,43 +2157,51 @@ export default function SalesModule({
                       id="quote-number-input"
                       type="text"
                       value={numeroCotacao}
-                      readOnly={isEditing}
-                      onChange={(e) => {
-                        if (!isEditing) {
-                          setNumeroCotacao(e.target.value);
-                        }
-                      }}
-                      placeholder="COT-2026-000040"
-                      title={isEditing ? "Número da cotação original preservado durante a edição." : "Número da Cotação gerado para novo orçamento."}
-                      className={`w-full bg-transparent text-xs font-mono font-black outline-none ${
+                      onChange={(e) => setNumeroCotacao(e.target.value)}
+                      placeholder="Ex: COT-2026-000140 ou 5000"
+                      title="Número da cotação editável livremente. Você pode apagar e digitar qualquer número específico ou aleatório."
+                      className={`w-full bg-transparent text-xs font-mono font-black outline-none transition-colors ${
                         isDuplicate 
                           ? 'text-rose-700 focus:text-rose-950' 
-                          : isEditing 
-                          ? 'text-amber-950 cursor-not-allowed select-all' 
+                          : isCustomNumber
+                          ? 'text-amber-900 focus:text-amber-950'
                           : 'text-indigo-700 focus:text-indigo-950'
                       }`}
                     />
-                    {isEditing && (
-                      <span title="Número bloqueado para preservar a integridade do histórico" className="text-amber-600">
-                        <Lock className="w-3 h-3" />
-                      </span>
-                    )}
                   </div>
 
-                  {isDuplicate && (
-                    <div className="mt-1 pt-1 border-t border-rose-200 text-[10px] text-rose-700 font-medium flex items-center justify-between">
-                      <span className="truncate max-w-[150px]" title={duplicateStatus.existingQuote?.clientName}>
-                        Cliente: {duplicateStatus.existingQuote?.clientName || 'Existente'}
+                  {/* Informações contextuais e botões rápidos */}
+                  {isDuplicate ? (
+                    <div className="mt-1.5 pt-1 border-t border-rose-200 text-[10px] text-rose-700 font-medium flex items-center justify-between">
+                      <span className="truncate max-w-[140px]" title={duplicateStatus.clientName}>
+                        {duplicateStatus.clientName ? `Cliente: ${duplicateStatus.clientName}` : 'Já cadastrado no banco'}
+                      </span>
+                      {autoSuggestedNumber && autoSuggestedNumber !== numeroCotacao.trim() && (
+                        <button
+                          type="button"
+                          onClick={() => setNumeroCotacao(autoSuggestedNumber)}
+                          className="text-indigo-700 font-black underline hover:text-indigo-950 cursor-pointer ml-1 text-[10px]"
+                          title="Restaurar sequencial automático do emitente"
+                        >
+                          Usar {autoSuggestedNumber}
+                        </button>
+                      )}
+                    </div>
+                  ) : isCustomNumber && autoSuggestedNumber ? (
+                    <div className="mt-1 pt-0.5 border-t border-amber-200/60 text-[9px] text-amber-700 font-medium flex items-center justify-between">
+                      <span className="truncate" title="A numeração sequencial do emitente será preservada intacta ao salvar">
+                        Sequência original preservada
                       </span>
                       <button
                         type="button"
-                        onClick={handleNewQuote}
-                        className="text-rose-900 font-black underline hover:text-rose-950 cursor-pointer ml-1 text-[10px]"
+                        onClick={() => setNumeroCotacao(autoSuggestedNumber)}
+                        className="text-amber-900 font-bold underline hover:text-amber-950 cursor-pointer ml-1 text-[9px]"
+                        title={`Voltar para o sequencial padrão sugerido (${autoSuggestedNumber})`}
                       >
-                        Novo Orçamento
+                        Restaurar padrão
                       </button>
                     </div>
-                  )}
+                  ) : null}
                 </div>
               );
             })()}

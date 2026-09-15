@@ -36,9 +36,10 @@ export const DEFAULT_COMPANY_DATA: CompanyFiscalData = {
   legalRepresentativeDoc: '092.345.510/0001-94',
 
   // 5. Numeração Sequencial de Cotações / Pedidos
-  nextQuoteSequential: 20,
+  nextQuoteSequential: 140,
+  proximo_numero_sequencial: 140,
   quotePrefix: 'COT-2026-',
-  proximo_numero_cotacao: 20,
+  proximo_numero_cotacao: 140,
   prefixo_cotacao: 'COT-2026-',
 
   // 6. Informações para Pagamento & Chave PIX (Dinâmico)
@@ -118,12 +119,21 @@ export function mapSupabaseToCompany(row: any): CompanyFiscalData {
     legalRepresentativeDoc: row.documento_responsavel || row.legal_representative_doc || row.legalRepresentativeDoc || DEFAULT_COMPANY_DATA.legalRepresentativeDoc,
 
     // 5. Numeração Sequencial
-    nextQuoteSequential: typeof row.nextQuoteSequential === 'number' && !isNaN(row.nextQuoteSequential)
-      ? row.nextQuoteSequential
-      : (typeof row.proximo_numero_cotacao === 'number' && !isNaN(row.proximo_numero_cotacao)
-        ? row.proximo_numero_cotacao
-        : (parseInt(row.proximo_numero_cotacao || row.nextQuoteSequential, 10) || 20)),
-    quotePrefix: row.quotePrefix || row.prefixo_cotacao || DEFAULT_COMPANY_DATA.quotePrefix,
+    nextQuoteSequential: typeof row.proximo_numero_sequencial === 'number' && !isNaN(row.proximo_numero_sequencial)
+      ? row.proximo_numero_sequencial
+      : (typeof row.nextQuoteSequential === 'number' && !isNaN(row.nextQuoteSequential)
+        ? row.nextQuoteSequential
+        : (typeof row.proximo_numero_cotacao === 'number' && !isNaN(row.proximo_numero_cotacao)
+          ? row.proximo_numero_cotacao
+          : (parseInt(row.proximo_numero_sequencial || row.proximo_numero_cotacao || row.nextQuoteSequential, 10) || 140))),
+    proximo_numero_sequencial: typeof row.proximo_numero_sequencial === 'number' && !isNaN(row.proximo_numero_sequencial)
+      ? row.proximo_numero_sequencial
+      : (typeof row.nextQuoteSequential === 'number' && !isNaN(row.nextQuoteSequential)
+        ? row.nextQuoteSequential
+        : (typeof row.proximo_numero_cotacao === 'number' && !isNaN(row.proximo_numero_cotacao)
+          ? row.proximo_numero_cotacao
+          : (parseInt(row.proximo_numero_sequencial || row.proximo_numero_cotacao || row.nextQuoteSequential, 10) || 140))),
+    quotePrefix: row.prefixo_cotacao || row.quotePrefix || DEFAULT_COMPANY_DATA.quotePrefix,
 
     // 6. Dados Bancários & PIX
     chavePix: row.chave_pix !== undefined && row.chave_pix !== null ? row.chave_pix : (row.chavePix ?? DEFAULT_COMPANY_DATA.chavePix),
@@ -156,11 +166,13 @@ export function mapSupabaseToCompany(row: any): CompanyFiscalData {
     logo_url: row.logo_url || '',
     nome_responsavel: row.nome_responsavel || DEFAULT_COMPANY_DATA.legalRepresentativeName,
     documento_responsavel: row.documento_responsavel || DEFAULT_COMPANY_DATA.legalRepresentativeDoc,
-    proximo_numero_cotacao: typeof row.proximo_numero_cotacao === 'number' && !isNaN(row.proximo_numero_cotacao)
-      ? row.proximo_numero_cotacao
-      : (typeof row.nextQuoteSequential === 'number' && !isNaN(row.nextQuoteSequential)
-        ? row.nextQuoteSequential
-        : (parseInt(row.proximo_numero_cotacao || row.nextQuoteSequential, 10) || 20)),
+    proximo_numero_cotacao: typeof row.proximo_numero_sequencial === 'number' && !isNaN(row.proximo_numero_sequencial)
+      ? row.proximo_numero_sequencial
+      : (typeof row.proximo_numero_cotacao === 'number' && !isNaN(row.proximo_numero_cotacao)
+        ? row.proximo_numero_cotacao
+        : (typeof row.nextQuoteSequential === 'number' && !isNaN(row.nextQuoteSequential)
+          ? row.nextQuoteSequential
+          : (parseInt(row.proximo_numero_sequencial || row.proximo_numero_cotacao || row.nextQuoteSequential, 10) || 140))),
     prefixo_cotacao: row.prefixo_cotacao || row.quotePrefix || DEFAULT_COMPANY_DATA.quotePrefix,
     chave_pix: row.chave_pix !== undefined && row.chave_pix !== null ? row.chave_pix : (row.chavePix ?? DEFAULT_COMPANY_DATA.chavePix),
     tipo_chave_pix: row.tipo_chave_pix !== undefined && row.tipo_chave_pix !== null ? row.tipo_chave_pix : (row.tipoChavePix ?? DEFAULT_COMPANY_DATA.tipoChavePix),
@@ -176,6 +188,28 @@ export function mapSupabaseToCompany(row: any): CompanyFiscalData {
 }
 
 export function mapCompanyToSupabase(data: CompanyFiscalData): Record<string, any> {
+  const street = data.street || data.endereco || '';
+  const num = data.number || data.numero || '';
+  const neighborhood = data.neighborhood || data.bairro || '';
+  
+  let fullEndereco = street;
+  if (num && !fullEndereco.includes(num)) {
+    fullEndereco += `, ${num}`;
+  }
+  if (neighborhood && !fullEndereco.includes(neighborhood)) {
+    fullEndereco += ` - ${neighborhood}`;
+  }
+
+  const seq = typeof data.proximo_numero_sequencial === 'number' && !isNaN(data.proximo_numero_sequencial)
+    ? data.proximo_numero_sequencial
+    : (typeof data.nextQuoteSequential === 'number' && !isNaN(data.nextQuoteSequential)
+      ? data.nextQuoteSequential
+      : (typeof data.proximo_numero_cotacao === 'number' && !isNaN(data.proximo_numero_cotacao)
+        ? data.proximo_numero_cotacao
+        : (parseInt(String(data.proximo_numero_sequencial || data.nextQuoteSequential || data.proximo_numero_cotacao || 140), 10) || 140)));
+
+  const prefix = data.prefixo_cotacao || data.quotePrefix || 'COT-2026-';
+
   return {
     razao_social: data.corporateName || data.razao_social || '',
     nome_fantasia: data.tradeName || data.nome_fantasia || '',
@@ -183,10 +217,12 @@ export function mapCompanyToSupabase(data: CompanyFiscalData): Record<string, an
     ie: data.ie || data.inscricao_estadual || '',
     telefone: data.phone || data.telefone || '',
     email: data.email || '',
-    endereco: `${data.street || data.endereco || ''}${data.number ? `, ${data.number}` : ''}${data.neighborhood ? ` - ${data.neighborhood}` : ''}`,
+    endereco: fullEndereco,
     cidade: data.city || data.cidade || '',
     estado: (data.state || data.uf || 'SP').toUpperCase(),
     cep: data.cep || '',
+    proximo_numero_sequencial: seq,
+    prefixo_cotacao: prefix,
     chave_pix: data.chavePix !== undefined ? data.chavePix : (data.chave_pix || ''),
     tipo_chave_pix: data.tipoChavePix !== undefined ? data.tipoChavePix : (data.tipo_chave_pix || ''),
     favorecido_pix: data.favorecidoPix !== undefined ? data.favorecidoPix : (data.favorecido_pix || ''),
@@ -362,33 +398,253 @@ export async function saveCompanyData(data: CompanyFiscalData): Promise<{ succes
 }
 
 /**
- * Obtém a configuração de numeração sequencial de cotações (próximo número e prefixo)
+ * 1. Leitura da Numeração da Aba Emitente:
+ * Busca as configurações de numeração diretamente da tabela 'emitente' no Supabase:
+ * - 'proximo_numero_sequencial' (ex: 140)
+ * - 'prefixo_cotacao' (ex: COT-2026-)
  */
-export function getQuoteSequentialConfig(): { nextSequential: number; prefix: string } {
-  const comp = getLocalCompanyData();
-  const nextSequential = typeof comp.nextQuoteSequential === 'number' && !isNaN(comp.nextQuoteSequential)
-    ? comp.nextQuoteSequential
-    : (typeof comp.proximo_numero_cotacao === 'number' && !isNaN(comp.proximo_numero_cotacao)
-      ? comp.proximo_numero_cotacao
-      : 20);
-  const prefix = comp.quotePrefix || comp.prefixo_cotacao || `COT-${new Date().getFullYear()}-`;
+export async function fetchEmitenteNumberingConfig(): Promise<{ nextSequential: number; prefix: string }> {
+  try {
+    const { data, error } = await db
+      .from('emitente')
+      .select('proximo_numero_sequencial, prefixo_cotacao')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (!error && data) {
+      const nextSequential = typeof data.proximo_numero_sequencial === 'number' && !isNaN(data.proximo_numero_sequencial)
+        ? data.proximo_numero_sequencial
+        : (parseInt(data.proximo_numero_sequencial, 10) || 140);
+      const prefix = data.prefixo_cotacao || 'COT-2026-';
+
+      // Atualiza cache local instantâneo
+      const local = getLocalCompanyData();
+      local.proximo_numero_sequencial = nextSequential;
+      local.nextQuoteSequential = nextSequential;
+      local.proximo_numero_cotacao = nextSequential;
+      local.prefixo_cotacao = prefix;
+      local.quotePrefix = prefix;
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(local));
+      } catch {}
+
+      return { nextSequential, prefix };
+    }
+  } catch (err) {
+    console.warn('Aviso ao buscar configurações de numeração da tabela emitente:', err);
+  }
+
+  // Fallback para dados locais
+  const local = getLocalCompanyData();
+  const nextSequential = typeof local.proximo_numero_sequencial === 'number' && !isNaN(local.proximo_numero_sequencial)
+    ? local.proximo_numero_sequencial
+    : (typeof local.nextQuoteSequential === 'number' && !isNaN(local.nextQuoteSequential)
+      ? local.nextQuoteSequential
+      : (typeof local.proximo_numero_cotacao === 'number' && !isNaN(local.proximo_numero_cotacao)
+        ? local.proximo_numero_cotacao
+        : 140));
+  const prefix = local.prefixo_cotacao || local.quotePrefix || 'COT-2026-';
   return { nextSequential, prefix };
 }
 
 /**
- * Incrementa o número sequencial de cotação em +1 nas configurações e persiste no LocalStorage/Supabase
+ * 2. Proteção contra Duplicidade & Resolução de Número Único:
+ * - Busca as configurações na tabela 'emitente'
+ * - Formata combinando o prefixo com o sequencial preenchido com zeros (ex: 140 vira COT-2026-000140)
+ * - Verifica na tabela 'cotacoes' se o número gerado já existe
+ * - Se já existir, busca o maior número sequencial cadastrado no banco, soma +1 e usa esse novo número
  */
-export function incrementQuoteSequentialConfig(): number {
+export async function resolveNextUniqueQuoteNumber(
+  existingLocalQuotes?: { quoteNumber?: string; numero?: string; id?: string }[]
+): Promise<{ quoteNumber: string; sequential: number; prefix: string; wasAdjustedDueToDuplicate: boolean }> {
+  // 1. Busca configurações da tabela emitente
+  const config = await fetchEmitenteNumberingConfig();
+  const prefix = config.prefix || 'COT-2026-';
+  const targetSeq = config.nextSequential || 140;
+
+  // 2. Coleta todos os números existentes em 'cotacoes' no Supabase
+  const existingSet = new Set<string>();
+  const allDbRows: { numero?: string }[] = [];
+
+  try {
+    const { data: cotacoesData } = await db.from('cotacoes').select('numero');
+    if (cotacoesData && Array.isArray(cotacoesData)) {
+      cotacoesData.forEach(r => {
+        allDbRows.push(r);
+        const s = (r.numero || '').trim().toLowerCase();
+        if (s) existingSet.add(s);
+      });
+    }
+  } catch (e) {
+    console.warn('Aviso ao consultar números na tabela cotacoes:', e);
+  }
+
+  // Mescla com cotações locais em memória caso passadas
+  if (existingLocalQuotes && Array.isArray(existingLocalQuotes)) {
+    existingLocalQuotes.forEach(q => {
+      const s = (q.quoteNumber || q.numero || q.id || '').trim().toLowerCase();
+      if (s) existingSet.add(s);
+    });
+  }
+
+  const initialCandidate = `${prefix}${String(targetSeq).padStart(6, '0')}`;
+
+  // Se o número gerado ainda não existe, pode ser usado com segurança
+  if (!existingSet.has(initialCandidate.toLowerCase())) {
+    return {
+      quoteNumber: initialCandidate,
+      sequential: targetSeq,
+      prefix,
+      wasAdjustedDueToDuplicate: false
+    };
+  }
+
+  // 2. Se já existir, busca o maior número sequencial cadastrado no banco, soma +1
+  const seqs: number[] = [];
+  for (const row of allDbRows) {
+    const numStr = (row.numero || '').trim();
+    const match = numStr.match(/(\d+)$/);
+    if (match) {
+      seqs.push(parseInt(match[1], 10));
+    }
+  }
+  if (existingLocalQuotes && Array.isArray(existingLocalQuotes)) {
+    for (const q of existingLocalQuotes) {
+      const numStr = String(q.quoteNumber || q.numero || q.id || '').trim();
+      const match = numStr.match(/(\d+)$/);
+      if (match) {
+        seqs.push(parseInt(match[1], 10));
+      }
+    }
+  }
+
+  seqs.sort((a, b) => a - b);
+
+  // Identifica a sequência ativa a partir de targetSeq (filtrando pedidos específicos de clientes com salto grande > 100)
+  const higherOrEqual = seqs.filter(s => s >= targetSeq);
+  let topInSequence = targetSeq;
+
+  if (higherOrEqual.length > 0) {
+    for (let i = 0; i < higherOrEqual.length; i++) {
+      const curr = higherOrEqual[i];
+      if (i === 0) {
+        topInSequence = curr;
+      } else {
+        const prev = higherOrEqual[i - 1];
+        if (curr - prev > 100) {
+          // Salto brusco (ex: de 171 para 3574 de cliente externo)
+          break;
+        }
+        topInSequence = curr;
+      }
+    }
+  } else if (seqs.length > 0) {
+    topInSequence = seqs[seqs.length - 1];
+  }
+
+  let resolvedSeq = topInSequence + 1;
+
+  // Garante que o número final é absolutamente único (avança caso haja colisão)
+  while (existingSet.has(`${prefix}${String(resolvedSeq).padStart(6, '0')}`.toLowerCase())) {
+    resolvedSeq++;
+  }
+
+  const resolvedNumber = `${prefix}${String(resolvedSeq).padStart(6, '0')}`;
+
+  return {
+    quoteNumber: resolvedNumber,
+    sequential: resolvedSeq,
+    prefix,
+    wasAdjustedDueToDuplicate: true
+  };
+}
+
+/**
+ * 3. Atualização Automática ao Gravar:
+ * Assim que um novo orçamento for salvo com sucesso, atualiza o 'proximo_numero_sequencial'
+ * na tabela 'emitente' (somando +1) para que a próxima cotação já venha com o número seguinte automático (ex: 141).
+ */
+export async function updateEmitenteNextSequential(nextSequential: number): Promise<boolean> {
+  try {
+    const { data: existing } = await db
+      .from('emitente')
+      .select('id')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (existing && existing.id) {
+      const { error } = await db
+        .from('emitente')
+        .update({
+          proximo_numero_sequencial: nextSequential
+        })
+        .eq('id', existing.id);
+
+      if (error) {
+        console.warn('Erro ao atualizar proximo_numero_sequencial no Supabase:', error);
+      }
+    }
+
+    // Atualiza cache local e dispara evento para sincronizar todas as abas
+    const local = getLocalCompanyData();
+    local.proximo_numero_sequencial = nextSequential;
+    local.nextQuoteSequential = nextSequential;
+    local.proximo_numero_cotacao = nextSequential;
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(local));
+    } catch {}
+
+    window.dispatchEvent(new CustomEvent('company-data-updated', { detail: local }));
+    return true;
+  } catch (err) {
+    console.warn('Falha ao atualizar proximo_numero_sequencial:', err);
+    return false;
+  }
+}
+
+/**
+ * Incrementa o número sequencial do emitente na gravação de um orçamento
+ */
+export async function incrementEmitenteQuoteSequential(usedSequential?: number): Promise<number> {
+  const currentConfig = await fetchEmitenteNumberingConfig();
+  const current = currentConfig.nextSequential;
+  const next = typeof usedSequential === 'number' && !isNaN(usedSequential) && usedSequential >= current
+    ? usedSequential + 1
+    : current + 1;
+
+  await updateEmitenteNextSequential(next);
+  return next;
+}
+
+/**
+ * Obtém a configuração de numeração sequencial de cotações de forma síncrona/cache
+ */
+export function getQuoteSequentialConfig(): { nextSequential: number; prefix: string } {
   const comp = getLocalCompanyData();
-  const current = typeof comp.nextQuoteSequential === 'number' && !isNaN(comp.nextQuoteSequential)
-    ? comp.nextQuoteSequential
-    : (typeof comp.proximo_numero_cotacao === 'number' && !isNaN(comp.proximo_numero_cotacao)
-      ? comp.proximo_numero_cotacao
-      : 20);
-  const next = current + 1;
-  comp.nextQuoteSequential = next;
-  comp.proximo_numero_cotacao = next;
-  saveCompanyData(comp).catch(() => {});
+  const nextSequential = typeof comp.proximo_numero_sequencial === 'number' && !isNaN(comp.proximo_numero_sequencial)
+    ? comp.proximo_numero_sequencial
+    : (typeof comp.nextQuoteSequential === 'number' && !isNaN(comp.nextQuoteSequential)
+      ? comp.nextQuoteSequential
+      : (typeof comp.proximo_numero_cotacao === 'number' && !isNaN(comp.proximo_numero_cotacao)
+        ? comp.proximo_numero_cotacao
+        : 140));
+  const prefix = comp.prefixo_cotacao || comp.quotePrefix || 'COT-2026-';
+  return { nextSequential, prefix };
+}
+
+/**
+ * Incrementa o número sequencial de cotação nas configurações e persiste
+ */
+export function incrementQuoteSequentialConfig(usedSequential?: number): number {
+  const currentConfig = getQuoteSequentialConfig();
+  const current = currentConfig.nextSequential;
+  const next = typeof usedSequential === 'number' && !isNaN(usedSequential) && usedSequential >= current
+    ? usedSequential + 1
+    : current + 1;
+
+  updateEmitenteNextSequential(next).catch(() => {});
   return next;
 }
 
@@ -397,12 +653,13 @@ export function incrementQuoteSequentialConfig(): number {
  */
 export function setQuoteSequentialConfig(nextSequential: number, prefix?: string): void {
   const comp = getLocalCompanyData();
+  comp.proximo_numero_sequencial = nextSequential;
   comp.nextQuoteSequential = nextSequential;
   comp.proximo_numero_cotacao = nextSequential;
   if (prefix !== undefined) {
     comp.quotePrefix = prefix;
     comp.prefixo_cotacao = prefix;
   }
-  saveCompanyData(comp).catch(() => {});
+  updateEmitenteNextSequential(nextSequential).catch(() => {});
 }
 

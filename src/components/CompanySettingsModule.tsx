@@ -730,28 +730,29 @@ export default function CompanySettingsModule({ onBackToDashboard }: CompanySett
                   <ListOrdered className="w-3.5 h-3.5 text-indigo-400" />
                   <span>Próximo Número Sequencial *</span>
                 </span>
-                <span className="text-[10px] text-slate-500 font-mono">Ex: 021934 ou 50000</span>
+                <span className="text-[10px] text-slate-500 font-mono">Ex: 140 ou 50000</span>
               </label>
               <input
                 type="number"
                 min="1"
                 step="1"
-                value={formData.nextQuoteSequential !== undefined ? formData.nextQuoteSequential : (formData.proximo_numero_cotacao ?? 20)}
+                value={formData.proximo_numero_sequencial !== undefined ? formData.proximo_numero_sequencial : (formData.nextQuoteSequential !== undefined ? formData.nextQuoteSequential : (formData.proximo_numero_cotacao ?? 140))}
                 onChange={(e) => {
                   const val = parseInt(e.target.value, 10);
                   const validVal = isNaN(val) || val < 1 ? 1 : val;
                   setFormData(prev => ({
                     ...prev,
+                    proximo_numero_sequencial: validVal,
                     nextQuoteSequential: validVal,
                     proximo_numero_cotacao: validVal
                   }));
                 }}
-                placeholder="21934"
+                placeholder="140"
                 className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm outline-none focus:border-indigo-500 text-indigo-300 font-mono font-bold text-base"
                 required
               />
               <span className="text-[11px] text-slate-400">
-                Se você quiser iniciar uma nova fase no número <strong>50000</strong>, basta digitar <strong>50000</strong> e salvar. A cada nova cotação gravada, esse número avança automaticamente (+1).
+                Configuração gravada diretamente na tabela <code>emitente</code> (coluna <code>proximo_numero_sequencial</code>). A cada nova cotação gravada, esse número avança automaticamente (+1).
               </span>
             </div>
 
@@ -763,20 +764,20 @@ export default function CompanySettingsModule({ onBackToDashboard }: CompanySett
               </label>
               <input
                 type="text"
-                value={formData.quotePrefix ?? formData.prefixo_cotacao ?? `COT-${new Date().getFullYear()}-`}
+                value={formData.prefixo_cotacao ?? formData.quotePrefix ?? `COT-${new Date().getFullYear()}-`}
                 onChange={(e) => {
                   const val = e.target.value;
                   setFormData(prev => ({
                     ...prev,
-                    quotePrefix: val,
-                    prefixo_cotacao: val
+                    prefixo_cotacao: val,
+                    quotePrefix: val
                   }));
                 }}
                 placeholder={`COT-${new Date().getFullYear()}-`}
                 className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm outline-none focus:border-indigo-500 text-slate-100 font-mono font-bold"
               />
               <span className="text-[11px] text-slate-400">
-                Prefixo adicionado antes do número sequencial (ex: <code>COT-2026-</code>).
+                Prefixo adicionado antes do número sequencial (ex: <code>COT-2026-</code>). Gravado na coluna <code>prefixo_cotacao</code>.
               </span>
             </div>
 
@@ -792,8 +793,8 @@ export default function CompanySettingsModule({ onBackToDashboard }: CompanySett
               </div>
 
               {(() => {
-                const currentSeq = Number(formData.nextQuoteSequential ?? formData.proximo_numero_cotacao ?? 20);
-                const rawPrefix = formData.quotePrefix ?? formData.prefixo_cotacao ?? `COT-${new Date().getFullYear()}-`;
+                const currentSeq = Number(formData.proximo_numero_sequencial ?? formData.nextQuoteSequential ?? formData.proximo_numero_cotacao ?? 140);
+                const rawPrefix = formData.prefixo_cotacao ?? formData.quotePrefix ?? `COT-${new Date().getFullYear()}-`;
                 const next1 = `${rawPrefix}${String(currentSeq).padStart(6, '0')}`;
                 const next2 = `${rawPrefix}${String(currentSeq + 1).padStart(6, '0')}`;
 

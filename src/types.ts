@@ -331,8 +331,9 @@ export interface CompanyFiscalData {
   legalRepresentativeDoc?: string; // CPF/CNPJ Representante (092.345.510/0001-94)
 
   // 5. Configuração de Numeração Sequencial de Cotações / Pedidos
-  nextQuoteSequential?: number; // Próximo Número Sequencial (ex: 21934 ou 50000)
+  nextQuoteSequential?: number; // Próximo Número Sequencial (ex: 140 ou 50000)
   quotePrefix?: string; // Prefixo Personalizado (ex: 'COT-2026-')
+  proximo_numero_sequencial?: number; // Nome do campo na tabela emitente
   proximo_numero_cotacao?: number;
   prefixo_cotacao?: string;
 
