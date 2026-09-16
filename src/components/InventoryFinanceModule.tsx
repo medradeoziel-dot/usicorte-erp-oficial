@@ -80,12 +80,14 @@ interface InventoryFinanceModuleProps {
   initialTab?: ActiveTab;
   onNavigateToQuote?: () => void;
   onNavigateToFechamento?: () => void;
+  onOpenHistoricoFechamento?: () => void;
 }
 
 export default function InventoryFinanceModule({
   initialTab = 'estoque',
   onNavigateToQuote,
-  onNavigateToFechamento
+  onNavigateToFechamento,
+  onOpenHistoricoFechamento
 }: InventoryFinanceModuleProps) {
   // Navigation State
   const [activeTab, setActiveTab] = useState<ActiveTab>(initialTab);
@@ -719,6 +721,17 @@ export default function InventoryFinanceModule({
           <FileSpreadsheet className="w-4 h-4" />
           <span>Relatórios Consolidados & Rentabilidade</span>
         </button>
+
+        {onOpenHistoricoFechamento && (
+          <button
+            onClick={onOpenHistoricoFechamento}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer bg-slate-900 text-purple-300 hover:bg-slate-800 hover:text-purple-200 border border-purple-500/40 hover:border-purple-400 shadow-sm"
+            title="Histórico de Fechamentos Mensais Gravados no Supabase"
+          >
+            <Calendar className="w-4 h-4 text-purple-400" />
+            <span>📊 Histórico de Fechamentos Mensais</span>
+          </button>
+        )}
       </div>
 
       {/* =====================================================================

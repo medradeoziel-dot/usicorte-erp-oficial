@@ -21,6 +21,7 @@ import InventoryFinanceModule from './components/InventoryFinanceModule';
 import CompanySettingsModule from './components/CompanySettingsModule';
 import FechamentoCotacoesModule from './components/FechamentoCotacoesModule';
 import AndamentoMovimentacoesModule from './components/AndamentoMovimentacoesModule';
+import FechamentoMensalModal from './components/FechamentoMensalModal';
 import UsicorteCalculatorModal from './components/UsicorteCalculatorModal';
 import { MaterialProfile } from './utils/calculator';
 import { Users, FileCode, CheckCircle2, AlertTriangle, X } from 'lucide-react';
@@ -53,10 +54,32 @@ export default function App() {
   const [isLoginOpen, setIsLoginOpen] = useState<boolean>(() => !sessionStorage.getItem('usuario_logado'));
   const [isQuickCalcOpen, setIsQuickCalcOpen] = useState<boolean>(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
+  const [isFechamentoModalOpen, setIsFechamentoModalOpen] = useState<boolean>(false);
+  const [isAutoOpenDia1, setIsAutoOpenDia1] = useState<boolean>(false);
   const [migrationAlert, setMigrationAlert] = useState<{
     type: 'success' | 'warning' | 'info';
     message: string;
   } | null>(null);
+
+  const abrirHistoricoFechamento = (autoDia1 = false) => {
+    setIsAutoOpenDia1(autoDia1);
+    setIsFechamentoModalOpen(true);
+  };
+
+  const handleLoginSuccess = (user: string) => {
+    setCurrentUser(user);
+    setIsLoginOpen(false);
+
+    // 1. Disparo Automático em Todos os Logins do Dia de Fechamento:
+    // Ao fazer login no dia 1º de qualquer mês (ou primeiro dia do mês), abra AUTOMATICAMENTE o modal de 'Fechamento do Mês Anterior'.
+    // O modal deve abrir em todos os logins realizados ao longo desse dia para garantir que as informações sejam vistas e conferidas.
+    const hoje = new Date();
+    const isDia1 = hoje.getDate() === 1 || sessionStorage.getItem('simular_login_dia_1') === 'true';
+    if (isDia1) {
+      sessionStorage.removeItem('simular_login_dia_1');
+      abrirHistoricoFechamento(true);
+    }
+  };
 
   // 1. Leitura do LocalStorage ao carregar o sistema:
   // 2. Envio para o Supabase (INSERT/UPSERT) dos orçamentos locais
@@ -142,6 +165,7 @@ export default function App() {
         setIsMobileSidebarOpen={setIsMobileSidebarOpen}
         trocarTela={trocarTela}
         setIsLoginOpen={setIsLoginOpen}
+        onOpenHistoricoFechamento={() => abrirHistoricoFechamento(false)}
       />
 
       {migrationAlert && (
@@ -180,6 +204,7 @@ export default function App() {
           setIsMobileSidebarOpen={setIsMobileSidebarOpen}
           trocarTela={trocarTela}
           setIsQuickCalcOpen={setIsQuickCalcOpen}
+          onOpenHistoricoFechamento={() => abrirHistoricoFechamento(false)}
         />
 
         <main className="flex-1 bg-slate-950 p-6 overflow-y-auto">
@@ -259,6 +284,7 @@ export default function App() {
               initialTab={reportsTab}
               onTabChange={setReportsTab}
               onNavigateToMovimentacoes={() => trocarTela('movimentacoes')}
+              onOpenHistoricoFechamento={() => abrirHistoricoFechamento(false)}
             />
           )}
 
@@ -275,6 +301,7 @@ export default function App() {
               initialTab="estoque" 
               onNavigateToQuote={() => trocarTela('orcamento')} 
               onNavigateToFechamento={() => trocarTela('fechamento')}
+              onOpenHistoricoFechamento={() => abrirHistoricoFechamento(false)}
             />
           )}
 
@@ -283,6 +310,7 @@ export default function App() {
               initialTab="financeiro" 
               onNavigateToQuote={() => trocarTela('orcamento')} 
               onNavigateToFechamento={() => trocarTela('fechamento')}
+              onOpenHistoricoFechamento={() => abrirHistoricoFechamento(false)}
             />
           )}
 
@@ -291,6 +319,7 @@ export default function App() {
               clients={clients}
               onNavigateToFinanceiro={() => trocarTela('financeiro')}
               onNavigateToQuote={() => trocarTela('orcamento')}
+              onOpenHistoricoFechamento={() => abrirHistoricoFechamento(false)}
             />
           )}
 
@@ -322,9 +351,16 @@ export default function App() {
       <LoginModule 
         isOpen={isLoginOpen}
         onClose={() => setIsLoginOpen(false)}
-        onLoginSuccess={(user) => { setCurrentUser(user); setIsLoginOpen(false); }}
+        onLoginSuccess={handleLoginSuccess}
         currentUser={currentUser}
         onLogout={() => { sessionStorage.removeItem('usuario_logado'); setCurrentUser(null); setIsLoginOpen(true); }}
+      />
+
+      <FechamentoMensalModal
+        isOpen={isFechamentoModalOpen}
+        onClose={() => setIsFechamentoModalOpen(false)}
+        currentUser={currentUser}
+        isAutoOpenDia1={isAutoOpenDia1}
       />
 
       <UsicorteCalculatorModal

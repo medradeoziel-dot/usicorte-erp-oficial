@@ -15,7 +15,8 @@ import {
   Users,
   Shield,
   KeyRound,
-  RefreshCw
+  RefreshCw,
+  Calendar
 } from 'lucide-react';
 import Logo from './Logo';
 import { 
@@ -486,6 +487,35 @@ export default function LoginModule({
             <Users className="w-4 h-4 text-blue-400" />
             <span>⚙️ Gerenciar Equipe & Cadastrar Funcionários</span>
           </button>
+
+          {/* Notificação / Informação sobre Fechamento Mensal no Login */}
+          {new Date().getDate() === 1 ? (
+            <div className="mt-3 p-3 rounded-xl bg-purple-950/60 border border-purple-500/40 text-xs text-purple-200 flex items-start gap-2.5">
+              <Calendar className="w-4 h-4 text-purple-400 shrink-0 mt-0.5 animate-pulse" />
+              <div>
+                <strong className="text-white block font-bold">Dia de Fechamento Oficial (1º do Mês):</strong>
+                <span>Ao entrar no sistema, o Fechamento Mensal será aberto automaticamente para conferência e gravação no Supabase.</span>
+              </div>
+            </div>
+          ) : (
+            <div className="mt-3.5 pt-2.5 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400 px-1">
+              <span className="flex items-center gap-1.5">
+                <Calendar className="w-3.5 h-3.5 text-purple-400" />
+                Fechamento abre auto no 1º dia
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  sessionStorage.setItem('simular_login_dia_1', 'true');
+                  concluirLogin(usuarioSelecionado || 'ADMINISTRADOR');
+                }}
+                className="text-purple-400 hover:text-purple-300 font-semibold underline cursor-pointer"
+                title="Simula o disparo automático como se hoje fosse o 1º dia do mês"
+              >
+                🧪 Simular Login no Dia 1º
+              </button>
+            </div>
+          )}
 
           {currentUser && (
             <div className="mt-4 pt-3 border-t border-slate-800 text-xs text-slate-400 flex items-center justify-between">

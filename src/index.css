@@ -146,6 +146,22 @@
   /* Se não estiver em modo extrato, esconde secao-extrato na impressão de outros modos */
   body:not(.print-extrato) .secao-extrato { display: none !important; }
 
+  /* Modo Fechamento Mensal: */
+  body.print-fechamento .secao-etiqueta,
+  body.print-fechamento .secao-pedido,
+  body.print-fechamento .secao-proposta,
+  body.print-fechamento .secao-proposta-resumida,
+  body.print-fechamento .secao-corte,
+  body.print-fechamento .secao-extrato,
+  body.print-fechamento .sidebar,
+  body.print-fechamento aside,
+  body.print-fechamento nav,
+  body.print-fechamento .no-print,
+  body.print-fechamento .btn-no-print { display: none !important; }
+  body.print-fechamento .secao-fechamento-print { display: block !important; }
+
+  body:not(.print-fechamento) .secao-fechamento-print { display: none !important; }
+
   /* ---------------------------------------------------
      MODELO EXTRATO DE COBRANÇA A4
      --------------------------------------------------- */

@@ -1,5 +1,13 @@
 import { createClient } from "@supabase/supabase-js";
-import { Client, Quote, QuoteItem } from "../types";
+import { 
+  Client, 
+  Quote, 
+  QuoteItem, 
+  FechamentoMensal, 
+  FechamentoMensalResumoJson, 
+  FechamentoEmpresaResumo, 
+  FechamentoCotacaoDetalhe 
+} from "../types";
 import { formatarMedidasLimpa } from "../utils/calculator";
 
 const SUPABASE_URL = (import.meta.env?.VITE_SUPABASE_URL as string) || "https://kyzeiroxvgbkincisrdf.supabase.co";
@@ -1375,3 +1383,406 @@ export async function getDesenhoUrl(pathOrUrl: string): Promise<string> {
     return '';
   }
 }
+
+/* =========================================================================
+   6. FECHAMENTO MENSAL NO SUPABASE (TABELA: fechamentos_mensais)
+   ========================================================================= */
+
+const NOMES_MESES_PT = [
+  'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+];
+
+/**
+ * Retorna o mês anterior no formato YYYY-MM (ex: se hoje é setembro/2026, retorna '2026-08')
+ */
+export function getMesAnterior(refDate: Date = new Date()): string {
+  const d = new Date(refDate.getFullYear(), refDate.getMonth() - 1, 1);
+  const ano = d.getFullYear();
+  const mes = String(d.getMonth() + 1).padStart(2, '0');
+  return `${ano}-${mes}`;
+}
+
+/**
+ * Formata 'YYYY-MM' para 'Mês por Extenso de YYYY' (ex: '2026-08' -> 'Agosto de 2026')
+ */
+export function formatarMesAnoLabel(mesAno: string): string {
+  if (!mesAno || !mesAno.includes('-')) return mesAno || '';
+  const parts = mesAno.split('-');
+  const ano = parts[0];
+  const mesIdx = parseInt(parts[1], 10) - 1;
+  if (mesIdx >= 0 && mesIdx < 12) {
+    return `${NOMES_MESES_PT[mesIdx]} de ${ano}`;
+  }
+  return mesAno;
+}
+
+/**
+ * Extrai o ano e mês (YYYY-MM) de uma string de data flexível
+ */
+export function extrairAnoMes(dataStr?: string | null): string | null {
+  if (!dataStr) return null;
+  const limpo = dataStr.trim();
+  
+  // Formato ISO: YYYY-MM-DD
+  const matchIso = limpo.match(/^(\d{4})-(\d{2})/);
+  if (matchIso) {
+    return `${matchIso[1]}-${matchIso[2]}`;
+  }
+
+  // Formato BR: DD/MM/YYYY
+  const matchBr = limpo.match(/^(\d{1,2})\/(\d{2})\/(\d{4})/);
+  if (matchBr) {
+    return `${matchBr[3]}-${matchBr[2]}`;
+  }
+
+  // Tenta parse via new Date
+  try {
+    const dt = new Date(limpo);
+    if (!isNaN(dt.getTime())) {
+      const y = dt.getFullYear();
+      const m = String(dt.getMonth() + 1).padStart(2, '0');
+      return `${y}-${m}`;
+    }
+  } catch {}
+
+  return null;
+}
+
+/**
+ * 2. Consolidação e Busca no Supabase:
+ * Busca na tabela 'cotacoes' os registros do mês especificado com 'situacao' = 'APROVADO'.
+ * Calcula o total por empresa, a lista de cotações e o Total Geral.
+ */
+export async function buscarCotacoesParaFechamento(mesAno: string): Promise<{
+  mesAno: string;
+  mesAnoFormatado: string;
+  totalGeral: number;
+  totalEmpresas: number;
+  totalCotacoes: number;
+  ticketMedio: number;
+  empresas: FechamentoEmpresaResumo[];
+  todasCotacoes: FechamentoCotacaoDetalhe[];
+}> {
+  const mesAnoAlvo = mesAno.trim();
+  const mesAnoFormatado = formatarMesAnoLabel(mesAnoAlvo);
+
+  let cotacoesCandidatas: any[] = [];
+
+  // 1. Busca direto do Supabase
+  try {
+    const { data, error } = await db
+      .from('cotacoes')
+      .select('*, cotacao_itens(*)')
+      .order('data', { ascending: false });
+
+    if (!error && data && data.length > 0) {
+      cotacoesCandidatas = data;
+    }
+  } catch (err) {
+    console.warn("Aviso ao buscar cotações no Supabase para fechamento:", err);
+  }
+
+  // 2. Fallback de contingência local se Supabase retornar vazio
+  if (cotacoesCandidatas.length === 0) {
+    try {
+      const localStr = localStorage.getItem('s_orcamentos');
+      if (localStr) {
+        cotacoesCandidatas = JSON.parse(localStr);
+      }
+    } catch (e) {
+      console.warn("Erro ao ler fallback s_orcamentos:", e);
+    }
+  }
+
+  // 3. Filtra apenas do mês alvo com 'situacao' = 'APROVADO' (ou status = 'aprovado')
+  const cotacoesFiltradas: FechamentoCotacaoDetalhe[] = [];
+
+  cotacoesCandidatas.forEach((c: any) => {
+    // Validação de mês/ano
+    const mesCotacao = extrairAnoMes(c.data) || extrairAnoMes(c.date) || extrairAnoMes(c.created_at) || extrairAnoMes(c.createdAt);
+    if (mesCotacao !== mesAnoAlvo) {
+      return;
+    }
+
+    // Validação estrita da situação = 'APROVADO' (aceita variações de caixa ou faturado)
+    const situacaoUpper = String(c.situacao || '').toUpperCase().trim();
+    const statusLower = String(c.status || '').toLowerCase().trim();
+
+    const isAprovado = 
+      situacaoUpper === 'APROVADO' || 
+      statusLower === 'aprovado' || 
+      situacaoUpper === 'FATURADO' || 
+      statusLower === 'faturado';
+
+    if (!isAprovado) {
+      return;
+    }
+
+    const valorTotal = Number(c.valor_total || c.grandTotal || c.subtotalTotal || 0);
+    const clienteNome = (c.cliente_nome || c.clientName || c.empresa || 'Cliente Balcão').trim();
+    const numero = c.numero || c.quoteNumber || String(c.id || 'S/N');
+    const id = String(c.id || numero);
+    const data = c.data || c.date || new Date().toISOString().split('T')[0];
+
+    cotacoesFiltradas.push({
+      id,
+      numero,
+      data,
+      cliente_nome: clienteNome,
+      valor_total: valorTotal,
+      contato: c.contato || c.contactPerson || '',
+      telefone: c.telefone || c.clientPhone || '',
+      email: c.email || c.clientEmail || '',
+      observacoes: c.observacoes || c.observations || '',
+      situacao: situacaoUpper || 'APROVADO',
+      status: statusLower || 'aprovado',
+      forma_pagamento: c.forma_pagamento || c.paymentMethod || '',
+      data_pagamento: c.data_pagamento || c.paymentDate || null
+    });
+  });
+
+  // 4. Agrupa e calcula o total por empresa
+  const mapaEmpresas = new Map<string, {
+    empresa: string;
+    total: number;
+    cotacoes: FechamentoCotacaoDetalhe[];
+  }>();
+
+  cotacoesFiltradas.forEach(cot => {
+    const chave = cot.cliente_nome.toUpperCase();
+    const atual = mapaEmpresas.get(chave) || {
+      empresa: cot.cliente_nome,
+      total: 0,
+      cotacoes: []
+    };
+
+    atual.total = Number((atual.total + cot.valor_total).toFixed(2));
+    atual.cotacoes.push(cot);
+    mapaEmpresas.set(chave, atual);
+  });
+
+  // 5. Total Geral
+  const totalGeral = Number(
+    Array.from(mapaEmpresas.values()).reduce((acc, emp) => acc + emp.total, 0).toFixed(2)
+  );
+  const totalEmpresas = mapaEmpresas.size;
+  const totalCotacoes = cotacoesFiltradas.length;
+  const ticketMedio = totalCotacoes > 0 ? Number((totalGeral / totalCotacoes).toFixed(2)) : 0;
+
+  // 6. Ordena empresas por faturamento decrescente
+  const empresas: FechamentoEmpresaResumo[] = Array.from(mapaEmpresas.values())
+    .map(emp => ({
+      empresa: emp.empresa,
+      total: emp.total,
+      quantidadeCotacoes: emp.cotacoes.length,
+      percentualDoTotal: totalGeral > 0 ? Number(((emp.total / totalGeral) * 100).toFixed(1)) : 0,
+      cotacoes: emp.cotacoes.sort((a, b) => b.valor_total - a.valor_total)
+    }))
+    .sort((a, b) => b.total - a.total);
+
+  return {
+    mesAno: mesAnoAlvo,
+    mesAnoFormatado,
+    totalGeral,
+    totalEmpresas,
+    totalCotacoes,
+    ticketMedio,
+    empresas,
+    todasCotacoes: cotacoesFiltradas
+  };
+}
+
+/**
+ * 2. Gravação no Supabase:
+ * Faz um UPSERT na tabela 'fechamentos_mensais' salvando:
+ * - mes_ano (ex: '2026-08')
+ * - total_geral
+ * - total_empresas
+ * - resumo_json (detalhes de cada empresa e suas cotações)
+ */
+export async function salvarFechamentoMensalDb(payload: {
+  mes_ano: string;
+  total_geral: number;
+  total_empresas: number;
+  resumo_json: FechamentoMensalResumoJson;
+  fechado_por?: string;
+}): Promise<{
+  success: boolean;
+  data?: any;
+  error?: string;
+  isFallbackLocal?: boolean;
+}> {
+  try {
+    const dadosParaUpsert: any = {
+      mes_ano: payload.mes_ano,
+      total_geral: payload.total_geral,
+      total_empresas: payload.total_empresas,
+      total_cotacoes: payload.resumo_json?.geral?.total_cotacoes || 0,
+      fechado_por: payload.fechado_por || 'ADMIN',
+      resumo_json: payload.resumo_json,
+      fechado_em: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+
+    // 1. Tenta UPSERT no Supabase
+    let supabaseSucesso = false;
+    let supabaseErro: string | undefined = undefined;
+
+    try {
+      const { data, error } = await db
+        .from('fechamentos_mensais')
+        .upsert(dadosParaUpsert, { onConflict: 'mes_ano' })
+        .select()
+        .single();
+
+      if (!error) {
+        supabaseSucesso = true;
+      } else {
+        supabaseErro = error.message;
+        console.warn("Aviso no UPSERT fechamentos_mensais (Supabase):", error.message);
+      }
+    } catch (e: any) {
+      supabaseErro = e?.message || String(e);
+      console.warn("Exceção ao conectar na tabela fechamentos_mensais:", e);
+    }
+
+    // 2. Sempre persiste também no LocalStorage como espelho seguro
+    try {
+      const storageKey = 's_fechamentos_mensais';
+      const locaisStr = localStorage.getItem(storageKey);
+      let lista: FechamentoMensal[] = locaisStr ? JSON.parse(locaisStr) : [];
+      
+      const indexExistente = lista.findIndex(f => f.mes_ano === payload.mes_ano);
+      const novoRegistro: FechamentoMensal = {
+        mes_ano: payload.mes_ano,
+        total_geral: payload.total_geral,
+        total_empresas: payload.total_empresas,
+        total_cotacoes: payload.resumo_json?.geral?.total_cotacoes || 0,
+        fechado_por: payload.fechado_por || 'ADMIN',
+        fechado_em: dadosParaUpsert.fechado_em,
+        resumo_json: payload.resumo_json,
+        updated_at: dadosParaUpsert.updated_at
+      };
+
+      if (indexExistente >= 0) {
+        lista[indexExistente] = novoRegistro;
+      } else {
+        lista.unshift(novoRegistro);
+      }
+
+      localStorage.setItem(storageKey, JSON.stringify(lista));
+    } catch (errLocal) {
+      console.warn("Erro ao gravar fechamento no localStorage:", errLocal);
+    }
+
+    if (supabaseSucesso) {
+      return { success: true, data: dadosParaUpsert };
+    }
+
+    // Retorna com sucesso local caso o Supabase precise criar a tabela
+    return {
+      success: true,
+      data: dadosParaUpsert,
+      isFallbackLocal: true,
+      error: supabaseErro ? `Salvo localmente com sucesso! No Supabase, execute o script SQL da tabela "fechamentos_mensais": ${supabaseErro}` : undefined
+    };
+  } catch (err: any) {
+    console.error("Erro geral em salvarFechamentoMensalDb:", err);
+    return { success: false, error: err?.message || String(err) };
+  }
+}
+
+/**
+ * 3. Consulta do Histórico de Fechamentos:
+ * Busca todos os fechamentos gravados na tabela 'fechamentos_mensais' e no cache local
+ */
+export async function fetchFechamentosMensaisDb(): Promise<FechamentoMensal[]> {
+  const mapaFechamentos = new Map<string, FechamentoMensal>();
+
+  // 1. Busca do LocalStorage primeiro
+  try {
+    const locaisStr = localStorage.getItem('s_fechamentos_mensais');
+    if (locaisStr) {
+      const listaLocal: FechamentoMensal[] = JSON.parse(locaisStr);
+      listaLocal.forEach(f => mapaFechamentos.set(f.mes_ano, f));
+    }
+  } catch (e) {
+    console.warn("Aviso ao ler fechamentos locais:", e);
+  }
+
+  // 2. Busca da tabela 'fechamentos_mensais' do Supabase
+  try {
+    const { data, error } = await db
+      .from('fechamentos_mensais')
+      .select('*')
+      .order('mes_ano', { ascending: false });
+
+    if (!error && data && Array.isArray(data)) {
+      data.forEach((item: any) => {
+        mapaFechamentos.set(item.mes_ano, {
+          id: item.id ? String(item.id) : undefined,
+          mes_ano: item.mes_ano,
+          total_geral: Number(item.total_geral || 0),
+          total_empresas: Number(item.total_empresas || 0),
+          total_cotacoes: Number(item.total_cotacoes || 0),
+          fechado_por: item.fechado_por || 'ADMIN',
+          fechado_em: item.fechado_em || item.created_at,
+          resumo_json: item.resumo_json,
+          created_at: item.created_at,
+          updated_at: item.updated_at
+        });
+      });
+    }
+  } catch (err) {
+    console.warn("Aviso ao carregar fechamentos do Supabase:", err);
+  }
+
+  // Retorna ordenado pelo mês mais recente primeiro
+  return Array.from(mapaFechamentos.values()).sort((a, b) => b.mes_ano.localeCompare(a.mes_ano));
+}
+
+/**
+ * Busca um fechamento específico por mes_ano ('YYYY-MM')
+ */
+export async function fetchFechamentoPorMesDb(mesAno: string): Promise<FechamentoMensal | null> {
+  if (!mesAno) return null;
+
+  try {
+    const { data, error } = await db
+      .from('fechamentos_mensais')
+      .select('*')
+      .eq('mes_ano', mesAno)
+      .maybeSingle();
+
+    if (!error && data) {
+      return {
+        id: data.id ? String(data.id) : undefined,
+        mes_ano: data.mes_ano,
+        total_geral: Number(data.total_geral || 0),
+        total_empresas: Number(data.total_empresas || 0),
+        total_cotacoes: Number(data.total_cotacoes || 0),
+        fechado_por: data.fechado_por,
+        fechado_em: data.fechado_em || data.created_at,
+        resumo_json: data.resumo_json,
+        created_at: data.created_at,
+        updated_at: data.updated_at
+      };
+    }
+  } catch (e) {
+    console.warn("Erro ao buscar fechamento no Supabase:", e);
+  }
+
+  // Fallback Local
+  try {
+    const locaisStr = localStorage.getItem('s_fechamentos_mensais');
+    if (locaisStr) {
+      const listaLocal: FechamentoMensal[] = JSON.parse(locaisStr);
+      const encontrado = listaLocal.find(f => f.mes_ano === mesAno);
+      if (encontrado) return encontrado;
+    }
+  } catch {}
+
+  return null;
+}
+

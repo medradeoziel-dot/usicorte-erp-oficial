@@ -393,4 +393,59 @@ export interface ItemCotacaoResumo {
   itensCount: number;
 }
 
+// ============================================================================
+// FECHAMENTO MENSAL & HISTÓRICO SUPABASE
+// ============================================================================
+
+export interface FechamentoCotacaoDetalhe {
+  id: string;
+  numero: string;
+  data: string;
+  cliente_nome: string;
+  valor_total: number;
+  contato?: string;
+  telefone?: string;
+  email?: string;
+  observacoes?: string;
+  situacao?: string;
+  status?: string;
+  forma_pagamento?: string;
+  data_pagamento?: string | null;
+}
+
+export interface FechamentoEmpresaResumo {
+  empresa: string;
+  total: number;
+  quantidadeCotacoes: number;
+  percentualDoTotal?: number;
+  cotacoes: FechamentoCotacaoDetalhe[];
+}
+
+export interface FechamentoMensalResumoJson {
+  empresas: FechamentoEmpresaResumo[];
+  geral: {
+    mes_ano: string; // Ex: '2026-08'
+    mes_ano_formatado: string; // Ex: 'Agosto de 2026'
+    total_geral: number;
+    total_empresas: number;
+    total_cotacoes: number;
+    ticket_medio: number;
+    fechado_em: string;
+    fechado_por: string;
+  };
+}
+
+export interface FechamentoMensal {
+  id?: string;
+  mes_ano: string; // 'YYYY-MM' (ex: '2026-08')
+  total_geral: number;
+  total_empresas: number;
+  total_cotacoes?: number;
+  fechado_por?: string;
+  fechado_em?: string;
+  resumo_json: FechamentoMensalResumoJson;
+  created_at?: string;
+  updated_at?: string;
+}
+
 

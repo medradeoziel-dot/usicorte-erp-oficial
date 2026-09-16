@@ -17,6 +17,7 @@ import {
   Scissors,
   Receipt,
   Barcode,
+  Calendar,
   X 
 } from 'lucide-react';
 import { getMateriaisEstoque } from '../services/inventoryFinanceService';
@@ -29,6 +30,7 @@ interface SidebarProps {
   setIsMobileSidebarOpen: (val: boolean) => void;
   trocarTela: (screen: ScreenType, tab?: 'propostas' | 'consulta') => void;
   setIsQuickCalcOpen: (val: boolean) => void;
+  onOpenHistoricoFechamento?: () => void;
 }
 
 export default function Sidebar({
@@ -38,7 +40,8 @@ export default function Sidebar({
   clientsCount,
   setIsMobileSidebarOpen,
   trocarTela,
-  setIsQuickCalcOpen
+  setIsQuickCalcOpen,
+  onOpenHistoricoFechamento
 }: SidebarProps) {
   return (
     <>
@@ -179,6 +182,22 @@ export default function Sidebar({
             Cobrança
           </span>
         </button>
+
+        {onOpenHistoricoFechamento && (
+          <button 
+            onClick={onOpenHistoricoFechamento}
+            className="flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer w-full text-left bg-purple-950/40 hover:bg-purple-900/60 text-purple-200 border border-purple-500/30 hover:border-purple-400 shadow-sm"
+            title="Histórico de Fechamentos Mensais Gravados no Supabase"
+          >
+            <div className="flex items-center gap-3">
+              <Calendar className="w-4 h-4 shrink-0 text-purple-400" />
+              <span>Histórico de Fechamentos</span>
+            </div>
+            <span className="text-[9px] bg-purple-500/20 text-purple-300 border border-purple-500/30 px-1.5 py-0.5 rounded font-mono font-bold">
+              Supabase
+            </span>
+          </button>
+        )}
 
         <div className="text-[10px] uppercase font-bold tracking-wider text-slate-400 px-3 pt-4 pb-1">Gestão & Fiscal</div>
 

@@ -80,6 +80,7 @@ interface ReportsModuleProps {
   initialTab?: 'propostas' | 'consulta';
   onTabChange?: (tab: 'propostas' | 'consulta') => void;
   onNavigateToMovimentacoes?: () => void;
+  onOpenHistoricoFechamento?: () => void;
 }
 
 export type StatusProposta = 'rascunho' | 'pendente' | 'aprovado' | 'faturado' | 'rejeitado' | 'cancelado' | string;
@@ -179,7 +180,8 @@ export default function ReportsModule({
   onEditQuote,
   initialTab = 'propostas',
   onTabChange,
-  onNavigateToMovimentacoes
+  onNavigateToMovimentacoes,
+  onOpenHistoricoFechamento
 }: ReportsModuleProps) {
   // Navigation tab: 'propostas' | 'consulta'
   const [activeTab, setActiveTab] = useState<'propostas' | 'consulta'>(initialTab);
@@ -2675,6 +2677,17 @@ export default function ReportsModule({
             <Search className="w-4 h-4 text-emerald-400" />
             <span>🔍 Consulta & Relatório Geral</span>
           </button>
+
+          {onOpenHistoricoFechamento && (
+            <button
+              onClick={onOpenHistoricoFechamento}
+              className="px-4 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 transition-all cursor-pointer bg-slate-900 hover:bg-slate-800 text-purple-300 border border-purple-500/40 hover:border-purple-400 shadow-sm"
+              title="Visualizar histórico de fechamentos e consolidar mês no Supabase"
+            >
+              <Calendar className="w-4 h-4 text-purple-400" />
+              <span>📊 Histórico de Fechamentos Mensais</span>
+            </button>
+          )}
         </div>
 
         {onNavigateToQuote && (

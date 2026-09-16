@@ -48,12 +48,14 @@ interface FechamentoCotacoesModuleProps {
   clients?: Client[];
   onNavigateToFinanceiro?: () => void;
   onNavigateToQuote?: () => void;
+  onOpenHistoricoFechamento?: () => void;
 }
 
 export default function FechamentoCotacoesModule({
   clients = [],
   onNavigateToFinanceiro,
-  onNavigateToQuote
+  onNavigateToQuote,
+  onOpenHistoricoFechamento
 }: FechamentoCotacoesModuleProps) {
   // Lista unificada de cotações carregadas
   const [allQuotes, setAllQuotes] = useState<ExtratoCotacaoItem[]>([]);
@@ -633,6 +635,17 @@ export default function FechamentoCotacoesModule({
                 {formatCurrency(totalPagasValor)}
               </span>
             </div>
+
+            {onOpenHistoricoFechamento && (
+              <button
+                onClick={onOpenHistoricoFechamento}
+                className="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-bold px-3.5 py-2 rounded-xl shadow-lg shadow-purple-600/30 flex items-center gap-2 transition-all cursor-pointer border border-purple-400/30 shrink-0"
+                title="Histórico de Fechamentos Mensais Salvos no Supabase"
+              >
+                <Calendar className="w-4 h-4 text-purple-200" />
+                <span>📊 Histórico no Supabase</span>
+              </button>
+            )}
           </div>
         </div>
       </div>
