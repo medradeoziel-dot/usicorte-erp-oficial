@@ -131,7 +131,7 @@ export default function App() {
   const handleEditQuote = (quote: Quote) => {
     setQuoteToEdit(quote);
     setCurrentQuote(quote);
-    setCurrentScreen('orcamento');
+    setCurrentScreen('vendas');
     setIsMobileSidebarOpen(false);
   };
 
@@ -148,12 +148,12 @@ export default function App() {
       grandTotal,
       totalWeightKg
     });
-    setCurrentScreen('orcamento');
+    setCurrentScreen('vendas');
   };
 
   const handleLaunchProductIntoQuote = (material: MaterialProfile) => {
     setSelectedMaterialForQuote(material);
-    setCurrentScreen('orcamento');
+    setCurrentScreen('vendas');
   };
 
   return (
@@ -264,7 +264,7 @@ export default function App() {
           {(currentScreen === 'orcamento' || currentScreen === 'vendas') && (
             <SalesModule 
               clients={clients} 
-              selectedMaterial={currentScreen === 'orcamento' ? selectedMaterialForQuote : null} 
+              selectedMaterial={selectedMaterialForQuote} 
               onQuoteChange={setCurrentQuote} 
               onNavigateToClients={() => trocarTela('clientes')} 
               onNavigateToReports={() => trocarTela('relatorios')} 
@@ -279,7 +279,7 @@ export default function App() {
             <ReportsModule 
               currentQuote={currentQuote} 
               clients={clients} 
-              onNavigateToQuote={() => trocarTela('orcamento')} 
+              onNavigateToQuote={() => trocarTela('vendas')} 
               onEditQuote={handleEditQuote}
               initialTab={reportsTab}
               onTabChange={setReportsTab}
@@ -292,14 +292,14 @@ export default function App() {
             <AndamentoMovimentacoesModule 
               clients={clients}
               onNavigateToReports={(tab) => trocarTela('relatorios', tab)}
-              onNavigateToQuote={() => trocarTela('orcamento')}
+              onNavigateToQuote={() => trocarTela('vendas')}
             />
           )}
 
           {currentScreen === 'estoque' && (
             <InventoryFinanceModule 
               initialTab="estoque" 
-              onNavigateToQuote={() => trocarTela('orcamento')} 
+              onNavigateToQuote={() => trocarTela('vendas')} 
               onNavigateToFechamento={() => trocarTela('fechamento')}
               onOpenHistoricoFechamento={() => abrirHistoricoFechamento(false)}
             />
@@ -308,7 +308,7 @@ export default function App() {
           {currentScreen === 'financeiro' && (
             <InventoryFinanceModule 
               initialTab="financeiro" 
-              onNavigateToQuote={() => trocarTela('orcamento')} 
+              onNavigateToQuote={() => trocarTela('vendas')} 
               onNavigateToFechamento={() => trocarTela('fechamento')}
               onOpenHistoricoFechamento={() => abrirHistoricoFechamento(false)}
             />
@@ -318,7 +318,7 @@ export default function App() {
             <FechamentoCotacoesModule 
               clients={clients}
               onNavigateToFinanceiro={() => trocarTela('financeiro')}
-              onNavigateToQuote={() => trocarTela('orcamento')}
+              onNavigateToQuote={() => trocarTela('vendas')}
               onOpenHistoricoFechamento={() => abrirHistoricoFechamento(false)}
             />
           )}

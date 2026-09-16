@@ -105,17 +105,7 @@ export default function Sidebar({
           <span className="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded font-mono">{totalMateriaisCount}</span>
         </button>
 
-        <div className="text-[10px] uppercase font-bold tracking-wider text-slate-400 px-3 pt-4 pb-1">Vendas & Lançamentos</div>
-
-        <button 
-          onClick={() => trocarTela('orcamento')}
-          className={`flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer w-full text-left ${
-            currentScreen === 'orcamento' ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30' : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
-          }`}
-        >
-          <Calculator className="w-4 h-4 shrink-0" />
-          <span>Lançamento / Orçamento</span>
-        </button>
+        <div className="text-[10px] uppercase font-bold tracking-wider text-slate-400 px-3 pt-4 pb-1">Vendas & Serviços</div>
 
         <button 
           onClick={() => setIsQuickCalcOpen(true)}

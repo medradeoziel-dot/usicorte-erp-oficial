@@ -4,7 +4,6 @@ import { Client, Quote } from '../types';
 import { ScreenType } from '../App';
 import { formatCurrency, formatWeightKg } from '../utils/calculator';
 import { 
-  Calculator, 
   ClipboardList, 
   Users, 
   ShoppingCart, 
@@ -103,14 +102,6 @@ export default function DashboardView({ clients, currentQuote, trocarTela, setIs
             <span className="text-xs font-bold text-blue-200">Calculadora</span>
             <span className="text-[10px] text-blue-400/80 mt-1 font-medium">Cálculo Rápido</span>
           </button>
-
-          <div onClick={() => trocarTela('orcamento')} className="bg-slate-800/80 hover:bg-slate-800 border border-slate-700/80 hover:border-blue-500 p-4 rounded-2xl cursor-pointer transition-all duration-200 flex flex-col items-center text-center gap-2 group hover:-translate-y-1 hover:shadow-xl shadow-slate-950/50">
-            <div className="p-2.5 bg-blue-500/10 text-blue-400 rounded-xl group-hover:bg-blue-600 group-hover:text-white transition-colors border border-blue-500/20"><Calculator className="w-5 h-5" /></div>
-            <div>
-              <strong className="text-xs text-slate-100 block font-bold group-hover:text-blue-400 transition-colors">Lançamento</strong>
-              <span className="text-[10px] text-slate-400">Por ENTER</span>
-            </div>
-          </div>
 
           <div onClick={() => trocarTela('ordem_servico')} className="bg-slate-800/80 hover:bg-slate-800 border border-slate-700/80 hover:border-red-500 p-4 rounded-2xl cursor-pointer transition-all duration-200 flex flex-col items-center text-center gap-2 group hover:-translate-y-1 hover:shadow-xl shadow-slate-950/50">
             <div className="p-2.5 bg-red-500/10 text-red-400 rounded-xl group-hover:bg-red-600 group-hover:text-white transition-colors border border-red-500/20"><ClipboardList className="w-5 h-5" /></div>

@@ -58,20 +58,18 @@ export async function safeFetchTable<T = any>(
     const res = await q;
 
     if (res.error) {
-      if (isNotFoundError(res.error, res.status)) {
-        // Tabela inexistente / 404: captura silenciosamente e retorna array vazio
+      // Captura erros 404 ou tabelas de estoque/movimentações silenciosamente sem registrar erro no console
+      if (isNotFoundError(res.error, res.status) || tableName.toLowerCase().includes('estoque') || tableName.toLowerCase().includes('movimentac')) {
         return [];
       }
-      console.warn(`Aviso ao consultar tabela '${tableName}':`, res.error.message || res.error);
       return [];
     }
 
     return (res.data || []) as T[];
   } catch (err: any) {
-    if (isNotFoundError(err, err?.status)) {
+    if (isNotFoundError(err, err?.status) || tableName.toLowerCase().includes('estoque') || tableName.toLowerCase().includes('movimentac')) {
       return [];
     }
-    console.warn(`Exceção capturada ao consultar tabela '${tableName}':`, err?.message || err);
     return [];
   }
 }
