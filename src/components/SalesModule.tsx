@@ -40,6 +40,7 @@ import {
   LISTA_MATERIAIS_INLINE,
   DADOS_MATERIAIS_MAP
 } from '../utils/calculator';
+import { useMaterialsCatalog } from '../services/materialsService';
 import { fileToDxfImage, isDxfFile } from '../utils/dxfRenderer';
 import { 
   baixarEstoquePorCotacao, 
@@ -119,6 +120,10 @@ export default function SalesModule({
   quoteToEdit,
   onClearQuoteToEdit
 }: SalesModuleProps) {
+  // Catálogo dinâmico de materiais conectado ao Supabase
+  const { profiles: dynamicMaterialProfiles } = useMaterialsCatalog();
+  const activeMaterialProfiles = dynamicMaterialProfiles.length > 0 ? dynamicMaterialProfiles : MATERIAL_PROFILES;
+
   // Saved quotes history (carregado diretamente do Supabase e mantido no estado da aplicação)
   const [savedQuotes, setSavedQuotes] = useState<Quote[]>([]);
 
@@ -693,7 +698,7 @@ export default function SalesModule({
     // Busca nas novas constantes oficiais
     const matData = DADOS_MATERIAIS_MAP[val] || 
       DADOS_MATERIAIS_MAP[val.toLowerCase()] ||
-      MATERIAL_PROFILES.find(p => p.id === val || p.name.toLowerCase() === val.toLowerCase());
+      activeMaterialProfiles.find(p => p.id === val || p.name.toLowerCase() === val.toLowerCase());
 
     if (matData) {
       const newGeom = matData.tipo;
@@ -707,7 +712,7 @@ export default function SalesModule({
       setItemPricePerKg(newPriceKg);
       setIsManualUnitPrice(false);
 
-      if (!itemDescription || MATERIAL_PROFILES.some(p => p.name === itemDescription)) {
+      if (!itemDescription || activeMaterialProfiles.some(p => p.name === itemDescription)) {
         setItemDescription(newProfileName);
       }
 
@@ -810,7 +815,7 @@ export default function SalesModule({
   };
 
   // Filtered Material Profiles for Select2-style dynamic Material combobox
-  const filteredMaterialProfiles = MATERIAL_PROFILES.filter(profile => {
+  const filteredMaterialProfiles = activeMaterialProfiles.filter(profile => {
     if (constantCategoryFilter !== 'ALL') {
       if (constantCategoryFilter === 'chapa' && profile.tipo !== 'chapa') return false;
       if (constantCategoryFilter === 'macico' && profile.tipo !== 'macico') return false;
@@ -856,7 +861,7 @@ export default function SalesModule({
     // Lista de materiais cadastrados no sistema
     const listaOpcoes = Array.from(new Set([
       ...LISTA_MATERIAIS_INLINE,
-      ...MATERIAL_PROFILES.map(p => p.name)
+      ...activeMaterialProfiles.map(p => p.name)
     ]));
 
     // Busca o primeiro item que começa com o que foi digitado (ignorando maiúsculas)
@@ -870,7 +875,7 @@ export default function SalesModule({
 
       // Mapeamento dos valores de K e tipo para o cálculo
       const matData = DADOS_MATERIAIS_MAP[correspondencia] || 
-        MATERIAL_PROFILES.find(p => p.name.toLowerCase() === correspondencia.toLowerCase());
+        activeMaterialProfiles.find(p => p.name.toLowerCase() === correspondencia.toLowerCase());
 
       if (matData) {
         const profileId = 'id' in matData ? matData.id : 'chapa_aco';
@@ -1348,7 +1353,7 @@ export default function SalesModule({
 
     // 2. Checa tabela de materiais e constantes
     const matName = String(it.constanteNome || it.constantName || it.material || it.description || it.descricao || '').toLowerCase();
-    const matchMap = DADOS_MATERIAIS_MAP[matName] || MATERIAL_PROFILES.find(p => p.name.toLowerCase() === matName);
+    const matchMap = DADOS_MATERIAIS_MAP[matName] || activeMaterialProfiles.find(p => p.name.toLowerCase() === matName);
     if (matchMap) {
       if (matchMap.tipo === 'bucha') return 'bucha';
       if (matchMap.tipo === 'macico') return 'macico';
@@ -1531,7 +1536,7 @@ export default function SalesModule({
     );
 
     // 3. Mapeamento de Constante e Perfil de Material
-    const matchedProfile = MATERIAL_PROFILES.find(
+    const matchedProfile = activeMaterialProfiles.find(
       p => p.id === (item as any).materialProfileId ||
            p.name.toLowerCase() === (item.constanteNome || item.constantName || item.material || '').toLowerCase() ||
            (p.k.toString() === item.constant.toString() && (p.tipo === resolvedGeometry || (p.tipo === 'chapa' && resolvedGeometry === 'CHAPA_RETANGULO') || (p.tipo === 'macico' && resolvedGeometry === 'REDONDO_QUADRADO') || (p.tipo === 'bucha' && resolvedGeometry === 'TUBO_BUCHA')))
@@ -2597,7 +2602,7 @@ export default function SalesModule({
                       // Sincroniza se houver correspondência exata ou aproximada
                       const matData = DADOS_MATERIAIS_MAP[itemConstantName] || 
                         DADOS_MATERIAIS_MAP[itemConstantName.toLowerCase()] ||
-                        MATERIAL_PROFILES.find(p => p.name.toLowerCase() === itemConstantName.toLowerCase());
+                        activeMaterialProfiles.find(p => p.name.toLowerCase() === itemConstantName.toLowerCase());
                       if (matData) {
                         const profileId = 'id' in matData ? matData.id : 'chapa';
                         handleConstantSelectChange(profileId);

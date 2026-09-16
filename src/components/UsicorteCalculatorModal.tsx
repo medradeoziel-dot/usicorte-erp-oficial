@@ -19,6 +19,7 @@ import {
   parseDimensionToMm,
   TabelaConstanteItem 
 } from '../utils/calculator';
+import { useMaterialsCatalog } from '../services/materialsService';
 
 interface UsicorteCalculatorModalProps {
   isOpen: boolean;
@@ -50,8 +51,12 @@ export default function UsicorteCalculatorModal({
   onClose,
   onAddItemToQuote
 }: UsicorteCalculatorModalProps) {
+  // Catálogo dinâmico de materiais conectado ao Supabase
+  const { constantes: dynamicConstantes } = useMaterialsCatalog();
+  const activeConstantes = dynamicConstantes.length > 0 ? dynamicConstantes : tabelaConstantes;
+
   // Form State
-  const defaultLaserIdx = tabelaConstantes.findIndex(m => m.nome === 'LASER A36');
+  const defaultLaserIdx = activeConstantes.findIndex(m => m.nome === 'LASER A36');
   const [materialIndex, setMaterialIndex] = useState<string>(() => defaultLaserIdx !== -1 ? String(defaultLaserIdx) : '19'); // Default: LASER A36
   const [tipo, setTipo] = useState<'chapa' | 'macico' | 'bucha'>('chapa');
   const [precoKg, setPrecoKg] = useState<string>('22');
@@ -89,7 +94,7 @@ export default function UsicorteCalculatorModal({
     }
 
     const idx = parseInt(indexStr, 10);
-    const mat = tabelaConstantes[idx];
+    const mat = activeConstantes[idx];
     if (mat) {
       setTipo(mat.tipo);
       setPrecoKg(String(Math.ceil(mat.precoKg)));
@@ -113,7 +118,7 @@ export default function UsicorteCalculatorModal({
   };
 
   // Calculations strictly per UsiCorte official formulas & Math.ceil rounding
-  const selectedMat: TabelaConstanteItem | undefined = materialIndex !== "" ? tabelaConstantes[parseInt(materialIndex, 10)] : undefined;
+  const selectedMat: TabelaConstanteItem | undefined = materialIndex !== "" ? activeConstantes[parseInt(materialIndex, 10)] : undefined;
   const kConst = selectedMat ? selectedMat.k : 0.00785;
   const tipoMat = selectedMat ? selectedMat.tipo : tipo;
 
@@ -351,7 +356,7 @@ export default function UsicorteCalculatorModal({
               className="w-full bg-[#131f37] border border-gray-700 rounded-lg p-2.5 text-white focus:outline-hidden focus:border-blue-500 font-medium cursor-pointer"
             >
               <option value="">Selecione o perfil/material...</option>
-              {tabelaConstantes.map((mat, index) => (
+              {activeConstantes.map((mat, index) => (
                 <option key={index} value={index}>
                   {mat.nome} (k: {mat.k} | R$ {Math.ceil(mat.precoKg)}/kg)
                 </option>

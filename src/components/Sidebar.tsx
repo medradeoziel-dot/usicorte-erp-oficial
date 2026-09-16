@@ -1,6 +1,7 @@
 import React from 'react';
 import { ScreenType } from '../App';
 import { MATERIAL_PROFILES } from '../utils/calculator';
+import { useMaterialsCatalog } from '../services/materialsService';
 import { 
   Home, 
   Users, 
@@ -43,6 +44,9 @@ export default function Sidebar({
   setIsQuickCalcOpen,
   onOpenHistoricoFechamento
 }: SidebarProps) {
+  const { materials } = useMaterialsCatalog();
+  const totalMateriaisCount = materials.length > 0 ? materials.length : MATERIAL_PROFILES.length;
+
   return (
     <>
       {isMobileSidebarOpen && (
@@ -98,7 +102,7 @@ export default function Sidebar({
             <Package className="w-4 h-4 shrink-0" />
             <span>Cadastro de Produtos</span>
           </div>
-          <span className="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded font-mono">{MATERIAL_PROFILES.length}</span>
+          <span className="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded font-mono">{totalMateriaisCount}</span>
         </button>
 
         <div className="text-[10px] uppercase font-bold tracking-wider text-slate-400 px-3 pt-4 pb-1">Vendas & Lançamentos</div>
