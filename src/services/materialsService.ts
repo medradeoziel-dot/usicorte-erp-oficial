@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { db } from '../lib/db';
+import { db, isNotFoundError } from '../lib/db';
 import { 
   MaterialProfile, 
   DADOS_MATERIAIS_MAP, 
@@ -168,7 +168,7 @@ export function saveCachedMaterials(items: MaterialItem[]) {
  */
 export async function fetchMateriaisDb(): Promise<MaterialItem[]> {
   try {
-    const { data, error } = await db
+    const { data, error, status } = await db
       .from('materiais')
       .select('*')
       .order('nome', { ascending: true });
@@ -179,11 +179,13 @@ export async function fetchMateriaisDb(): Promise<MaterialItem[]> {
       return mapped;
     }
 
-    if (error) {
-      console.warn('Erro ao buscar materiais do Supabase:', error);
+    if (error && !isNotFoundError(error, status)) {
+      console.warn('Erro ao buscar materiais do Supabase:', error.message || error);
     }
-  } catch (err) {
-    console.warn('Falha de conexão com Supabase materiais:', err);
+  } catch (err: any) {
+    if (!isNotFoundError(err, err?.status)) {
+      console.warn('Falha de conexão com Supabase materiais:', err?.message || err);
+    }
   }
 
   return getCachedMaterials();

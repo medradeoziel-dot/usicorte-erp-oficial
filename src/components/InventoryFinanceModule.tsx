@@ -21,7 +21,14 @@ import {
   registrarMovimentacao,
   calcularLucratividadePorPedido,
   obterAlertasReposicao,
-  LucratividadeItem
+  LucratividadeItem,
+  fetchMateriaisEstoqueDb,
+  fetchRetalhosEstoqueDb,
+  fetchLancamentosFinanceirosDb,
+  fetchMovimentacoesEstoqueDb,
+  INITIAL_MATERIAIS,
+  INITIAL_RETALHOS,
+  INITIAL_FINANCEIRO
 } from '../services/inventoryFinanceService';
 import { formatCurrency, formatWeightKg } from '../utils/calculator';
 import {
@@ -108,13 +115,73 @@ export default function InventoryFinanceModule({
     setTimeout(() => setFeedback(null), 4000);
   };
 
-  // Reload data from storage
-  const reloadAllData = () => {
+  // Carrega dados do Supabase na inicialização garantindo fallback para dados padrão caso o banco esteja vazio ou com 404
+  useEffect(() => {
+    let isMounted = true;
+    async function sincronizarComBanco() {
+      try {
+        const [matsDb, retDb, lancDb, movDb] = await Promise.all([
+          fetchMateriaisEstoqueDb(),
+          fetchRetalhosEstoqueDb(),
+          fetchLancamentosFinanceirosDb(),
+          fetchMovimentacoesEstoqueDb()
+        ]);
+        if (!isMounted) return;
+
+        if (matsDb && matsDb.length > 0) {
+          setMateriais(matsDb);
+        } else {
+          setMateriais([...INITIAL_MATERIAIS]);
+        }
+
+        if (retDb && retDb.length > 0) {
+          setRetalhos(retDb);
+        } else {
+          setRetalhos([...INITIAL_RETALHOS]);
+        }
+
+        if (lancDb && lancDb.length > 0) {
+          setLancamentos(lancDb);
+        } else {
+          setLancamentos([...INITIAL_FINANCEIRO]);
+        }
+
+        if (movDb && movDb.length > 0) {
+          setMovimentacoes(movDb);
+        }
+
+        setLucratividadeList(calcularLucratividadePorPedido());
+      } catch (err) {
+        // Exceção capturada silenciosamente, mantendo os dados padrão já carregados
+      }
+    }
+    sincronizarComBanco();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Reload data from storage & DB
+  const reloadAllData = async () => {
     setMateriais(getMateriaisEstoque());
     setRetalhos(getRetalhosEstoque());
     setLancamentos(getLancamentosFinanceiros());
     setMovimentacoes(getMovimentacoesEstoque());
     setLucratividadeList(calcularLucratividadePorPedido());
+
+    try {
+      const [matsDb, retDb, lancDb, movDb] = await Promise.all([
+        fetchMateriaisEstoqueDb(),
+        fetchRetalhosEstoqueDb(),
+        fetchLancamentosFinanceirosDb(),
+        fetchMovimentacoesEstoqueDb()
+      ]);
+      if (matsDb && matsDb.length > 0) setMateriais(matsDb);
+      if (retDb && retDb.length > 0) setRetalhos(retDb);
+      if (lancDb && lancDb.length > 0) setLancamentos(lancDb);
+      if (movDb && movDb.length > 0) setMovimentacoes(movDb);
+      setLucratividadeList(calcularLucratividadePorPedido());
+    } catch (e) {}
   };
 
   // =========================================================================

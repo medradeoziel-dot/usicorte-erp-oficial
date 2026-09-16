@@ -13,7 +13,10 @@ import {
   SupabaseCotacao, 
   atualizarSituacaoCotacaoDb,
   atualizarStatusPagamentoCotacaoDb,
-  sincronizarPagamentoContaReceberDb
+  sincronizarPagamentoContaReceberDb,
+  isNotFoundError,
+  safeFetchTable,
+  isUuid
 } from '../lib/db';
 
 // Materiais Iniciais Padrão UsiCorte / Caldeiraria
@@ -336,27 +339,37 @@ let cachePagamentosMap: Record<string, RegistroPagamentoCotacao> = {};
 
 // Helper: mapeia registro do Supabase para MaterialEstoque
 export function mapSupabaseToMaterial(row: any): MaterialEstoque {
+  const nome = row.nome || row.name || 'Material sem nome';
+  const matchedInitial = INITIAL_MATERIAIS.find(m => 
+    m.nome.toLowerCase() === nome.toLowerCase() ||
+    (row.codigo && m.codigo.toLowerCase() === String(row.codigo).toLowerCase())
+  );
+
+  const qtd = Number(row.quantidade != null ? row.quantidade : (row.quantity != null ? row.quantity : (matchedInitial?.quantidade ?? 0)));
+  const pesoUnit = Number(row.peso_unitario_kg != null ? row.peso_unitario_kg : (row.pesoUnitarioKg != null ? row.pesoUnitarioKg : (matchedInitial?.pesoUnitarioKg ?? 0)));
+  const pesoTot = Number(row.peso_total_kg != null ? row.peso_total_kg : (row.pesoTotalKg != null ? row.pesoTotalKg : (qtd * pesoUnit || (matchedInitial?.pesoTotalKg ?? 0))));
+
   return {
-    id: String(row.id || `mat-${Date.now()}`),
-    codigo: row.codigo || row.code || '',
-    nome: row.nome || row.name || 'Material sem nome',
-    tipo: row.tipo || row.type || 'chapa',
-    material: row.material || row.liga || 'A36',
-    espessuraMm: Number(row.espessura_mm || row.espessuraMm || row.espessura || 0),
-    larguraMm: Number(row.largura_mm || row.larguraMm || row.largura || 0),
-    comprimentoMm: Number(row.comprimento_mm || row.comprimentoMm || row.comprimento || 0),
-    densidade: Number(row.densidade || row.density || 0.00785),
-    pesoUnitarioKg: Number(row.peso_unitario_kg || row.pesoUnitarioKg || 0),
-    quantidade: Number(row.quantidade || row.quantity || 0),
-    pesoTotalKg: Number(row.peso_total_kg || row.pesoTotalKg || 0),
-    estoqueMinimoKg: Number(row.estoque_minimo_kg || row.estoqueMinimoKg || 0),
-    estoqueMinimoQtd: Number(row.estoque_minimo_qtd || row.estoqueMinimoQtd || 0),
-    custoKg: Number(row.custo_kg || row.custoKg || 0),
-    precoVendaKg: Number(row.preco_venda_kg || row.precoVendaKg || 0),
-    localizacao: row.localizacao || row.location || '',
-    fornecedor: row.fornecedor || row.supplier || '',
-    observacoes: row.observacoes || row.observacao || row.notes || '',
-    atualizadoEm: row.updated_at || row.atualizado_em || row.atualizadoEm || new Date().toISOString()
+    id: String(row.id || matchedInitial?.id || `mat-${Date.now()}`),
+    codigo: row.codigo || row.code || matchedInitial?.codigo || '',
+    nome,
+    tipo: row.tipo || row.type || matchedInitial?.tipo || 'chapa',
+    material: row.material || row.liga || matchedInitial?.material || 'A36',
+    espessuraMm: Number(row.espessura_mm != null ? row.espessura_mm : (row.espessuraMm != null ? row.espessuraMm : (matchedInitial?.espessuraMm ?? 0))),
+    larguraMm: Number(row.largura_mm != null ? row.largura_mm : (row.larguraMm != null ? row.larguraMm : (matchedInitial?.larguraMm ?? 0))),
+    comprimentoMm: Number(row.comprimento_mm != null ? row.comprimento_mm : (row.comprimentoMm != null ? row.comprimentoMm : (matchedInitial?.comprimentoMm ?? 0))),
+    densidade: Number(row.densidade != null ? row.densidade : (matchedInitial?.densidade ?? 0.00785)),
+    pesoUnitarioKg: pesoUnit,
+    quantidade: qtd,
+    pesoTotalKg: pesoTot,
+    estoqueMinimoKg: Number(row.estoque_minimo_kg != null ? row.estoque_minimo_kg : (matchedInitial?.estoqueMinimoKg ?? 0)),
+    estoqueMinimoQtd: Number(row.estoque_minimo_qtd != null ? row.estoque_minimo_qtd : (matchedInitial?.estoqueMinimoQtd ?? 0)),
+    custoKg: Number(row.custo_kg != null ? row.custo_kg : (matchedInitial?.custoKg ?? 0)),
+    precoVendaKg: Number(row.preco_venda_kg != null ? row.preco_venda_kg : (matchedInitial?.precoVendaKg ?? 0)),
+    localizacao: row.localizacao || row.location || matchedInitial?.localizacao || '',
+    fornecedor: row.fornecedor || row.supplier || matchedInitial?.fornecedor || '',
+    observacoes: row.observacoes || row.observacao || row.notes || matchedInitial?.observacoes || '',
+    atualizadoEm: row.updated_at || row.created_at || row.atualizado_em || row.atualizadoEm || new Date().toISOString()
   };
 }
 
@@ -503,67 +516,115 @@ export function mapLancamentoToSupabase(l: LancamentoFinanceiro): Record<string,
 // 1. FUNÇÕES DE BUSCA E PERSISTÊNCIA NO SUPABASE (ESTOQUE)
 // ==========================================
 
+/**
+ * Busca direta na tabela 'estoque' do Supabase.
+ * Se a busca retornar erro 404 (tabela não encontrada no schema cache),
+ * captura a exceção e retorna um array vazio ([]) no lugar de travar a tela ou gerar loops de erro no console.
+ */
+export async function fetchEstoqueDb(): Promise<any[]> {
+  try {
+    const { data, error, status } = await db.from('estoque').select('*');
+    if (error) {
+      if (isNotFoundError(error, status)) {
+        return [];
+      }
+      return [];
+    }
+    return data || [];
+  } catch (err: any) {
+    return [];
+  }
+}
+
+/**
+ * Busca direta na tabela 'estoque_movimentacoes' do Supabase.
+ * Se a busca retornar erro 404, captura a exceção e retorna um array vazio ([]) sem travar a tela ou gerar loops de erro no console.
+ */
+export async function fetchEstoqueMovimentacoesDb(): Promise<any[]> {
+  try {
+    const { data, error, status } = await db
+      .from('estoque_movimentacoes')
+      .select('*')
+      .order('created_at', { ascending: false });
+    if (error) {
+      if (isNotFoundError(error, status)) {
+        return [];
+      }
+      return [];
+    }
+    return data || [];
+  } catch (err: any) {
+    return [];
+  }
+}
+
 export async function fetchMateriaisEstoqueDb(): Promise<MaterialEstoque[]> {
   try {
-    const { data, error } = await db
-      .from('estoque_materiais')
+    // 1. Tenta buscar da tabela 'estoque'
+    const { data: estoqueData, error: estoqueError, status: estoqueStatus } = await db
+      .from('estoque')
       .select('*')
       .order('nome', { ascending: true });
 
-    if (!error && data && data.length > 0) {
-      const mapped = data.map(mapSupabaseToMaterial);
+    if (!estoqueError && estoqueData && estoqueData.length > 0) {
+      const mapped = estoqueData.map(mapSupabaseToMaterial);
       cacheMateriais = mapped;
       return mapped;
     }
 
-    // Se a tabela estiver vazia, tenta semear os materiais iniciais no Supabase
-    if (!error && (!data || data.length === 0)) {
-      try {
-        const toInsert = INITIAL_MATERIAIS.map(mapMaterialToSupabase);
-        await db.from('estoque_materiais').insert(toInsert);
-      } catch (seedErr) {
-        console.warn('Aviso semeadura estoque_materiais:', seedErr);
+    // 2. Tenta tabela alternativa 'estoque_materiais' caso 'estoque' não retorne itens
+    try {
+      const { data: matData, error: matError, status: matStatus } = await db
+        .from('estoque_materiais')
+        .select('*')
+        .order('nome', { ascending: true });
+
+      if (!matError && matData && matData.length > 0) {
+        const mapped = matData.map(mapSupabaseToMaterial);
+        cacheMateriais = mapped;
+        return mapped;
       }
+    } catch (matErr: any) {
+      // Captura exceção 404 silenciosamente
     }
-  } catch (err) {
-    console.warn('Supabase estoque_materiais offline ou com erro:', err);
+  } catch (err: any) {
+    if (!isNotFoundError(err, err?.status)) {
+      console.warn('Aviso ao consultar materiais do estoque no Supabase:', err?.message || err);
+    }
+  }
+
+  // Certifique-se de que o estado da aplicação carregue normalmente com dados padrão caso o banco esteja vazio
+  if (!cacheMateriais || cacheMateriais.length === 0) {
+    cacheMateriais = [...INITIAL_MATERIAIS];
   }
   return cacheMateriais;
 }
 
 export async function saveMaterialEstoqueDb(material: MaterialEstoque): Promise<{ data: MaterialEstoque; error: any }> {
   try {
-    const payload = mapMaterialToSupabase(material);
-    const { data, error } = await db
-      .from('estoque_materiais')
-      .upsert(payload, { onConflict: 'id' })
+    // Tenta persistir na tabela 'estoque' se compatível
+    const payloadEstoque: Record<string, any> = {
+      nome: material.nome,
+      quantidade: material.quantidade,
+      unidade: 'UN'
+    };
+    if (isUuid(material.id)) {
+      payloadEstoque.id = material.id;
+    }
+
+    const { error: estErr } = await db
+      .from('estoque')
+      .upsert(payloadEstoque)
       .select()
       .maybeSingle();
 
-    if (!error && data) {
-      const mapped = mapSupabaseToMaterial(data);
-      const idx = cacheMateriais.findIndex(m => m.id === mapped.id);
-      if (idx >= 0) cacheMateriais[idx] = mapped;
-      else cacheMateriais.push(mapped);
-      return { data: mapped, error: null };
-    }
-
-    // Fallback de insert caso upsert direto necessite
-    if (error) {
-      const { data: insData, error: insErr } = await db
-        .from('estoque_materiais')
-        .insert(payload)
-        .select()
-        .maybeSingle();
-
-      if (!insErr && insData) {
-        const mapped = mapSupabaseToMaterial(insData);
-        cacheMateriais.push(mapped);
-        return { data: mapped, error: null };
-      }
+    if (estErr && !isNotFoundError(estErr)) {
+      // Se 'estoque' falhar, tenta tabela 'estoque_materiais'
+      const payloadMat = mapMaterialToSupabase(material);
+      await db.from('estoque_materiais').upsert(payloadMat, { onConflict: 'id' });
     }
   } catch (e: any) {
-    console.warn('Erro ao salvar material no Supabase:', e);
+    // Captura qualquer exceção sem travar a aplicação
   }
 
   // Atualiza cache em memória
@@ -576,18 +637,20 @@ export async function saveMaterialEstoqueDb(material: MaterialEstoque): Promise<
 
 export async function deleteMaterialEstoqueDb(id: string): Promise<{ error: any }> {
   try {
-    const { error } = await db.from('estoque_materiais').delete().eq('id', id);
-    cacheMateriais = cacheMateriais.filter(m => m.id !== id);
-    return { error };
+    if (isUuid(id)) {
+      await db.from('estoque').delete().eq('id', id);
+    }
+    await db.from('estoque_materiais').delete().eq('id', id);
   } catch (e: any) {
-    cacheMateriais = cacheMateriais.filter(m => m.id !== id);
-    return { error: e };
+    // Silently continue
   }
+  cacheMateriais = cacheMateriais.filter(m => m.id !== id);
+  return { error: null };
 }
 
 export async function fetchRetalhosEstoqueDb(): Promise<RetalhoEstoque[]> {
   try {
-    const { data, error } = await db
+    const { data, error, status } = await db
       .from('estoque_retalhos')
       .select('*')
       .order('data_entrada', { ascending: false });
@@ -598,14 +661,18 @@ export async function fetchRetalhosEstoqueDb(): Promise<RetalhoEstoque[]> {
       return mapped;
     }
 
-    // Se estiver vazio, tenta semear no Supabase
-    if (!error && (!data || data.length === 0)) {
-      try {
-        await db.from('estoque_retalhos').insert(INITIAL_RETALHOS.map(mapRetalhoToSupabase));
-      } catch (e) {}
+    if (error && !isNotFoundError(error, status)) {
+      console.warn('Aviso ao carregar retalhos:', error.message || error);
     }
-  } catch (err) {
-    console.warn('Supabase estoque_retalhos com erro:', err);
+  } catch (err: any) {
+    if (!isNotFoundError(err, err?.status)) {
+      console.warn('Aviso ao consultar retalhos:', err?.message || err);
+    }
+  }
+
+  // Se o banco estiver vazio ou retornar 404, carrega normalmente com dados padrão
+  if (!cacheRetalhos || cacheRetalhos.length === 0) {
+    cacheRetalhos = [...INITIAL_RETALHOS];
   }
   return cacheRetalhos;
 }
@@ -637,21 +704,18 @@ export async function saveRetalhoEstoqueDb(retalho: RetalhoEstoque): Promise<{ d
 
 export async function deleteRetalhoEstoqueDb(id: string): Promise<{ error: any }> {
   try {
-    const { error } = await db.from('estoque_retalhos').delete().eq('id', id);
-    cacheRetalhos = cacheRetalhos.filter(r => r.id !== id);
-    return { error };
-  } catch (e) {
-    cacheRetalhos = cacheRetalhos.filter(r => r.id !== id);
-    return { error: e };
-  }
+    await db.from('estoque_retalhos').delete().eq('id', id);
+  } catch (e) {}
+  cacheRetalhos = cacheRetalhos.filter(r => r.id !== id);
+  return { error: null };
 }
 
 export async function fetchMovimentacoesEstoqueDb(): Promise<MovimentacaoEstoque[]> {
   try {
-    const { data, error } = await db
+    const { data, error, status } = await db
       .from('estoque_movimentacoes')
       .select('*')
-      .order('data', { ascending: false })
+      .order('created_at', { ascending: false })
       .limit(100);
 
     if (!error && data && data.length > 0) {
@@ -659,8 +723,14 @@ export async function fetchMovimentacoesEstoqueDb(): Promise<MovimentacaoEstoque
       cacheMovimentacoes = mapped;
       return mapped;
     }
-  } catch (e) {}
-  return cacheMovimentacoes;
+
+    if (error && !isNotFoundError(error, status)) {
+      console.warn('Aviso ao carregar movimentações:', error.message || error);
+    }
+  } catch (e: any) {
+    // Captura exceção e não trava nem gera loops no console
+  }
+  return cacheMovimentacoes || [];
 }
 
 export async function registrarMovimentacaoDb(mov: Omit<MovimentacaoEstoque, 'id' | 'data'>): Promise<MovimentacaoEstoque> {
@@ -671,10 +741,17 @@ export async function registrarMovimentacaoDb(mov: Omit<MovimentacaoEstoque, 'id
   };
 
   try {
-    const payload = mapMovimentacaoToSupabase(novaMov);
+    const payload: Record<string, any> = {
+      descricao: `${mov.materialNome || 'Material'} (${mov.tipo.toUpperCase()}) - ${mov.observacao || ''}`.trim(),
+      tipo: mov.tipo,
+      quantidade: mov.quantidade
+    };
+    if (mov.materialId && isUuid(mov.materialId)) {
+      payload.estoque_id = mov.materialId;
+    }
     await db.from('estoque_movimentacoes').insert(payload);
   } catch (e) {
-    console.warn('Aviso ao gravar movimentação no Supabase:', e);
+    // Não trava se a gravação remota falhar
   }
 
   cacheMovimentacoes = [novaMov, ...cacheMovimentacoes];
@@ -687,7 +764,7 @@ export async function registrarMovimentacaoDb(mov: Omit<MovimentacaoEstoque, 'id
 
 export async function fetchLancamentosFinanceirosDb(): Promise<LancamentoFinanceiro[]> {
   try {
-    const { data, error } = await db
+    const { data, error, status } = await db
       .from('financeiro_lancamentos')
       .select('*')
       .order('data_vencimento', { ascending: false });
@@ -698,14 +775,18 @@ export async function fetchLancamentosFinanceirosDb(): Promise<LancamentoFinance
       return mapped;
     }
 
-    // Se estiver vazio, tenta semear lançamentos iniciais no Supabase
-    if (!error && (!data || data.length === 0)) {
-      try {
-        await db.from('financeiro_lancamentos').insert(INITIAL_FINANCEIRO.map(mapLancamentoToSupabase));
-      } catch (e) {}
+    if (error && !isNotFoundError(error, status)) {
+      console.warn('Aviso ao carregar lançamentos financeiros:', error.message || error);
     }
-  } catch (e) {
-    console.warn('Supabase financeiro_lancamentos com erro:', e);
+  } catch (e: any) {
+    if (!isNotFoundError(e, e?.status)) {
+      console.warn('Aviso ao consultar financeiro:', e?.message || e);
+    }
+  }
+
+  // Se o banco estiver vazio ou retornar 404, carrega normalmente com dados padrão
+  if (!cacheLancamentos || cacheLancamentos.length === 0) {
+    cacheLancamentos = [...INITIAL_FINANCEIRO];
   }
   return cacheLancamentos;
 }

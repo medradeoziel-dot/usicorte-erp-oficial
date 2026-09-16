@@ -23,6 +23,75 @@ export const db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 
 export type StatusCotacao = 'rascunho' | 'pendente' | 'aprovado' | 'rejeitado';
 
+/**
+ * Identifica se um erro retornado pelo Supabase/PostgREST ou uma exceção de rede
+ * corresponde a um erro 404 (tabela não encontrada no schema cache, relação inexistente ou status 404).
+ */
+export function isNotFoundError(error: any, status?: number): boolean {
+  if (!error && status !== 404) return false;
+  if (status === 404) return true;
+  if (error?.status === 404 || error?.statusCode === 404) return true;
+  if (error?.code === 'PGRST205' || error?.code === 'PGRST116' || error?.code === '42P01') return true;
+  const msg = String(error?.message || error?.details || error || '').toLowerCase();
+  return (
+    msg.includes('404') ||
+    msg.includes('not found') ||
+    msg.includes('could not find the table') ||
+    (msg.includes('relation') && msg.includes('does not exist'))
+  );
+}
+
+/**
+ * Executa uma busca segura em qualquer tabela do Supabase.
+ * Se a busca retornar erro 404 (ou a tabela não existir no schema cache),
+ * captura a exceção/erro e retorna um array vazio ([]) sem travar a tela ou gerar loops de erro no console.
+ */
+export async function safeFetchTable<T = any>(
+  tableName: string,
+  queryBuilder?: (query: any) => any
+): Promise<T[]> {
+  try {
+    let q = db.from(tableName).select('*');
+    if (queryBuilder) {
+      q = queryBuilder(q);
+    }
+    const res = await q;
+
+    if (res.error) {
+      if (isNotFoundError(res.error, res.status)) {
+        // Tabela inexistente / 404: captura silenciosamente e retorna array vazio
+        return [];
+      }
+      console.warn(`Aviso ao consultar tabela '${tableName}':`, res.error.message || res.error);
+      return [];
+    }
+
+    return (res.data || []) as T[];
+  } catch (err: any) {
+    if (isNotFoundError(err, err?.status)) {
+      return [];
+    }
+    console.warn(`Exceção capturada ao consultar tabela '${tableName}':`, err?.message || err);
+    return [];
+  }
+}
+
+/**
+ * Busca registros da tabela 'estoque' no Supabase de forma segura.
+ * Retorna [] se a tabela retornar 404 ou estiver vazia.
+ */
+export async function fetchEstoqueDb(): Promise<any[]> {
+  return safeFetchTable('estoque');
+}
+
+/**
+ * Busca registros da tabela 'estoque_movimentacoes' no Supabase de forma segura.
+ * Retorna [] se a tabela retornar 404 ou estiver vazia.
+ */
+export async function fetchEstoqueMovimentacoesDb(): Promise<any[]> {
+  return safeFetchTable('estoque_movimentacoes', q => q.order('created_at', { ascending: false }).limit(100));
+}
+
 /* ---- helper: só aceita UUID de verdade ---- */
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const isUuid = (v?: string | null): v is string => !!v && UUID_RE.test(v.trim());
@@ -500,10 +569,12 @@ export async function fetchClientesDb(searchQuery?: string): Promise<Client[]> {
       .select('*')
       .order('nome', { ascending: true });
 
-    const { data, error } = await query;
+    const { data, error, status } = await query;
 
     if (error) {
-      console.warn("Aviso ao buscar clientes no Supabase:", error.message);
+      if (!isNotFoundError(error, status)) {
+        console.warn("Aviso ao buscar clientes no Supabase:", error.message);
+      }
       return [];
     }
 
@@ -851,9 +922,11 @@ export async function fetchCotacoesDb(filtroCliente?: string, filtroStatus?: str
       q = q.eq('status', filtroStatus);
     }
 
-    const { data, error } = await q;
+    const { data, error, status } = await q;
     if (error) {
-      console.warn("Erro ao carregar cotações do Supabase:", error.message);
+      if (!isNotFoundError(error, status)) {
+        console.warn("Erro ao carregar cotações do Supabase:", error.message);
+      }
       return [];
     }
 
@@ -1353,14 +1426,16 @@ export async function fetchCotacaoById(idOrNumero: string): Promise<SupabaseCota
 export async function fetchItensByCotacaoId(cotacaoId: string): Promise<SupabaseCotacaoItem[]> {
   try {
     if (!cotacaoId) return [];
-    const { data, error } = await db
+    const { data, error, status } = await db
       .from('cotacao_itens')
       .select('*')
       .eq('cotacao_id', cotacaoId)
       .order('ordem', { ascending: true });
 
     if (error) {
-      console.warn("Erro ao buscar itens da cotação:", error.message);
+      if (!isNotFoundError(error, status)) {
+        console.warn("Erro ao buscar itens da cotação:", error.message);
+      }
       return [];
     }
 
@@ -1713,7 +1788,7 @@ export async function fetchFechamentosMensaisDb(): Promise<FechamentoMensal[]> {
 
   // 2. Busca da tabela 'fechamentos_mensais' do Supabase
   try {
-    const { data, error } = await db
+    const { data, error, status } = await db
       .from('fechamentos_mensais')
       .select('*')
       .order('mes_ano', { ascending: false });
@@ -1733,9 +1808,13 @@ export async function fetchFechamentosMensaisDb(): Promise<FechamentoMensal[]> {
           updated_at: item.updated_at
         });
       });
+    } else if (error && !isNotFoundError(error, status)) {
+      console.warn("Aviso ao carregar fechamentos do Supabase:", error.message || error);
     }
-  } catch (err) {
-    console.warn("Aviso ao carregar fechamentos do Supabase:", err);
+  } catch (err: any) {
+    if (!isNotFoundError(err, err?.status)) {
+      console.warn("Aviso ao carregar fechamentos do Supabase:", err);
+    }
   }
 
   // Retorna ordenado pelo mês mais recente primeiro
