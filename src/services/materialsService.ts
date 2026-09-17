@@ -126,11 +126,11 @@ export function getCachedMaterials(): MaterialItem[] {
         return items;
       }
     }
-  } catch (err) {
-    console.warn('Erro ao ler cache local de materiais:', err);
+  } catch {
+    // Silencioso
   }
 
-  // Fallback padrão com os materiais canônicos
+  // Fallback padrão com os materiais canônicos em memória
   const defaults: MaterialItem[] = tabelaConstantes.map(c => ({
     id: c.nome
       .toLowerCase()
@@ -153,18 +153,23 @@ export function getCachedMaterials(): MaterialItem[] {
  */
 export function saveCachedMaterials(items: MaterialItem[]) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
-    syncGlobalMaterials(items);
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent(EVENT_MATERIAIS_SYNC, { detail: items }));
+    if (items && items.length > 0) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
+      syncGlobalMaterials(items);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent(EVENT_MATERIAIS_SYNC, { detail: items }));
+      }
     }
-  } catch (err) {
-    console.warn('Erro ao salvar cache de materiais:', err);
+  } catch {
+    // Silencioso
   }
 }
 
 /**
- * Busca todos os materiais da tabela 'materiais' do Supabase
+ * Busca todos os materiais da tabela 'materiais' do Supabase.
+ * Trata graciosamente buscas com ordenação (?order=nome.asc):
+ * captura erros HTTP/404 em try/catch e retorne um array vazio ([]) silenciosamente
+ * sem exibir o log vermelho no console.
  */
 export async function fetchMateriaisDb(): Promise<MaterialItem[]> {
   try {
@@ -173,22 +178,21 @@ export async function fetchMateriaisDb(): Promise<MaterialItem[]> {
       .select('*')
       .order('nome', { ascending: true });
 
-    if (!error && data && Array.isArray(data) && data.length > 0) {
+    if (error || status === 404 || isNotFoundError(error, status)) {
+      return [];
+    }
+
+    if (data && Array.isArray(data) && data.length > 0) {
       const mapped = data.map(mapSupabaseToItem);
       saveCachedMaterials(mapped);
       return mapped;
     }
 
-    if (error && !isNotFoundError(error, status)) {
-      console.warn('Erro ao buscar materiais do Supabase:', error.message || error);
-    }
-  } catch (err: any) {
-    if (!isNotFoundError(err, err?.status)) {
-      console.warn('Falha de conexão com Supabase materiais:', err?.message || err);
-    }
+    return [];
+  } catch {
+    // Silencioso: captura erros HTTP/404 e rede sem log vermelho
+    return [];
   }
-
-  return getCachedMaterials();
 }
 
 /**
@@ -344,10 +348,17 @@ export function useMaterialsCatalog() {
     setLoading(true);
     try {
       const items = await fetchMateriaisDb();
-      setMaterials(items);
+      if (items && items.length > 0) {
+        setMaterials(items);
+      } else {
+        // Certifique-se de que a aplicação utilize a lista de materiais em memória/estado caso o Supabase não retorne resultados
+        setMaterials(prev => (prev && prev.length > 0 ? prev : getCachedMaterials()));
+      }
       setError(null);
-    } catch (err: any) {
-      setError(err?.message || 'Falha ao carregar materiais.');
+    } catch {
+      // Fallback em memória/estado
+      setMaterials(prev => (prev && prev.length > 0 ? prev : getCachedMaterials()));
+      setError(null);
     } finally {
       setLoading(false);
     }
@@ -383,17 +394,18 @@ export function useMaterialsCatalog() {
       }
       try {
         db.removeChannel(channel);
-      } catch (err) {
+      } catch {
         // Ignora caso canal já fechado
       }
     };
   }, [reload]);
 
-  const profiles: MaterialProfile[] = materials.map(materialItemToProfile);
-  const constantes: TabelaConstanteItem[] = materials.map(materialItemToConstante);
+  const activeMaterials = (materials && materials.length > 0) ? materials : getCachedMaterials();
+  const profiles: MaterialProfile[] = activeMaterials.map(materialItemToProfile);
+  const constantes: TabelaConstanteItem[] = activeMaterials.map(materialItemToConstante);
 
   return {
-    materials,
+    materials: activeMaterials,
     profiles,
     constantes,
     loading,

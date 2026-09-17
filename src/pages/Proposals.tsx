@@ -263,19 +263,19 @@ export default function Proposals() {
     setIsLoadingDb(true);
     try {
       // 1. Clientes do Supabase
-      const { data: supaClientes, error: errClientes } = await db
+      const { data: supaClientes, error: errClientes, status: statusClientes } = await db
         .from("clientes")
         .select("*")
         .order("nome", { ascending: true });
 
       // 2. Cotações do Supabase
-      const { data: supaCotacoes, error: errCotacoes } = await db
+      const { data: supaCotacoes, error: errCotacoes, status: statusCotacoes } = await db
         .from("cotacoes")
         .select("*, cotacao_itens(*)")
         .order("created_at", { ascending: false });
 
       let currentClientsList = [...mockClientes];
-      if (!errClientes && supaClientes && supaClientes.length > 0) {
+      if (!errClientes && statusClientes !== 404 && supaClientes && supaClientes.length > 0) {
         const mappedClients: LocalCliente[] = supaClientes.map((c: any, index: number) => ({
           id: typeof c.id === "number" ? c.id : (index + 100),
           nome: c.nome || c.empresa || "Cliente",
@@ -296,7 +296,7 @@ export default function Proposals() {
         setDbClientes(combinedClients);
       }
 
-      if (!errCotacoes && supaCotacoes && supaCotacoes.length > 0) {
+      if (!errCotacoes && statusCotacoes !== 404 && supaCotacoes && supaCotacoes.length > 0) {
         const newPedidosPorCliente: Record<number, Pedido[]> = { ...mockPedidos };
         const newItensPorPedido: Record<string, ItemPedido[]> = { ...mockItens };
 
@@ -390,8 +390,8 @@ export default function Proposals() {
           loadSpecificQuoteFromDb(urlId);
         }
       }
-    } catch (error) {
-      console.warn("Conexão ao Supabase em modo local:", error);
+    } catch {
+      // Modo local ou offline sem travar nem gerar erro no console
     } finally {
       setIsLoadingDb(false);
     }

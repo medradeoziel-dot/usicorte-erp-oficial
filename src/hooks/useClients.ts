@@ -25,11 +25,20 @@ export function useClients() {
             if (Array.isArray(parsed)) {
               setClients(parsed);
             }
-          } catch (e) {}
+          } catch {}
         }
       }
-    } catch (err) {
-      console.warn('Erro ao carregar clientes do Supabase:', err);
+    } catch {
+      // Fallback gracioso para localStorage em caso de erro
+      const saved = localStorage.getItem('s_clientes');
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) {
+            setClients(parsed);
+          }
+        } catch {}
+      }
     } finally {
       setIsLoading(false);
     }
@@ -45,9 +54,7 @@ export function useClients() {
           const valid = parsed.filter(c => !String(c.id).startsWith('seed-'));
           setClients(valid);
         }
-      } catch (e) {
-        console.error('Error loading saved clients from localStorage:', e);
-      }
+      } catch {}
     }
 
     // 2. Busca do Supabase

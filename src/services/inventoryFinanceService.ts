@@ -517,14 +517,17 @@ export function mapLancamentoToSupabase(l: LancamentoFinanceiro): Record<string,
 // ==========================================
 
 /**
- * Busca direta na tabela 'estoque' do Supabase.
+ * Busca direta na tabela 'estoque' do Supabase com ordenação por nome.
  * Se a busca retornar erro 404 (tabela não encontrada no schema cache) ou qualquer erro,
  * captura a exceção e retorna um array vazio ([]) silenciosamente sem registrar erro vermelho no console.
  */
 export async function fetchEstoqueDb(): Promise<any[]> {
   try {
-    const { data, error } = await db.from('estoque').select('*');
-    if (error) {
+    const { data, error, status } = await db
+      .from('estoque')
+      .select('*')
+      .order('nome', { ascending: true });
+    if (error || status === 404 || isNotFoundError(error, status)) {
       return [];
     }
     return data || [];
@@ -539,11 +542,11 @@ export async function fetchEstoqueDb(): Promise<any[]> {
  */
 export async function fetchEstoqueMovimentacoesDb(): Promise<any[]> {
   try {
-    const { data, error } = await db
+    const { data, error, status } = await db
       .from('estoque_movimentacoes')
       .select('*')
       .order('created_at', { ascending: false });
-    if (error) {
+    if (error || status === 404 || isNotFoundError(error, status)) {
       return [];
     }
     return data || [];
@@ -554,13 +557,13 @@ export async function fetchEstoqueMovimentacoesDb(): Promise<any[]> {
 
 export async function fetchMateriaisEstoqueDb(): Promise<MaterialEstoque[]> {
   try {
-    // 1. Tenta buscar da tabela 'estoque'
-    const { data: estoqueData, error: estoqueError } = await db
+    // 1. Tenta buscar da tabela 'estoque' com ordenação por nome (order=nome.asc)
+    const { data: estoqueData, error: estoqueError, status: estoqueStatus } = await db
       .from('estoque')
       .select('*')
       .order('nome', { ascending: true });
 
-    if (!estoqueError && estoqueData && estoqueData.length > 0) {
+    if (!estoqueError && estoqueStatus !== 404 && !isNotFoundError(estoqueError, estoqueStatus) && estoqueData && estoqueData.length > 0) {
       const mapped = estoqueData.map(mapSupabaseToMaterial);
       cacheMateriais = mapped;
       return mapped;
@@ -568,12 +571,12 @@ export async function fetchMateriaisEstoqueDb(): Promise<MaterialEstoque[]> {
 
     // 2. Tenta tabela alternativa 'estoque_materiais' caso 'estoque' não retorne itens
     try {
-      const { data: matData, error: matError } = await db
+      const { data: matData, error: matError, status: matStatus } = await db
         .from('estoque_materiais')
         .select('*')
         .order('nome', { ascending: true });
 
-      if (!matError && matData && matData.length > 0) {
+      if (!matError && matStatus !== 404 && !isNotFoundError(matError, matStatus) && matData && matData.length > 0) {
         const mapped = matData.map(mapSupabaseToMaterial);
         cacheMateriais = mapped;
         return mapped;
@@ -585,7 +588,7 @@ export async function fetchMateriaisEstoqueDb(): Promise<MaterialEstoque[]> {
     // Silencioso
   }
 
-  // Certifique-se de que o estado da aplicação carregue normalmente com dados padrão caso o banco esteja vazio
+  // Certifique-se de que a aplicação utilize a lista de materiais em memória/estado caso o Supabase não retorne resultados
   if (!cacheMateriais || cacheMateriais.length === 0) {
     cacheMateriais = [...INITIAL_MATERIAIS];
   }
@@ -642,12 +645,12 @@ export async function deleteMaterialEstoqueDb(id: string): Promise<{ error: any 
 
 export async function fetchRetalhosEstoqueDb(): Promise<RetalhoEstoque[]> {
   try {
-    const { data, error } = await db
+    const { data, error, status } = await db
       .from('estoque_retalhos')
       .select('*')
       .order('data_entrada', { ascending: false });
 
-    if (!error && data && data.length > 0) {
+    if (!error && status !== 404 && !isNotFoundError(error, status) && data && data.length > 0) {
       const mapped = data.map(mapSupabaseToRetalho);
       cacheRetalhos = mapped;
       return mapped;
@@ -656,7 +659,7 @@ export async function fetchRetalhosEstoqueDb(): Promise<RetalhoEstoque[]> {
     // Silencioso
   }
 
-  // Se o banco estiver vazio ou retornar 404, carrega normalmente com dados padrão
+  // Se o banco estiver vazio ou retornar 404, carrega normalmente com dados padrão em memória
   if (!cacheRetalhos || cacheRetalhos.length === 0) {
     cacheRetalhos = [...INITIAL_RETALHOS];
   }
@@ -698,13 +701,13 @@ export async function deleteRetalhoEstoqueDb(id: string): Promise<{ error: any }
 
 export async function fetchMovimentacoesEstoqueDb(): Promise<MovimentacaoEstoque[]> {
   try {
-    const { data, error } = await db
+    const { data, error, status } = await db
       .from('estoque_movimentacoes')
       .select('*')
       .order('created_at', { ascending: false })
       .limit(100);
 
-    if (!error && data && data.length > 0) {
+    if (!error && status !== 404 && !isNotFoundError(error, status) && data && data.length > 0) {
       const mapped = data.map(mapSupabaseToMovimentacao);
       cacheMovimentacoes = mapped;
       return mapped;
@@ -751,22 +754,16 @@ export async function fetchLancamentosFinanceirosDb(): Promise<LancamentoFinance
       .select('*')
       .order('data_vencimento', { ascending: false });
 
-    if (!error && data && data.length > 0) {
+    if (!error && status !== 404 && !isNotFoundError(error, status) && data && data.length > 0) {
       const mapped = data.map(mapSupabaseToLancamento);
       cacheLancamentos = mapped;
       return mapped;
     }
-
-    if (error && !isNotFoundError(error, status)) {
-      console.warn('Aviso ao carregar lançamentos financeiros:', error.message || error);
-    }
-  } catch (e: any) {
-    if (!isNotFoundError(e, e?.status)) {
-      console.warn('Aviso ao consultar financeiro:', e?.message || e);
-    }
+  } catch {
+    // Silencioso
   }
 
-  // Se o banco estiver vazio ou retornar 404, carrega normalmente com dados padrão
+  // Se o banco estiver vazio ou retornar 404, carrega normalmente com dados padrão em memória
   if (!cacheLancamentos || cacheLancamentos.length === 0) {
     cacheLancamentos = [...INITIAL_FINANCEIRO];
   }
@@ -1297,6 +1294,9 @@ export function darBaixaMultiplasCotacoes(
 
 // Helpers síncronos para compatibilidade imediata
 export function getMateriaisEstoque(): MaterialEstoque[] {
+  if (!cacheMateriais || cacheMateriais.length === 0) {
+    cacheMateriais = [...INITIAL_MATERIAIS];
+  }
   return cacheMateriais;
 }
 

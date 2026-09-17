@@ -31,13 +31,22 @@ export function isNotFoundError(error: any, status?: number): boolean {
   if (!error && status !== 404) return false;
   if (status === 404) return true;
   if (error?.status === 404 || error?.statusCode === 404) return true;
-  if (error?.code === 'PGRST205' || error?.code === 'PGRST116' || error?.code === '42P01') return true;
+  if (
+    error?.code === 'PGRST205' || 
+    error?.code === 'PGRST116' || 
+    error?.code === '42P01' || 
+    error?.code === '42703' || 
+    error?.code === 'PGRST204'
+  ) return true;
   const msg = String(error?.message || error?.details || error || '').toLowerCase();
   return (
     msg.includes('404') ||
     msg.includes('not found') ||
     msg.includes('could not find the table') ||
-    (msg.includes('relation') && msg.includes('does not exist'))
+    msg.includes('could not find the column') ||
+    msg.includes('schema cache') ||
+    (msg.includes('relation') && msg.includes('does not exist')) ||
+    (msg.includes('column') && msg.includes('does not exist'))
   );
 }
 
@@ -57,29 +66,34 @@ export async function safeFetchTable<T = any>(
     }
     const res = await q;
 
-    if (res.error) {
-      // Captura erros 404 ou tabelas de estoque/movimentações silenciosamente sem registrar erro no console
-      if (isNotFoundError(res.error, res.status) || tableName.toLowerCase().includes('estoque') || tableName.toLowerCase().includes('movimentac')) {
-        return [];
-      }
+    if (res.error || res.status === 404 || isNotFoundError(res.error, res.status)) {
       return [];
     }
 
     return (res.data || []) as T[];
-  } catch (err: any) {
-    if (isNotFoundError(err, err?.status) || tableName.toLowerCase().includes('estoque') || tableName.toLowerCase().includes('movimentac')) {
-      return [];
-    }
+  } catch {
     return [];
   }
 }
 
 /**
- * Busca registros da tabela 'estoque' no Supabase de forma segura.
- * Retorna [] se a tabela retornar 404 ou estiver vazia.
+ * Busca registros da tabela 'estoque' no Supabase de forma segura com ordenação por nome.
+ * Retorna [] silenciosamente se a tabela retornar 404 ou estiver vazia.
  */
 export async function fetchEstoqueDb(): Promise<any[]> {
-  return safeFetchTable('estoque');
+  try {
+    const { data, error, status } = await db
+      .from('estoque')
+      .select('*')
+      .order('nome', { ascending: true });
+
+    if (error || status === 404 || isNotFoundError(error, status)) {
+      return [];
+    }
+    return data || [];
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -87,7 +101,20 @@ export async function fetchEstoqueDb(): Promise<any[]> {
  * Retorna [] se a tabela retornar 404 ou estiver vazia.
  */
 export async function fetchEstoqueMovimentacoesDb(): Promise<any[]> {
-  return safeFetchTable('estoque_movimentacoes', q => q.order('created_at', { ascending: false }).limit(100));
+  try {
+    const { data, error, status } = await db
+      .from('estoque_movimentacoes')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(100);
+
+    if (error || status === 404 || isNotFoundError(error, status)) {
+      return [];
+    }
+    return data || [];
+  } catch {
+    return [];
+  }
 }
 
 /* ---- helper: só aceita UUID de verdade ---- */
@@ -278,12 +305,12 @@ const DEFAULT_USUARIOS_EQUIPE: SupabaseUserRole[] = [
 export async function fetchUsuariosDb(): Promise<SupabaseUserRole[]> {
   try {
     // 1. Tenta buscar da tabela principal `usuarios`
-    const { data, error } = await db
+    const { data, error, status } = await db
       .from('usuarios')
       .select('*')
       .order('nome', { ascending: true });
 
-    if (!error && data && data.length > 0) {
+    if (!error && status !== 404 && data && data.length > 0) {
       return data.map((item: any) => {
         const isAdmin = (item.nome || '').toUpperCase() === 'ADMIN' || 
                         item.role === 'admin' || 
@@ -305,12 +332,8 @@ export async function fetchUsuariosDb(): Promise<SupabaseUserRole[]> {
       });
     }
 
-    if (error) {
-      console.warn("Aviso ao buscar tabela 'usuarios' no Supabase:", error.message);
-    }
-
-    // 2. Se a tabela 'usuarios' estiver vazia, tenta semear os usuários padrões nela
-    if (!error && (!data || data.length === 0)) {
+    // 2. Se a tabela 'usuarios' estiver vazia (sem erro), tenta semear os usuários padrões nela
+    if (!error && status !== 404 && (!data || data.length === 0)) {
       try {
         await Promise.all(DEFAULT_USUARIOS_EQUIPE.map(u => 
           db.from('usuarios').upsert({
@@ -320,16 +343,16 @@ export async function fetchUsuariosDb(): Promise<SupabaseUserRole[]> {
             cargo: u.cargo
           }, { onConflict: 'nome' })
         ));
-      } catch (e) {}
+      } catch {}
     }
 
     // 3. Fallback: Se usuarios deu erro, tenta consultar user_roles
     try {
-      const { data: roleData, error: roleError } = await db
+      const { data: roleData, error: roleError, status: roleStatus } = await db
         .from('user_roles')
         .select('*');
 
-      if (!roleError && roleData && roleData.length > 0) {
+      if (!roleError && roleStatus !== 404 && roleData && roleData.length > 0) {
         return roleData.map((item: any) => ({
           id: item.id ? String(item.id) : undefined,
           user_id: item.user_id ? String(item.user_id) : undefined,
@@ -342,11 +365,10 @@ export async function fetchUsuariosDb(): Promise<SupabaseUserRole[]> {
           updated_at: item.updated_at
         }));
       }
-    } catch (e) {}
+    } catch {}
 
     return DEFAULT_USUARIOS_EQUIPE;
-  } catch (err) {
-    console.error("Erro ao carregar usuários do Supabase:", err);
+  } catch {
     return DEFAULT_USUARIOS_EQUIPE;
   }
 }
@@ -562,17 +584,14 @@ export function mapClientToSupabase(c: any): Record<string, any> {
 
 export async function fetchClientesDb(searchQuery?: string): Promise<Client[]> {
   try {
-    let query = db
+    const query = db
       .from('clientes')
       .select('*')
       .order('nome', { ascending: true });
 
     const { data, error, status } = await query;
 
-    if (error) {
-      if (!isNotFoundError(error, status)) {
-        console.warn("Aviso ao buscar clientes no Supabase:", error.message);
-      }
+    if (error || status === 404 || isNotFoundError(error, status)) {
       return [];
     }
 
@@ -593,8 +612,8 @@ export async function fetchClientesDb(searchQuery?: string): Promise<Client[]> {
       return mapped;
     }
     return [];
-  } catch (err) {
-    console.error("Erro na conexão Supabase (clientes):", err);
+  } catch {
+    // Retorna array vazio silenciosamente sem exibir log vermelho no console
     return [];
   }
 }
@@ -602,20 +621,18 @@ export async function fetchClientesDb(searchQuery?: string): Promise<Client[]> {
 export async function fetchClienteById(id: string): Promise<Client | null> {
   try {
     if (!id) return null;
-    const { data, error } = await db
+    const { data, error, status } = await db
       .from('clientes')
       .select('*')
       .eq('id', id)
       .maybeSingle();
 
-    if (error) {
-      console.warn("Erro ao buscar cliente por ID:", error.message);
+    if (error || status === 404 || isNotFoundError(error, status)) {
       return null;
     }
 
     return data ? mapSupabaseToClient(data) : null;
-  } catch (err) {
-    console.error("Erro ao buscar cliente por ID:", err);
+  } catch {
     return null;
   }
 }
