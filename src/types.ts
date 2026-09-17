@@ -178,9 +178,9 @@ export interface MaterialEstoque {
   larguraMm: number; // Largura da chapa/perfil em mm
   comprimentoMm: number; // Comprimento em mm
   densidade: number; // Ex: 0.00785 (Aço Carbono), 0.00800 (Inox), etc.
-  pesoUnitarioKg: number; // Peso de 1 unidade/chapa em KG
-  quantidade: number; // Quantidade de chapas/unidades em estoque
-  pesoTotalKg: number; // Saldo total em KG (quantidade * pesoUnitarioKg)
+  pesoUnitarioKg: number; // Peso de 1 unidade/chapa em KG (ou 1 barra de 6m)
+  quantidade: number; // Quantidade de unidades/barras em estoque (conferência)
+  pesoTotalKg: number; // Saldo total estritamente em KG (controle principal)
   estoqueMinimoKg: number; // Alerta em KG
   estoqueMinimoQtd: number; // Alerta em Unidades
   custoKg: number; // Custo de compra por KG (R$)
@@ -189,6 +189,39 @@ export interface MaterialEstoque {
   fornecedor?: string;
   observacoes?: string;
   atualizadoEm: string;
+  ncm?: string;
+  constanteK?: number;
+  bitolaMm?: number;
+  metroLinearTotal?: number;
+}
+
+export interface EntradaNotaFiscalData {
+  numeroNF: string;
+  fornecedor?: string;
+  dataEmissao?: string;
+  tipoProduto: string;
+  bitolaMm: number;
+  constanteK: number;
+  ncm: string;
+  pesoBarra6m: number;
+  pesoTotalKgNF: number;
+  valorKgNF: number;
+  freteTotalNF: number;
+  qtdItensNF: number;
+  precoVendaKg: number;
+  qtdBarras6m: number;
+  metroLinearTotal: number;
+  subtotal: number;
+  ipiValor: number;
+  freteRateado: number;
+  custoTotalItem: number;
+  custoRealKg: number;
+  lucroKg: number;
+  margemLucroPercent: number;
+  materialDestinoId?: string;
+  nomeMaterial: string;
+  localizacao?: string;
+  lancarContasPagar?: boolean;
 }
 
 export interface RetalhoEstoque {

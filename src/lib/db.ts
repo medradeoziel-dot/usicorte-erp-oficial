@@ -10,16 +10,42 @@ import {
 } from "../types";
 import { formatarMedidasLimpa } from "../utils/calculator";
 
-const SUPABASE_URL = (import.meta.env?.VITE_SUPABASE_URL as string) || "https://kyzeiroxvgbkincisrdf.supabase.co";
-const SUPABASE_ANON_KEY = (import.meta.env?.VITE_SUPABASE_ANON_KEY as string) || "sb_publishable_2vCA1d0mEry_9Qy-QREVxA_aaR9IE6z";
+// Fallbacks robustos para variáveis de ambiente do Supabase (evita travamento do preview)
+const DEFAULT_SUPABASE_URL = "https://kyzeiroxvgbkincisrdf.supabase.co";
+const DEFAULT_SUPABASE_ANON_KEY = "sb_publishable_2vCA1d0mEry_9Qy-QREVxA_aaR9IE6z";
 
-export const db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: true
+const rawUrl = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_URL 
+  ? String(import.meta.env.VITE_SUPABASE_URL).trim() 
+  : "");
+const rawKey = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_ANON_KEY 
+  ? String(import.meta.env.VITE_SUPABASE_ANON_KEY).trim() 
+  : "");
+
+const SUPABASE_URL = (rawUrl && rawUrl.startsWith("http")) ? rawUrl : DEFAULT_SUPABASE_URL;
+const SUPABASE_ANON_KEY = (rawKey && rawKey.length > 0) ? rawKey : DEFAULT_SUPABASE_ANON_KEY;
+
+function initSupabaseClient() {
+  try {
+    return createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true
+      }
+    });
+  } catch (err) {
+    console.warn("Aviso: Falha ao inicializar cliente Supabase com credenciais fornecidas. Usando cliente fallback para evitar travamento do preview.", err);
+    return createClient(DEFAULT_SUPABASE_URL, DEFAULT_SUPABASE_ANON_KEY, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false
+      }
+    });
   }
-});
+}
+
+export const db = initSupabaseClient();
 
 export type StatusCotacao = 'rascunho' | 'pendente' | 'aprovado' | 'rejeitado';
 

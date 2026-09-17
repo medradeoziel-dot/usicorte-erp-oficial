@@ -26,11 +26,13 @@ import {
   fetchRetalhosEstoqueDb,
   fetchLancamentosFinanceirosDb,
   fetchMovimentacoesEstoqueDb,
+  saveMaterialEstoqueDb,
   INITIAL_MATERIAIS,
   INITIAL_RETALHOS,
   INITIAL_FINANCEIRO
 } from '../services/inventoryFinanceService';
-import { formatCurrency, formatWeightKg } from '../utils/calculator';
+import { formatCurrency, formatWeightKg, formatNumberBR } from '../utils/calculator';
+import EntradaNotaFiscalModal from './EntradaNotaFiscalModal';
 import {
   Package,
   Boxes,
@@ -191,6 +193,8 @@ export default function InventoryFinanceModule({
   const [filterTipo, setFilterTipo] = useState<string>('TODOS');
   const [filterOnlyLowStock, setFilterOnlyLowStock] = useState(false);
   const [isMaterialModalOpen, setIsMaterialModalOpen] = useState(false);
+  const [isNotaFiscalModalOpen, setIsNotaFiscalModalOpen] = useState(false);
+  const [materialSelecionadoNF, setMaterialSelecionadoNF] = useState<MaterialEstoque | null>(null);
   const [editingMaterial, setEditingMaterial] = useState<MaterialEstoque | null>(null);
 
   // Form Material State
@@ -333,6 +337,89 @@ export default function InventoryFinanceModule({
     setMateriais(updated);
     saveMateriaisEstoque(updated);
     showFeedback(`Material "${nome}" excluído do estoque.`);
+  };
+
+  const handleConfirmarEntradaNotaFiscal = async (dados: {
+    material: MaterialEstoque;
+    isNovo: boolean;
+    movimentacao: {
+      numeroNF: string;
+      pesoKg: number;
+      custoTotal: number;
+      observacao: string;
+      quantidadeBarras: number;
+      metroLinear: number;
+    };
+    gerarFinanceiro: boolean;
+    dadosFinanceiro?: {
+      descricao: string;
+      fornecedor: string;
+      valor: number;
+      numeroNF: string;
+    };
+  }) => {
+    try {
+      const { material, isNovo, movimentacao, gerarFinanceiro, dadosFinanceiro } = dados;
+
+      // 1. Atualiza lista de materiais
+      let updatedMateriais: MaterialEstoque[];
+      if (isNovo) {
+        updatedMateriais = [material, ...materiais];
+      } else {
+        updatedMateriais = materiais.map(m => m.id === material.id ? material : m);
+      }
+      setMateriais(updatedMateriais);
+      saveMateriaisEstoque(updatedMateriais);
+      await saveMaterialEstoqueDb(material);
+
+      // 2. Registra movimentação de estoque
+      const novaMov: MovimentacaoEstoque = {
+        id: `mov-${Date.now()}`,
+        materialId: material.id,
+        materialNome: material.nome,
+        tipo: 'entrada',
+        quantidade: movimentacao.quantidadeBarras,
+        pesoKg: movimentacao.pesoKg,
+        custoTotal: movimentacao.custoTotal,
+        referenciaDoc: `NF-${movimentacao.numeroNF}`,
+        data: new Date().toISOString(),
+        usuario: 'Almoxarifado / Compras',
+        observacao: movimentacao.observacao
+      };
+      const updatedMovs = [novaMov, ...movimentacoes];
+      setMovimentacoes(updatedMovs);
+      await registrarMovimentacao(novaMov);
+
+      // 3. Lançamento opcional em Contas a Pagar
+      if (gerarFinanceiro && dadosFinanceiro) {
+        const novoLancamento: LancamentoFinanceiro = {
+          id: `fin-${Date.now()}`,
+          tipo: 'despesa',
+          categoria: 'compra_chapa',
+          descricao: dadosFinanceiro.descricao,
+          clienteFornecedor: dadosFinanceiro.fornecedor,
+          documentoRef: `NF-${dadosFinanceiro.numeroNF}`,
+          valor: dadosFinanceiro.valor,
+          dataVencimento: new Date(Date.now() + 28 * 86400000).toISOString().split('T')[0],
+          dataCompetencia: new Date().toISOString().split('T')[0],
+          formaPagamento: 'Boleto',
+          status: 'pendente',
+          criadoEm: new Date().toISOString(),
+          observacoes: `Entrada NF ${dadosFinanceiro.numeroNF} estocada em barras de 6m (${formatWeightKg(movimentacao.pesoKg)} / ${movimentacao.quantidadeBarras} barras)`
+        };
+        const updatedLancamentos = [novoLancamento, ...lancamentos];
+        setLancamentos(updatedLancamentos);
+        saveLancamentosFinanceiros(updatedLancamentos);
+      }
+
+      showFeedback(
+        `✅ Entrada da NF ${movimentacao.numeroNF} processada! ${formatWeightKg(movimentacao.pesoKg)} estocados em KG (${formatNumberBR(movimentacao.quantidadeBarras, 2)} barras de 6m / ${formatNumberBR(movimentacao.metroLinear, 1)}m lineares para conferência).`,
+        'success'
+      );
+    } catch (err: any) {
+      console.error('Erro ao processar entrada de NF:', err);
+      showFeedback('Erro ao salvar entrada da Nota Fiscal.', 'error');
+    }
   };
 
   const handleExecuteAdjustStock = (e: React.FormEvent) => {
@@ -919,6 +1006,17 @@ export default function InventoryFinanceModule({
             </div>
 
             <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  setMaterialSelecionadoNF(null);
+                  setIsNotaFiscalModalOpen(true);
+                }}
+                className="px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-600/20 flex items-center gap-1.5 transition-all cursor-pointer"
+                title="Entrada de Nota Fiscal e cálculo automático em barras de 6m"
+              >
+                <FileText className="w-4 h-4" />
+                <span>Entrada Nota Fiscal (6m)</span>
+              </button>
               {onNavigateToFechamento && (
                 <button
                   onClick={onNavigateToFechamento}
@@ -948,11 +1046,12 @@ export default function InventoryFinanceModule({
                     <th className="py-3 px-4">Código</th>
                     <th className="py-3 px-4">Descrição do Material</th>
                     <th className="py-3 px-4 text-center">Tipo</th>
-                    <th className="py-3 px-4 text-right">Espessura</th>
-                    <th className="py-3 px-4 text-right">Dimensões (mm)</th>
-                    <th className="py-3 px-4 text-right">Peso Unit. (KG)</th>
-                    <th className="py-3 px-4 text-right">Saldo (Un)</th>
-                    <th className="py-3 px-4 text-right">Saldo Total (KG)</th>
+                    <th className="py-3 px-4 text-right">Bitola / Dimensões</th>
+                    <th className="py-3 px-4 text-right">Peso 1 Barra (6m)</th>
+                    <th className="py-3 px-4 text-right text-emerald-400">
+                      <div>Saldo em Estoque</div>
+                      <div className="text-[9px] text-emerald-500/80 font-normal lowercase">(Kg / Metros / Barras 6m)</div>
+                    </th>
                     <th className="py-3 px-4 text-right">Custo / KG</th>
                     <th className="py-3 px-4 text-center">Nível / Alerta</th>
                     <th className="py-3 px-4">Localização</th>
@@ -962,37 +1061,53 @@ export default function InventoryFinanceModule({
                 <tbody className="divide-y divide-slate-800/60 text-slate-300">
                   {filteredMateriais.length === 0 ? (
                     <tr>
-                      <td colSpan={12} className="py-8 text-center text-slate-500">
+                      <td colSpan={11} className="py-8 text-center text-slate-500">
                         Nenhum material encontrado com os filtros selecionados.
                       </td>
                     </tr>
                   ) : (
                     filteredMateriais.map((mat) => {
                       const isLowStock = mat.pesoTotalKg <= mat.estoqueMinimoKg || mat.quantidade <= mat.estoqueMinimoQtd;
-                      const percentualMinimo = mat.estoqueMinimoKg > 0 ? (mat.pesoTotalKg / mat.estoqueMinimoKg) * 100 : 100;
+                      const isBarraOuPerfil = mat.tipo === 'barra' || mat.tipo === 'perfil' || mat.tipo === 'tubo' || Boolean(mat.constanteK);
+                      const barrasEquiv = mat.pesoUnitarioKg > 0 ? (mat.pesoTotalKg / mat.pesoUnitarioKg) : (mat.quantidade || 0);
+                      const metrosLinearesEquiv = barrasEquiv * ((mat.comprimentoMm || 6000) / 1000);
+                      const barrasFormatada = Number.isInteger(Number(barrasEquiv.toFixed(2)))
+                        ? Math.round(barrasEquiv).toString()
+                        : formatNumberBR(barrasEquiv, 2);
+
+                      // Formato solicitado: "370,20 Kg (24,00m / 4 Barras de 6m)"
+                      const saldoFormatado6m = isBarraOuPerfil
+                        ? `${formatNumberBR(mat.pesoTotalKg, 2)} Kg (${formatNumberBR(metrosLinearesEquiv, 2)}m / ${barrasFormatada} ${barrasFormatada === '1' ? 'Barra' : 'Barras'} de 6m)`
+                        : `${formatNumberBR(mat.pesoTotalKg, 2)} Kg (${mat.quantidade} un)`;
 
                       return (
                         <tr key={mat.id} className={`hover:bg-slate-800/40 transition-colors ${isLowStock ? 'bg-rose-950/10' : ''}`}>
                           <td className="py-3 px-4 font-mono font-bold text-blue-400">{mat.codigo}</td>
                           <td className="py-3 px-4 font-semibold text-white">
                             <div>{mat.nome}</div>
-                            {mat.fornecedor && <div className="text-[10px] text-slate-500 font-normal">Fornecedor: {mat.fornecedor}</div>}
+                            <div className="flex items-center gap-2 text-[10px] text-slate-400 font-normal mt-0.5">
+                              {mat.ncm && <span>NCM: <strong className="font-mono text-slate-300">{mat.ncm}</strong></span>}
+                              {mat.constanteK && <span>k: <strong className="font-mono text-emerald-400">{mat.constanteK}</strong></span>}
+                              {mat.fornecedor && <span>Fornecedor: {mat.fornecedor}</span>}
+                            </div>
                           </td>
                           <td className="py-3 px-4 text-center">
                             <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase bg-slate-800 text-slate-300 border border-slate-700">
                               {mat.tipo}
                             </span>
                           </td>
-                          <td className="py-3 px-4 text-right font-mono">{mat.espessuraMm ? `${mat.espessuraMm} mm` : '-'}</td>
-                          <td className="py-3 px-4 text-right font-mono text-slate-400">
-                            {mat.larguraMm && mat.comprimentoMm ? `${mat.larguraMm} x ${mat.comprimentoMm}` : '-'}
+                          <td className="py-3 px-4 text-right font-mono text-slate-300">
+                            {mat.espessuraMm ? `${mat.espessuraMm} mm` : (mat.larguraMm && mat.comprimentoMm ? `${mat.larguraMm} x ${mat.comprimentoMm}` : '-')}
                           </td>
                           <td className="py-3 px-4 text-right font-mono">{formatWeightKg(mat.pesoUnitarioKg)}</td>
-                          <td className="py-3 px-4 text-right font-mono font-bold text-white">
-                            {mat.quantidade} un
-                          </td>
-                          <td className="py-3 px-4 text-right font-mono font-bold text-emerald-400">
-                            {formatWeightKg(mat.pesoTotalKg)}
+                          <td className="py-3 px-4 text-right font-mono">
+                            {/* Saldo exibido exatamente no formato: "370,20 Kg (24,00m / 4 Barras de 6m)" */}
+                            <div className="text-xs sm:text-sm font-extrabold text-emerald-400 whitespace-nowrap">
+                              {saldoFormatado6m}
+                            </div>
+                            <div className="text-[9px] text-slate-400 uppercase tracking-wider font-normal mt-0.5">
+                              Estoque base em KG (baixas fracionadas)
+                            </div>
                           </td>
                           <td className="py-3 px-4 text-right font-mono text-slate-300">
                             {formatCurrency(mat.custoKg)}
@@ -1013,6 +1128,16 @@ export default function InventoryFinanceModule({
                           <td className="py-3 px-4 text-slate-400 text-[11px]">{mat.localizacao}</td>
                           <td className="py-3 px-4 text-center">
                             <div className="flex items-center justify-center gap-1">
+                              <button
+                                onClick={() => {
+                                  setMaterialSelecionadoNF(mat);
+                                  setIsNotaFiscalModalOpen(true);
+                                }}
+                                className="p-1.5 bg-teal-600/20 hover:bg-teal-600 text-teal-300 hover:text-white rounded-lg text-xs transition-all cursor-pointer"
+                                title={`Entrada por Nota Fiscal para "${mat.nome}"`}
+                              >
+                                <FileText className="w-3.5 h-3.5" />
+                              </button>
                               <button
                                 onClick={() => {
                                   setAdjustMaterial(mat);
@@ -1922,6 +2047,27 @@ export default function InventoryFinanceModule({
               </div>
             </div>
 
+            {!editingMaterial && (
+              <div className="p-3 bg-gradient-to-r from-emerald-950/40 via-slate-900 to-teal-950/30 border border-emerald-500/30 rounded-xl flex items-center justify-between gap-3">
+                <div className="text-xs text-slate-300">
+                  <span className="font-bold text-emerald-400">Entrada via Nota Fiscal (Barras de 6m)?</span>
+                  <div className="text-[11px] text-slate-400 mt-0.5">
+                    Preenchimento automático de k, NCM, peso da barra, IPI (3,25%), rateio de frete e custo real.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMaterialModalOpen(false);
+                    setIsNotaFiscalModalOpen(true);
+                  }}
+                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold shrink-0 transition-colors cursor-pointer"
+                >
+                  Abrir Entrada NF
+                </button>
+              </div>
+            )}
+
             <form onSubmit={handleSaveMaterial} className="space-y-4 pt-2">
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
@@ -2330,6 +2476,18 @@ export default function InventoryFinanceModule({
           </div>
         </div>
       )}
+
+      {/* Modal: Entrada de Nota Fiscal & Estoque Barras 6m */}
+      <EntradaNotaFiscalModal
+        isOpen={isNotaFiscalModalOpen}
+        onClose={() => {
+          setIsNotaFiscalModalOpen(false);
+          setMaterialSelecionadoNF(null);
+        }}
+        materiaisExistentes={materiais}
+        materialPreSelecionado={materialSelecionadoNF}
+        onConfirmarEntrada={handleConfirmarEntradaNotaFiscal}
+      />
     </div>
   );
 }

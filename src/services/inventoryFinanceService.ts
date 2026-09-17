@@ -369,7 +369,11 @@ export function mapSupabaseToMaterial(row: any): MaterialEstoque {
     localizacao: row.localizacao || row.location || matchedInitial?.localizacao || '',
     fornecedor: row.fornecedor || row.supplier || matchedInitial?.fornecedor || '',
     observacoes: row.observacoes || row.observacao || row.notes || matchedInitial?.observacoes || '',
-    atualizadoEm: row.updated_at || row.created_at || row.atualizado_em || row.atualizadoEm || new Date().toISOString()
+    atualizadoEm: row.updated_at || row.created_at || row.atualizado_em || row.atualizadoEm || new Date().toISOString(),
+    ncm: row.ncm || row.ncm_codigo || matchedInitial?.ncm || '',
+    constanteK: Number(row.constante_k != null ? row.constante_k : (row.constanteK != null ? row.constanteK : (matchedInitial?.constanteK ?? 0))),
+    bitolaMm: Number(row.bitola_mm != null ? row.bitola_mm : (row.bitolaMm != null ? row.bitolaMm : (matchedInitial?.bitolaMm ?? 0))),
+    metroLinearTotal: Number(row.metro_linear_total != null ? row.metro_linear_total : (row.metroLinearTotal != null ? row.metroLinearTotal : (matchedInitial?.metroLinearTotal ?? 0)))
   };
 }
 
@@ -394,6 +398,10 @@ export function mapMaterialToSupabase(m: MaterialEstoque): Record<string, any> {
     localizacao: m.localizacao,
     fornecedor: m.fornecedor,
     observacoes: m.observacoes,
+    ncm: m.ncm,
+    constante_k: m.constanteK,
+    bitola_mm: m.bitolaMm,
+    metro_linear_total: m.metroLinearTotal,
     updated_at: new Date().toISOString()
   };
 }
@@ -597,11 +605,13 @@ export async function fetchMateriaisEstoqueDb(): Promise<MaterialEstoque[]> {
 
 export async function saveMaterialEstoqueDb(material: MaterialEstoque): Promise<{ data: MaterialEstoque; error: any }> {
   try {
-    // Tenta persistir na tabela 'estoque' se compatível
+    // Persiste no Supabase estritamente em KG para permitir baixas fracionadas nas vendas
+    const pesoKgReal = Number((material.pesoTotalKg ?? 0).toFixed(2));
     const payloadEstoque: Record<string, any> = {
       nome: material.nome,
-      quantidade: material.quantidade,
-      unidade: 'UN'
+      quantidade: pesoKgReal, // Saldo principal estritamente em KG
+      unidade: 'KG', // Unidade em KG para baixas fracionadas de corte/venda
+      peso_total_kg: pesoKgReal
     };
     if (isUuid(material.id)) {
       payloadEstoque.id = material.id;
@@ -613,11 +623,11 @@ export async function saveMaterialEstoqueDb(material: MaterialEstoque): Promise<
       .select()
       .maybeSingle();
 
-    if (estErr && !isNotFoundError(estErr)) {
-      // Se 'estoque' falhar, tenta tabela 'estoque_materiais'
-      const payloadMat = mapMaterialToSupabase(material);
-      await db.from('estoque_materiais').upsert(payloadMat, { onConflict: 'id' });
-    }
+    // Sincroniza também com a tabela detalhada 'estoque_materiais'
+    const payloadMat = mapMaterialToSupabase(material);
+    payloadMat.peso_total_kg = pesoKgReal;
+    payloadMat.quantidade = pesoKgReal; // Saldo principal em KG
+    await db.from('estoque_materiais').upsert(payloadMat, { onConflict: 'id' });
   } catch (e: any) {
     // Captura qualquer exceção sem travar a aplicação
   }
