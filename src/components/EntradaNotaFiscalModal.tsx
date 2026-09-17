@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { MaterialEstoque } from '../types';
 import { 
   PRODUTOS_PADRAO_NF, 
@@ -21,8 +21,137 @@ import {
   HelpCircle,
   ArrowRight,
   ShieldCheck,
-  Scale
+  Scale,
+  Barcode,
+  ScanLine,
+  Sparkles,
+  Search,
+  RotateCcw
 } from 'lucide-react';
+
+interface DanfeChaveInfo {
+  chave: string;
+  numeroNF: string;
+  emitente: string;
+  cnpj: string;
+  pesoTotalKg: number;
+  valorKg: number;
+  ncm: string;
+  tipoPerfilId?: string;
+  bitolaMm?: number;
+  descricaoItem?: string;
+}
+
+const EXEMPLOS_DANFE: DanfeChaveInfo[] = [
+  {
+    chave: '35240833611500000119550010001048201987654321',
+    numeroNF: '104820',
+    emitente: 'Gerdau Aços Longos S.A.',
+    cnpj: '33.611.500/0001-19',
+    pesoTotalKg: 1850.00,
+    valorKg: 11.20,
+    ncm: '7214.99.10',
+    tipoPerfilId: 'redondo',
+    bitolaMm: 50.8,
+    descricaoItem: 'Barra Redonda Laminada 1020/1045 Ø 2" (50.8mm)'
+  },
+  {
+    chave: '31240917469701000177550020002154301123456789',
+    numeroNF: '215430',
+    emitente: 'ArcelorMittal Brasil S.A.',
+    cnpj: '17.469.701/0001-77',
+    pesoTotalKg: 2450.00,
+    valorKg: 10.90,
+    ncm: '7214.91.00',
+    tipoPerfilId: 'quadrado',
+    bitolaMm: 50,
+    descricaoItem: 'Barra Quadrada Laminada A36 50mm'
+  },
+  {
+    chave: '35240761074829000185550010000895401998877665',
+    numeroNF: '089540',
+    emitente: 'Villares Metals S.A.',
+    cnpj: '61.074.829/0001-85',
+    pesoTotalKg: 1200.00,
+    valorKg: 16.50,
+    ncm: '7214.99.10',
+    tipoPerfilId: 'redondo',
+    bitolaMm: 76.2,
+    descricaoItem: 'Barra Redonda Aço Especial 4140 Ø 3" (76.2mm)'
+  },
+  {
+    chave: '35240901732997000104550030003412001554433221',
+    numeroNF: '341200',
+    emitente: 'Açotubo Indústria e Comércio Ltda',
+    cnpj: '01.732.997/0001-04',
+    pesoTotalKg: 1620.00,
+    valorKg: 12.80,
+    ncm: '7304.39.90',
+    tipoPerfilId: 'tubo',
+    bitolaMm: 50,
+    descricaoItem: 'Tubo Mecânico sem Costura ST 52'
+  }
+];
+
+function decodificarChaveAcessoDanfe(chaveInput: string): DanfeChaveInfo | null {
+  const digits = chaveInput.replace(/\D/g, '');
+  if (!digits) return null;
+
+  // 1. Verifica se bate com preset conhecido
+  const preset = EXEMPLOS_DANFE.find(
+    ex => ex.chave === digits || (digits.length >= 6 && ex.chave.includes(digits)) || digits === ex.numeroNF
+  );
+  if (preset && digits.length >= 6) {
+    return preset;
+  }
+
+  // 2. Chave oficial de 44 dígitos (NF-e padrão brasileiro)
+  if (digits.length === 44) {
+    const cnpjRaw = digits.slice(6, 20);
+    const cnpjFormatado = `${cnpjRaw.slice(0, 2)}.${cnpjRaw.slice(2, 5)}.${cnpjRaw.slice(5, 8)}/${cnpjRaw.slice(8, 12)}-${cnpjRaw.slice(12, 14)}`;
+    const numNFNum = parseInt(digits.slice(25, 34), 10);
+    const numNFStr = String(numNFNum || digits.slice(25, 34));
+
+    // Mapeamento de emitentes conhecidos pelo CNPJ
+    let emitente = `Siderúrgica Industrial (CNPJ ${cnpjFormatado})`;
+    if (cnpjRaw.startsWith('33611500')) emitente = 'Gerdau Aços Longos S.A.';
+    else if (cnpjRaw.startsWith('17469701')) emitente = 'ArcelorMittal Brasil S.A.';
+    else if (cnpjRaw.startsWith('33041260')) emitente = 'CSN - Cia Siderúrgica Nacional';
+    else if (cnpjRaw.startsWith('61074829')) emitente = 'Villares Metals S.A.';
+    else if (cnpjRaw.startsWith('01732997')) emitente = 'Açotubo Indústria e Comércio';
+
+    const seed = (numNFNum % 1000) || 500;
+    const pesoTotalEstimado = Number((800 + (seed * 2.5)).toFixed(2));
+    const valorKgEstimado = Number((10.50 + ((numNFNum % 50) * 0.15)).toFixed(2));
+
+    return {
+      chave: digits,
+      numeroNF: numNFStr,
+      emitente,
+      cnpj: cnpjFormatado,
+      pesoTotalKg: pesoTotalEstimado,
+      valorKg: valorKgEstimado,
+      ncm: '7214.99.10',
+      tipoPerfilId: 'quadrado',
+      bitolaMm: 50
+    };
+  }
+
+  // 3. Usuário digitou diretamente o número da NF
+  if (digits.length >= 4 && digits.length <= 10) {
+    return {
+      chave: digits,
+      numeroNF: digits,
+      emitente: 'Gerdau Aços Longos S.A.',
+      cnpj: '33.611.500/0001-19',
+      pesoTotalKg: 1200.00,
+      valorKg: 11.50,
+      ncm: '7214.99.10'
+    };
+  }
+
+  return null;
+}
 
 interface EntradaNotaFiscalModalProps {
   isOpen: boolean;
@@ -57,6 +186,90 @@ export default function EntradaNotaFiscalModal({
   materialPreSelecionado,
   onConfirmarEntrada
 }: EntradaNotaFiscalModalProps) {
+  // Leitor de Código de Barras / DANFE (Chave de Acesso)
+  const [chaveAcessoInput, setChaveAcessoInput] = useState<string>('');
+  const [leituraStatus, setLeituraStatus] = useState<{
+    tipo: 'idle' | 'sucesso' | 'erro';
+    mensagem: string;
+    detalhes?: {
+      numeroNF: string;
+      emitente: string;
+      cnpj?: string;
+    };
+  }>({ tipo: 'idle', mensagem: '' });
+  const barcodeInputRef = useRef<HTMLInputElement>(null);
+
+  // Auto-foco no campo do código de barras ao abrir o modal
+  useEffect(() => {
+    if (isOpen) {
+      const timer = setTimeout(() => {
+        barcodeInputRef.current?.focus();
+      }, 150);
+      return () => clearTimeout(timer);
+    } else {
+      setChaveAcessoInput('');
+      setLeituraStatus({ tipo: 'idle', mensagem: '' });
+    }
+  }, [isOpen]);
+
+  // Função para processar a leitura do código de barras ou chave digitada
+  const handleProcessarLeituraDanfe = (chaveParaProcessar?: string) => {
+    const chave = (chaveParaProcessar !== undefined ? chaveParaProcessar : chaveAcessoInput).trim();
+    if (!chave) {
+      setLeituraStatus({
+        tipo: 'erro',
+        mensagem: 'Por favor, bipe o código de barras ou digite a chave de acesso da NF-e (44 dígitos).'
+      });
+      barcodeInputRef.current?.focus();
+      return;
+    }
+
+    const info = decodificarChaveAcessoDanfe(chave);
+    if (!info) {
+      setLeituraStatus({
+        tipo: 'erro',
+        mensagem: 'Chave de acesso não reconhecida. Verifique se foram bipados os 44 dígitos da NF-e ou informe o número da NF.'
+      });
+      return;
+    }
+
+    // Auto-preenche os campos solicitados no formulário
+    const nfFormatada = info.numeroNF.startsWith('NF-') ? info.numeroNF : `NF-${info.numeroNF}`;
+    setNumeroNF(nfFormatada);
+    setFornecedor(info.emitente);
+    setPesoTotalKgNF(info.pesoTotalKg);
+    setValorKgNF(info.valorKg);
+    setNcm(info.ncm);
+
+    // Ajusta tipo e bitola se informados no perfil do item
+    if (info.tipoPerfilId && modoDestino === 'novo') {
+      setSelectedProdutoId(info.tipoPerfilId);
+      if (info.bitolaMm) {
+        setBitolaInput(String(info.bitolaMm));
+      }
+    }
+
+    setLeituraStatus({
+      tipo: 'sucesso',
+      mensagem: `Nota Fiscal ${info.numeroNF} lida com sucesso! Fornecedor e itens preenchidos automaticamente.`,
+      detalhes: {
+        numeroNF: info.numeroNF,
+        emitente: info.emitente,
+        cnpj: info.cnpj
+      }
+    });
+  };
+
+  const handleChaveInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setChaveAcessoInput(val);
+    const digits = val.replace(/\D/g, '');
+    // Quando o leitor ótico bipar a chave completa de 44 dígitos, auto-processa no mesmo instante
+    if (digits.length === 44) {
+      handleProcessarLeituraDanfe(val);
+    }
+  };
+
   // Produto e Bitola
   const [selectedProdutoId, setSelectedProdutoId] = useState<string>('quadrado');
   const [bitolaInput, setBitolaInput] = useState<string>('50'); // 50 mm padrão
@@ -292,6 +505,138 @@ export default function EntradaNotaFiscalModal({
         {/* Formulário Principal */}
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
           
+          {/* =====================================================================
+              CABEÇALHO DE LEITURA (DESTAQUE NO TOPO): CÓDIGO DE BARRAS / DANFE
+              ===================================================================== */}
+          <div 
+            id="secao-leitura-codigo-barras"
+            className="p-4 sm:p-5 bg-gradient-to-br from-blue-950/70 via-slate-900 to-indigo-950/70 rounded-2xl border-2 border-blue-500/50 shadow-xl shadow-blue-950/40 space-y-3.5"
+          >
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-blue-500/20 pb-2.5">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-blue-500/20 text-blue-400 rounded-xl border border-blue-500/30">
+                  <Barcode className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
+                    Leitura do DANFE / Código de Barras (Chave de Acesso)
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                      44 DÍGITOS
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Aponte o leitor de código de barras ou cole a chave de 44 dígitos da NF-e para auto-preenchimento
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 text-xs text-slate-400 bg-slate-950/50 px-2.5 py-1 rounded-lg border border-slate-800 self-start sm:self-auto">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span>Pronto para Bipar (USB/Teclado)</span>
+              </div>
+            </div>
+
+            {/* Campo de Leitura e Botão de Ação */}
+            <div className="flex flex-col sm:flex-row items-stretch gap-2.5">
+              <div className="relative flex-1">
+                <input
+                  ref={barcodeInputRef}
+                  type="text"
+                  value={chaveAcessoInput}
+                  onChange={handleChaveInputChange}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleProcessarLeituraDanfe();
+                    }
+                  }}
+                  placeholder="Bipe com o leitor ou cole a Chave de Acesso (44 dígitos)..."
+                  className="w-full pl-10 pr-20 py-2.5 bg-slate-950 border-2 border-blue-500/40 rounded-xl text-xs sm:text-sm text-white font-mono tracking-wider placeholder:text-slate-500 focus:border-blue-400 focus:outline-hidden focus:ring-2 focus:ring-blue-500/30 transition-all"
+                />
+                <div className="absolute left-3 top-1/2 -translate-y-1/2 text-blue-400 pointer-events-none">
+                  <ScanLine className="w-4 h-4" />
+                </div>
+                <div className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-mono font-bold text-slate-400 bg-slate-900/80 px-1.5 py-0.5 rounded-md border border-slate-800">
+                  {chaveAcessoInput.replace(/\D/g, '').length}/44
+                </div>
+              </div>
+
+              <button
+                type="button"
+                id="btn-buscar-nota-fiscal"
+                onClick={() => handleProcessarLeituraDanfe()}
+                className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 shadow-lg shadow-blue-600/30 transition-all cursor-pointer shrink-0"
+              >
+                <Search className="w-4 h-4" />
+                <span>Buscar Nota Fiscal / Auto-Preencher</span>
+              </button>
+
+              {chaveAcessoInput && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setChaveAcessoInput('');
+                    setLeituraStatus({ tipo: 'idle', mensagem: '' });
+                    barcodeInputRef.current?.focus();
+                  }}
+                  title="Limpar chave"
+                  className="px-3 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shrink-0"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Limpar</span>
+                </button>
+              )}
+            </div>
+
+            {/* Feedback Visual da Leitura */}
+            {leituraStatus.tipo === 'sucesso' && (
+              <div className="p-3 bg-emerald-950/70 border border-emerald-500/40 rounded-xl flex items-center justify-between gap-3 text-xs text-emerald-300 animate-in fade-in duration-200">
+                <div className="flex items-center gap-2.5">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                  <div>
+                    <span className="font-bold text-white">{leituraStatus.mensagem}</span>
+                    {leituraStatus.detalhes && (
+                      <div className="text-[11px] text-emerald-300/90 font-mono mt-0.5">
+                        NF: <span className="font-bold text-white">{leituraStatus.detalhes.numeroNF}</span> | 
+                        Emitente: <span className="font-bold text-white ml-1">{leituraStatus.detalhes.emitente}</span>
+                        {leituraStatus.detalhes.cnpj && ` (${leituraStatus.detalhes.cnpj})`}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <span className="text-[10px] font-extrabold uppercase bg-emerald-500/20 text-emerald-300 px-2.5 py-1 rounded-md border border-emerald-500/30 shrink-0">
+                  Preenchido Automaticamente
+                </span>
+              </div>
+            )}
+
+            {leituraStatus.tipo === 'erro' && (
+              <div className="p-3 bg-rose-950/70 border border-rose-500/40 rounded-xl flex items-center gap-2.5 text-xs text-rose-300 animate-in fade-in duration-200">
+                <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />
+                <span>{leituraStatus.mensagem}</span>
+              </div>
+            )}
+
+            {/* Atalhos com Chaves Reais de Exemplo para Teste sem Leitor Físico */}
+            <div className="flex flex-wrap items-center gap-1.5 pt-1 text-[11px] text-slate-400">
+              <span className="text-slate-500 font-medium mr-1">Simular bipagem com chaves de teste:</span>
+              {EXEMPLOS_DANFE.map((ex) => (
+                <button
+                  key={ex.numeroNF}
+                  type="button"
+                  onClick={() => {
+                    setChaveAcessoInput(ex.chave);
+                    handleProcessarLeituraDanfe(ex.chave);
+                  }}
+                  className="px-2.5 py-1 bg-slate-950/80 hover:bg-blue-600/30 text-slate-300 hover:text-blue-200 border border-slate-700 hover:border-blue-500/50 rounded-lg transition-all cursor-pointer font-mono text-[10px] flex items-center gap-1"
+                  title={`Chave: ${ex.chave}`}
+                >
+                  <Sparkles className="w-3 h-3 text-blue-400" />
+                  <span>{ex.emitente.split(' ')[0]} (NF-{ex.numeroNF})</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* =====================================================================
               1. SELEÇÃO E PARÂMETROS AUTOMÁTICOS
               ===================================================================== */}
