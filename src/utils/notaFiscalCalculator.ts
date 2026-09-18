@@ -8,7 +8,8 @@ export type TipoPerfilNF =
   | 'Redondo/Barra Maciça' 
   | 'Chapa' 
   | 'Tubo' 
-  | 'Barra Chata';
+  | 'Barra Chata'
+  | 'Sextavado';
 
 export interface ProdutoPadraoNF {
   id: string;
@@ -22,12 +23,13 @@ export interface ProdutoPadraoNF {
 }
 
 /**
- * 5 Tipos Oficiais solicitados para o dropdown de perfis:
- * 1. Quadrado (k = 0.00785, NCM: 7214.99.10)
- * 2. Redondo/Barra Maciça (k = 0.00617, NCM: 7214.99.10)
- * 3. Chapa (k = 0.00785, NCM: 7208.51.00)
- * 4. Tubo (k = 0.00617, NCM: 7304.39.90)
- * 5. Barra Chata (k = 0.00785, NCM: 7214.91.00)
+ * Perfis Padrão para Entrada de NF e Estoque:
+ * 1. Quadrado (k = 0.00785, NCM: 7215.50.00 / 7214.99.10)
+ * 2. Redondo/Barra Maciça (k = 0.00617, NCM: 7215.50.00 / 7214.99.10)
+ * 3. Sextavado (k = 0.0068, NCM: 7215.50.00)
+ * 4. Chapa (k = 0.00785, NCM: 7208.51.00)
+ * 5. Tubo (k = 0.00617, NCM: 7304.39.90)
+ * 6. Barra Chata (k = 0.00785, NCM: 7214.91.00)
  */
 export const PRODUTOS_PADRAO_NF: ProdutoPadraoNF[] = [
   {
@@ -36,9 +38,9 @@ export const PRODUTOS_PADRAO_NF: ProdutoPadraoNF[] = [
     tipoPerfil: 'Quadrado',
     tipo: 'barra',
     constanteK: 0.00785,
-    ncm: '7214.99.10',
-    descricao: 'Barra de aço seção quadrada (k = 0,00785)',
-    exemploBitola: '50.8'
+    ncm: '7215.50.00',
+    descricao: 'Barra de aço seção quadrada trefilada/laminada (k = 0,00785)',
+    exemploBitola: '25.4'
   },
   {
     id: 'redondo',
@@ -46,9 +48,19 @@ export const PRODUTOS_PADRAO_NF: ProdutoPadraoNF[] = [
     tipoPerfil: 'Redondo/Barra Maciça',
     tipo: 'barra',
     constanteK: 0.00617,
-    ncm: '7214.99.10',
-    descricao: 'Barra redonda maciça de aço carbono / SAE 1020/1045 (k = 0,00617)',
-    exemploBitola: '76.2'
+    ncm: '7215.50.00',
+    descricao: 'Barra redonda maciça trefilada/laminada SAE 1020/1045 (k = 0,00617)',
+    exemploBitola: '25.4'
+  },
+  {
+    id: 'sextavado',
+    nome: 'Sextavado',
+    tipoPerfil: 'Sextavado',
+    tipo: 'barra',
+    constanteK: 0.0068,
+    ncm: '7215.50.00',
+    descricao: 'Barra de aço seção sextavada trefilada SAE 1045 (k = 0,0068)',
+    exemploBitola: '38.1'
   },
   {
     id: 'chapa',

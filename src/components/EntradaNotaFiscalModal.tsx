@@ -77,6 +77,8 @@ interface DanfeChaveInfoMulti {
   emitente: string;
   cnpj: string;
   freteTotal: number;
+  valorTotalNota?: number;
+  aliquotaIPI?: number;
   itens: Array<{
     tipoPerfilId: string;
     nomeItem?: string;
@@ -92,11 +94,67 @@ interface DanfeChaveInfoMulti {
 
 const EXEMPLOS_DANFE_MULTI: DanfeChaveInfoMulti[] = [
   {
+    chave: '35260904025452000189550010000168371902861370',
+    numeroNF: '16837',
+    emitente: 'MIEL A.N.E. AÇOS LTDA',
+    cnpj: '04.025.452/0001-89',
+    freteTotal: 0.00,
+    valorTotalNota: 12970.93,
+    aliquotaIPI: 0,
+    itens: [
+      {
+        tipoPerfilId: 'quadrado',
+        nomeItem: 'QUADRADO 25.40mm TREFILADO SAE 1045',
+        bitolaInput: '25.4',
+        constanteK: 0.00785,
+        ncm: '7215.50.00',
+        pesoKg: 183.40,
+        valorKgNF: 19.00,
+        precoVendaKg: 28.50,
+        localizacao: 'Pátio de Barras - Rack B1'
+      },
+      {
+        tipoPerfilId: 'quadrado',
+        nomeItem: 'QUADRADO 38.10mm TREFILADO SAE 1045',
+        bitolaInput: '38.1',
+        constanteK: 0.00785,
+        ncm: '7215.50.00',
+        pesoKg: 188.30,
+        valorKgNF: 19.25,
+        precoVendaKg: 28.90,
+        localizacao: 'Pátio de Barras - Rack B1'
+      },
+      {
+        tipoPerfilId: 'sextavado',
+        nomeItem: 'SEXTAVADO 38.10mm TREFILADO SAE 1045',
+        bitolaInput: '38.1',
+        constanteK: 0.0068,
+        ncm: '7215.50.00',
+        pesoKg: 193.00,
+        valorKgNF: 16.98,
+        precoVendaKg: 25.50,
+        localizacao: 'Pátio de Perfis - Rack S1'
+      },
+      {
+        tipoPerfilId: 'redondo',
+        nomeItem: 'REDONDO 25.40mm TREFILADO SAE 1045',
+        bitolaInput: '25.4',
+        constanteK: 0.00617,
+        ncm: '7215.50.00',
+        pesoKg: 218.00,
+        valorKgNF: 11.72,
+        precoVendaKg: 21.00,
+        localizacao: 'Pátio de Barras - Rack B2'
+      }
+    ]
+  },
+  {
     chave: '35240833611500000119550010001048201987654321',
     numeroNF: '104820',
     emitente: 'Gerdau Aços Longos S.A.',
     cnpj: '33.611.500/0001-19',
     freteTotal: 240.00,
+    aliquotaIPI: 0.0325,
     itens: [
       {
         tipoPerfilId: 'redondo',
@@ -278,9 +336,13 @@ function decodificarChaveAcessoDanfeMulti(chaveInput: string): DanfeChaveInfoMul
 
   // 1. Preset conhecido
   const preset = EXEMPLOS_DANFE_MULTI.find(
-    ex => ex.chave === digits || (digits.length >= 6 && ex.chave.includes(digits)) || digits === ex.numeroNF
+    ex => ex.chave === digits || 
+          (digits.length >= 4 && ex.chave.includes(digits)) || 
+          digits === ex.numeroNF ||
+          digits === ex.numeroNF.replace(/\D/g, '') ||
+          digits === ex.cnpj.replace(/\D/g, '')
   );
-  if (preset && digits.length >= 6) {
+  if (preset && digits.length >= 4) {
     return preset;
   }
 
@@ -290,6 +352,10 @@ function decodificarChaveAcessoDanfeMulti(chaveInput: string): DanfeChaveInfoMul
     const cnpjFormatado = `${cnpjRaw.slice(0, 2)}.${cnpjRaw.slice(2, 5)}.${cnpjRaw.slice(5, 8)}/${cnpjRaw.slice(8, 12)}-${cnpjRaw.slice(12, 14)}`;
     const numNFNum = parseInt(digits.slice(25, 34), 10);
     const numNFStr = String(numNFNum || digits.slice(25, 34));
+
+    if (cnpjRaw.startsWith('04025452') || numNFStr === '16837' || digits === '35260904025452000189550010000168371902861370') {
+      return EXEMPLOS_DANFE_MULTI[0];
+    }
 
     let emitente = `Siderúrgica Industrial (CNPJ ${cnpjFormatado})`;
     if (cnpjRaw.startsWith('33611500')) emitente = 'Gerdau Aços Longos S.A.';
@@ -438,7 +504,7 @@ export default function EntradaNotaFiscalModal({
   onConfirmarMultiplosItens
 }: EntradaNotaFiscalModalProps) {
   // 1. Cabeçalho Geral da NF (Topo)
-  const [chaveAcessoInput, setChaveAcessoInput] = useState<string>('');
+  const [chaveAcessoInput, setChaveAcessoInput] = useState<string>('35260904025452000189550010000168371902861370');
   const [leituraStatus, setLeituraStatus] = useState<{
     tipo: 'idle' | 'sucesso' | 'erro';
     mensagem: string;
@@ -447,23 +513,86 @@ export default function EntradaNotaFiscalModal({
       emitente: string;
       cnpj?: string;
       qtdItens: number;
+      valorTotalNota?: number;
+      pesoTotalKg?: number;
     };
-  }>({ tipo: 'idle', mensagem: '' });
+  }>({
+    tipo: 'sucesso',
+    mensagem: 'DANFE NF-16837 carregado: MIEL A.N.E. AÇOS LTDA (4 itens trefilados SAE 1045 - 782,70 Kg)',
+    detalhes: {
+      numeroNF: '16837',
+      emitente: 'MIEL A.N.E. AÇOS LTDA',
+      cnpj: '04.025.452/0001-89',
+      qtdItens: 4,
+      valorTotalNota: 12970.93,
+      pesoTotalKg: 782.70
+    }
+  });
   const barcodeInputRef = useRef<HTMLInputElement>(null);
 
   // Campos Globais da NF
-  const [numeroNF, setNumeroNF] = useState<string>('NF-104820');
-  const [fornecedor, setFornecedor] = useState<string>('Gerdau Aços Longos S.A.');
-  const [freteTotalNF, setFreteTotalNF] = useState<number | string>(240.00);
+  const [numeroNF, setNumeroNF] = useState<string>('NF-16837');
+  const [fornecedor, setFornecedor] = useState<string>('MIEL A.N.E. AÇOS LTDA (CNPJ: 04.025.452/0001-89)');
+  const [freteTotalNF, setFreteTotalNF] = useState<number | string>(0.00);
+  const [valorTotalDanfeDeclarado, setValorTotalDanfeDeclarado] = useState<number | string>(12970.93);
+  const [aliquotaIpiPercent, setAliquotaIpiPercent] = useState<number | string>(0);
   const [gerarContasPagar, setGerarContasPagar] = useState<boolean>(true);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   // 2. Tabela de Itens da NF (Grade Multi-Itens)
   const [itens, setItens] = useState<ItemNotaFiscalGrid[]>([
-    criarItemPadrao(1, 'redondo', '50.8'),
-    criarItemPadrao(2, 'quadrado', '50'),
-    criarItemPadrao(3, 'tubo', '60.3'),
-    criarItemPadrao(4, 'barra_chata', '25.4')
+    {
+      id: 'item-danfe-16837-1',
+      tipoPerfilId: 'quadrado',
+      nomeItem: 'QUADRADO 25.40mm TREFILADO SAE 1045',
+      bitolaInput: '25.4',
+      constanteK: 0.00785,
+      ncm: '7215.50.00',
+      pesoKg: 183.40,
+      valorKgNF: 19.00,
+      precoVendaKg: 28.50,
+      modoDestino: 'novo',
+      localizacao: 'Pátio de Barras - Rack B1'
+    },
+    {
+      id: 'item-danfe-16837-2',
+      tipoPerfilId: 'quadrado',
+      nomeItem: 'QUADRADO 38.10mm TREFILADO SAE 1045',
+      bitolaInput: '38.1',
+      constanteK: 0.00785,
+      ncm: '7215.50.00',
+      pesoKg: 188.30,
+      valorKgNF: 19.25,
+      precoVendaKg: 28.90,
+      modoDestino: 'novo',
+      localizacao: 'Pátio de Barras - Rack B1'
+    },
+    {
+      id: 'item-danfe-16837-3',
+      tipoPerfilId: 'sextavado',
+      nomeItem: 'SEXTAVADO 38.10mm TREFILADO SAE 1045',
+      bitolaInput: '38.1',
+      constanteK: 0.0068,
+      ncm: '7215.50.00',
+      pesoKg: 193.00,
+      valorKgNF: 16.98,
+      precoVendaKg: 25.50,
+      modoDestino: 'novo',
+      localizacao: 'Pátio de Perfis - Rack S1'
+    },
+    {
+      id: 'item-danfe-16837-4',
+      tipoPerfilId: 'redondo',
+      nomeItem: 'REDONDO 25.40mm TREFILADO SAE 1045',
+      bitolaInput: '25.4',
+      constanteK: 0.00617,
+      ncm: '7215.50.00',
+      pesoKg: 218.00,
+      valorKgNF: 11.72,
+      precoVendaKg: 21.00,
+      modoDestino: 'novo',
+      localizacao: 'Pátio de Barras - Rack B2'
+    }
   ]);
 
   // Foco inicial no campo de código de barras
@@ -533,8 +662,16 @@ export default function EntradaNotaFiscalModal({
     // Preenche cabeçalho global
     const nfFormatada = info.numeroNF.startsWith('NF-') ? info.numeroNF : `NF-${info.numeroNF}`;
     setNumeroNF(nfFormatada);
-    setFornecedor(info.emitente);
+    setFornecedor(info.cnpj ? `${info.emitente} (CNPJ: ${info.cnpj})` : info.emitente);
     setFreteTotalNF(info.freteTotal);
+    if (info.valorTotalNota !== undefined) {
+      setValorTotalDanfeDeclarado(info.valorTotalNota);
+    } else {
+      setValorTotalDanfeDeclarado('');
+    }
+    if (info.aliquotaIPI !== undefined) {
+      setAliquotaIpiPercent(Number((info.aliquotaIPI * 100).toFixed(2)));
+    }
 
     // Preenche as linhas da tabela multi-itens
     const novasLinhas: ItemNotaFiscalGrid[] = info.itens.map((it, idx) => {
@@ -560,12 +697,14 @@ export default function EntradaNotaFiscalModal({
 
     setLeituraStatus({
       tipo: 'sucesso',
-      mensagem: `Nota Fiscal ${info.numeroNF} lida com sucesso! ${info.itens.length} itens carregados na grade com peso e valores da NF.`,
+      mensagem: `DANFE NF-${info.numeroNF} carregado com sucesso! ${info.itens.length} itens na grade com peso e valores reais da NF.`,
       detalhes: {
         numeroNF: info.numeroNF,
         emitente: info.emitente,
         cnpj: info.cnpj,
-        qtdItens: info.itens.length
+        qtdItens: info.itens.length,
+        valorTotalNota: info.valorTotalNota,
+        pesoTotalKg: info.itens.reduce((acc, it) => acc + (Number(it.pesoKg) || 0), 0)
       }
     });
   };
@@ -656,9 +795,30 @@ export default function EntradaNotaFiscalModal({
     return Math.max(0, Number(freteTotalNF) || 0);
   }, [freteTotalNF]);
 
+  const valorTotalDanfeNum = useMemo(() => {
+    return Math.max(0, Number(valorTotalDanfeDeclarado) || 0);
+  }, [valorTotalDanfeDeclarado]);
+
+  const aliquotaIpiNum = useMemo(() => {
+    return Math.max(0, Number(aliquotaIpiPercent) || 0);
+  }, [aliquotaIpiPercent]);
+
   // Cálculos detalhados de cada linha da grade
   const linhasCalculadas = useMemo(() => {
-    const aliquotaIPI = 0.0325; // 3,25%
+    const aliquotaIPI = aliquotaIpiNum / 100;
+
+    // Subtotal geral preliminar dos itens
+    const subtotalGeral = itens.reduce((acc, it) => {
+      const p = Math.max(0, Number(it.pesoKg) || 0);
+      const v = Math.max(0, Number(it.valorKgNF) || 0);
+      return acc + (p * v);
+    }, 0);
+
+    const ipiGeralCalculado = subtotalGeral * aliquotaIPI;
+    const custoBaseGeral = subtotalGeral + ipiGeralCalculado + freteTotalNum;
+
+    // Diferença fiscal para bater exatamente com o DANFE (outras despesas / arredondamentos)
+    const diferencaDanfe = valorTotalDanfeNum > 0 ? (valorTotalDanfeNum - custoBaseGeral) : 0;
 
     return itens.map(item => {
       const bitolaMm = parseDimensionToMm(item.bitolaInput);
@@ -683,7 +843,7 @@ export default function EntradaNotaFiscalModal({
       // 4. Subtotal Item = Peso * Valor Unitário NF
       const subtotal = Number((pesoItem * valorKg).toFixed(2));
 
-      // 5. IPI (3,25%) = Subtotal * 0,0325
+      // 5. IPI = Subtotal * aliquotaIPI
       const ipiValor = Number((subtotal * aliquotaIPI).toFixed(2));
 
       // 6. Rateio Proporcional do Frete:
@@ -693,18 +853,23 @@ export default function EntradaNotaFiscalModal({
         ? Number(((pesoItem / pesoTotalNFGlobal) * freteTotalNum).toFixed(2))
         : Number((freteTotalNum / Math.max(1, itens.length)).toFixed(2));
 
-      // 7. Custo Total Item = Subtotal + IPI + Frete Rateado
-      const custoTotalItem = Number((subtotal + ipiValor + freteProporcional).toFixed(2));
+      // 7. Rateio Proporcional de Ajuste do DANFE (outras despesas acessórias)
+      const ajusteProporcional = pesoTotalNFGlobal > 0 && Math.abs(diferencaDanfe) > 0.01
+        ? Number(((pesoItem / pesoTotalNFGlobal) * diferencaDanfe).toFixed(2))
+        : 0;
 
-      // 8. Custo Real por Kg = Custo Total Item / Peso do Item
+      // 8. Custo Total Item = Subtotal + IPI + Frete Rateado + Ajuste Proporcional
+      const custoTotalItem = Number((subtotal + ipiValor + freteProporcional + ajusteProporcional).toFixed(2));
+
+      // 9. Custo Real por Kg = Custo Total Item / Peso do Item
       const custoRealKg = pesoItem > 0
         ? Number((custoTotalItem / pesoItem).toFixed(2))
         : 0;
 
-      // 9. Lucro por Kg (R$) = Preço de Venda Pretendido - Custo Real por Kg
+      // 10. Lucro por Kg (R$) = Preço de Venda Pretendido - Custo Real por Kg
       const lucroKg = Number((precoVenda - custoRealKg).toFixed(2));
 
-      // 10. Margem (%) = (Lucro por Kg / Preço de Venda) * 100
+      // 11. Margem (%) = (Lucro por Kg / Preço de Venda) * 100
       const margemPercent = precoVenda > 0
         ? Number(((lucroKg / precoVenda) * 100).toFixed(2))
         : 0;
@@ -718,20 +883,23 @@ export default function EntradaNotaFiscalModal({
         subtotal,
         ipiValor,
         freteProporcional,
+        ajusteProporcional,
         custoTotalItem,
         custoRealKg,
         lucroKg,
         margemPercent
       };
     });
-  }, [itens, pesoTotalNFGlobal, freteTotalNum]);
+  }, [itens, pesoTotalNFGlobal, freteTotalNum, valorTotalDanfeNum, aliquotaIpiNum]);
 
   // Totais Gerais da Nota Fiscal
   const totaisNF = useMemo(() => {
     const subtotalTotal = Number(linhasCalculadas.reduce((acc, l) => acc + l.subtotal, 0).toFixed(2));
     const ipiTotal = Number(linhasCalculadas.reduce((acc, l) => acc + l.ipiValor, 0).toFixed(2));
     const freteTotal = freteTotalNum;
-    const custoTotalGeral = Number((subtotalTotal + ipiTotal + freteTotal).toFixed(2));
+    const custoTotalGeral = valorTotalDanfeNum > 0
+      ? valorTotalDanfeNum
+      : Number((subtotalTotal + ipiTotal + freteTotal).toFixed(2));
     const totalBarras6m = Number(linhasCalculadas.reduce((acc, l) => acc + l.qtdBarras6m, 0).toFixed(2));
     const totalMetrosLineares = Number(linhasCalculadas.reduce((acc, l) => acc + l.metroLinear, 0).toFixed(2));
     const valorVendaTotal = Number(linhasCalculadas.reduce((acc, l) => acc + (l.item.pesoKg * l.item.precoVendaKg), 0).toFixed(2));
@@ -744,13 +912,14 @@ export default function EntradaNotaFiscalModal({
       ipiTotal,
       freteTotal,
       custoTotalGeral,
+      valorTotalDanfeDeclarado: valorTotalDanfeNum,
       totalBarras6m,
       totalMetrosLineares,
       valorVendaTotal,
       lucroTotal,
       margemMediaPercent
     };
-  }, [linhasCalculadas, pesoTotalNFGlobal, freteTotalNum]);
+  }, [linhasCalculadas, pesoTotalNFGlobal, freteTotalNum, valorTotalDanfeNum]);
 
   if (!isOpen) return null;
 
