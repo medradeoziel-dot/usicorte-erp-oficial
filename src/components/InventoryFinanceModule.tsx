@@ -27,12 +27,13 @@ import {
   fetchLancamentosFinanceirosDb,
   fetchMovimentacoesEstoqueDb,
   saveMaterialEstoqueDb,
+  saveMultiplosMateriaisEstoqueDb,
   INITIAL_MATERIAIS,
   INITIAL_RETALHOS,
   INITIAL_FINANCEIRO
 } from '../services/inventoryFinanceService';
 import { formatCurrency, formatWeightKg, formatNumberBR } from '../utils/calculator';
-import EntradaNotaFiscalModal from './EntradaNotaFiscalModal';
+import EntradaNotaFiscalModal, { EntradaNotaFiscalMultiplosItensDados } from './EntradaNotaFiscalModal';
 import {
   Package,
   Boxes,
@@ -419,6 +420,85 @@ export default function InventoryFinanceModule({
     } catch (err: any) {
       console.error('Erro ao processar entrada de NF:', err);
       showFeedback('Erro ao salvar entrada da Nota Fiscal.', 'error');
+    }
+  };
+
+  const handleConfirmarEntradaNotaFiscalMultiplos = async (dados: EntradaNotaFiscalMultiplosItensDados) => {
+    try {
+      const { numeroNF, fornecedor, freteTotal, gerarFinanceiro, itens, custoTotalGeral, pesoTotalGeralKg } = dados;
+
+      // 1. Atualiza lista de materiais com todos os itens da grade
+      let updatedMateriais = [...materiais];
+      const materiaisParaGravarDb: MaterialEstoque[] = [];
+      const novasMovimentacoes: MovimentacaoEstoque[] = [];
+
+      for (const itemDado of itens) {
+        const { material, isNovo, movimentacao } = itemDado;
+        if (isNovo) {
+          updatedMateriais = [material, ...updatedMateriais];
+        } else {
+          updatedMateriais = updatedMateriais.map(m => m.id === material.id ? material : m);
+        }
+        materiaisParaGravarDb.push(material);
+
+        const novaMov: MovimentacaoEstoque = {
+          id: `mov-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          materialId: material.id,
+          materialNome: material.nome,
+          tipo: 'entrada',
+          quantidade: movimentacao.quantidadeBarras,
+          pesoKg: movimentacao.pesoKg,
+          custoTotal: movimentacao.custoTotal,
+          referenciaDoc: `NF-${numeroNF}`,
+          data: new Date().toISOString(),
+          usuario: 'Almoxarifado / Compras',
+          observacao: movimentacao.observacao
+        };
+        novasMovimentacoes.push(novaMov);
+      }
+
+      setMateriais(updatedMateriais);
+      saveMateriaisEstoque(updatedMateriais);
+
+      // 2. Persiste todos os itens simultaneamente na tabela 'estoque' do Supabase com quantidade estritamente em KG
+      await saveMultiplosMateriaisEstoqueDb(materiaisParaGravarDb);
+
+      // 3. Registra as movimentações no histórico
+      const updatedMovs = [...novasMovimentacoes, ...movimentacoes];
+      setMovimentacoes(updatedMovs);
+      for (const mov of novasMovimentacoes) {
+        await registrarMovimentacao(mov);
+      }
+
+      // 4. Lançamento consolidado em Contas a Pagar (se solicitado)
+      if (gerarFinanceiro && custoTotalGeral > 0) {
+        const novoLancamento: LancamentoFinanceiro = {
+          id: `fin-${Date.now()}`,
+          tipo: 'despesa',
+          categoria: 'compra_chapa',
+          descricao: `Compra Matéria-Prima NF ${numeroNF} (${fornecedor} - ${itens.length} itens)`,
+          clienteFornecedor: fornecedor.trim() || 'Fornecedor de Aço',
+          documentoRef: `NF-${numeroNF}`,
+          valor: custoTotalGeral,
+          dataVencimento: new Date(Date.now() + 28 * 86400000).toISOString().split('T')[0],
+          dataCompetencia: new Date().toISOString().split('T')[0],
+          formaPagamento: 'Boleto',
+          status: 'pendente',
+          criadoEm: new Date().toISOString(),
+          observacoes: `Entrada NF ${numeroNF} com ${itens.length} itens estocados em barras de 6m (${formatWeightKg(pesoTotalGeralKg)} estocados estritamente em KG)`
+        };
+        const updatedLancamentos = [novoLancamento, ...lancamentos];
+        setLancamentos(updatedLancamentos);
+        saveLancamentosFinanceiros(updatedLancamentos);
+      }
+
+      showFeedback(
+        `✅ Entrada da NF ${numeroNF} processada! ${itens.length} itens cadastrados com sucesso no estoque (${formatWeightKg(pesoTotalGeralKg)} estocados estritamente em KG)!`,
+        'success'
+      );
+    } catch (err: any) {
+      console.error('Erro ao processar entrada de múltiplos itens da NF:', err);
+      showFeedback('Erro ao salvar itens da Nota Fiscal no estoque.', 'error');
     }
   };
 
@@ -2487,6 +2567,7 @@ export default function InventoryFinanceModule({
         materiaisExistentes={materiais}
         materialPreSelecionado={materialSelecionadoNF}
         onConfirmarEntrada={handleConfirmarEntradaNotaFiscal}
+        onConfirmarMultiplosItens={handleConfirmarEntradaNotaFiscalMultiplos}
       />
     </div>
   );

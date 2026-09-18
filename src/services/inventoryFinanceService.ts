@@ -640,6 +640,67 @@ export async function saveMaterialEstoqueDb(material: MaterialEstoque): Promise<
   return { data: material, error: null };
 }
 
+/**
+ * Salva múltiplos materiais simultaneamente no Supabase (tabela 'estoque' e 'estoque_materiais'),
+ * persistindo a quantidade principal estritamente em KG.
+ */
+export async function saveMultiplosMateriaisEstoqueDb(
+  materiaisParaSalvar: MaterialEstoque[]
+): Promise<{ sucesso: boolean; count: number; error: any }> {
+  if (!materiaisParaSalvar || materiaisParaSalvar.length === 0) {
+    return { sucesso: true, count: 0, error: null };
+  }
+
+  try {
+    // 1. Prepara batch para tabela 'estoque' com saldo estritamente em KG
+    const payloadEstoqueBatch = materiaisParaSalvar.map(material => {
+      const pesoKgReal = Number((material.pesoTotalKg ?? 0).toFixed(2));
+      const obj: Record<string, any> = {
+        nome: material.nome,
+        quantidade: pesoKgReal, // Saldo principal estritamente em KG
+        unidade: 'KG', // Unidade em KG para baixas fracionadas de vendas/corte
+        peso_total_kg: pesoKgReal
+      };
+      if (isUuid(material.id)) {
+        obj.id = material.id;
+      }
+      return obj;
+    });
+
+    // Envia upsert em batch para a tabela 'estoque'
+    await db.from('estoque').upsert(payloadEstoqueBatch).select();
+
+    // 2. Sincroniza em batch na tabela detalhada 'estoque_materiais'
+    const payloadDetalhadoBatch = materiaisParaSalvar.map(material => {
+      const payloadMat = mapMaterialToSupabase(material);
+      const pesoKgReal = Number((material.pesoTotalKg ?? 0).toFixed(2));
+      payloadMat.peso_total_kg = pesoKgReal;
+      payloadMat.quantidade = pesoKgReal; // Saldo principal em KG
+      return payloadMat;
+    });
+
+    await db.from('estoque_materiais').upsert(payloadDetalhadoBatch, { onConflict: 'id' });
+
+    // 3. Atualiza cache em memória
+    for (const material of materiaisParaSalvar) {
+      const idx = cacheMateriais.findIndex(m => m.id === material.id);
+      if (idx >= 0) cacheMateriais[idx] = material;
+      else cacheMateriais.push(material);
+    }
+
+    return { sucesso: true, count: materiaisParaSalvar.length, error: null };
+  } catch (err: any) {
+    console.warn('Aviso: Falha ao persistir múltiplos materiais no Supabase:', err);
+    // Mesmo com erro de rede/offline, atualiza cache em memória local
+    for (const material of materiaisParaSalvar) {
+      const idx = cacheMateriais.findIndex(m => m.id === material.id);
+      if (idx >= 0) cacheMateriais[idx] = material;
+      else cacheMateriais.push(material);
+    }
+    return { sucesso: false, count: 0, error: err };
+  }
+}
+
 export async function deleteMaterialEstoqueDb(id: string): Promise<{ error: any }> {
   try {
     if (isUuid(id)) {
