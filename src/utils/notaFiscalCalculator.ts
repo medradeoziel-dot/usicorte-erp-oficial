@@ -6,7 +6,7 @@
 export type TipoPerfilNF = 
   | 'Quadrado' 
   | 'Redondo/Barra Maciça' 
-  | 'Chapa' 
+  | 'Chapa / Placa' 
   | 'Tubo' 
   | 'Barra Chata'
   | 'Sextavado';
@@ -24,17 +24,27 @@ export interface ProdutoPadraoNF {
 
 /**
  * Perfis Padrão para Entrada de NF e Estoque:
- * 1. Quadrado (k = 0.00785, NCM: 7215.50.00 / 7214.99.10)
- * 2. Redondo/Barra Maciça (k = 0.00617, NCM: 7215.50.00 / 7214.99.10)
- * 3. Sextavado (k = 0.0068, NCM: 7215.50.00)
- * 4. Chapa (k = 0.00785, NCM: 7208.51.00)
+ * 1. Chapa / Placa (k = 0.00785, NCM: 7208.51.00)
+ * 2. Quadrado (k = 0.00785, NCM: 7215.50.00 / 7214.99.10)
+ * 3. Redondo/Barra Maciça (k = 0.00617, NCM: 7215.50.00 / 7214.99.10)
+ * 4. Sextavado (k = 0.0068, NCM: 7215.50.00)
  * 5. Tubo (k = 0.00617, NCM: 7304.39.90)
  * 6. Barra Chata (k = 0.00785, NCM: 7214.91.00)
  */
 export const PRODUTOS_PADRAO_NF: ProdutoPadraoNF[] = [
   {
+    id: 'chapa',
+    nome: 'Chapa / Placa',
+    tipoPerfil: 'Chapa / Placa',
+    tipo: 'chapa',
+    constanteK: 0.00785,
+    ncm: '7208.51.00',
+    descricao: 'Chapa / Placa de aço carbono laminada (k = 0,00785)',
+    exemploBitola: '25.0'
+  },
+  {
     id: 'quadrado',
-    nome: 'Quadrado',
+    nome: 'Quadrado (k=0.00785)',
     tipoPerfil: 'Quadrado',
     tipo: 'barra',
     constanteK: 0.00785,
@@ -44,7 +54,7 @@ export const PRODUTOS_PADRAO_NF: ProdutoPadraoNF[] = [
   },
   {
     id: 'redondo',
-    nome: 'Redondo/Barra Maciça',
+    nome: 'Redondo/Barra Maciça (k=0.00617)',
     tipoPerfil: 'Redondo/Barra Maciça',
     tipo: 'barra',
     constanteK: 0.00617,
@@ -54,7 +64,7 @@ export const PRODUTOS_PADRAO_NF: ProdutoPadraoNF[] = [
   },
   {
     id: 'sextavado',
-    nome: 'Sextavado',
+    nome: 'Sextavado (k=0.0068)',
     tipoPerfil: 'Sextavado',
     tipo: 'barra',
     constanteK: 0.0068,
@@ -63,18 +73,8 @@ export const PRODUTOS_PADRAO_NF: ProdutoPadraoNF[] = [
     exemploBitola: '38.1'
   },
   {
-    id: 'chapa',
-    nome: 'Chapa',
-    tipoPerfil: 'Chapa',
-    tipo: 'chapa',
-    constanteK: 0.00785,
-    ncm: '7208.51.00',
-    descricao: 'Chapa de aço carbono laminada (k = 0,00785)',
-    exemploBitola: '6.35'
-  },
-  {
     id: 'tubo',
-    nome: 'Tubo',
+    nome: 'Tubo (k=0.00617)',
     tipoPerfil: 'Tubo',
     tipo: 'tubo',
     constanteK: 0.00617,
@@ -84,7 +84,7 @@ export const PRODUTOS_PADRAO_NF: ProdutoPadraoNF[] = [
   },
   {
     id: 'barra_chata',
-    nome: 'Barra Chata',
+    nome: 'Barra Chata (k=0.00785)',
     tipoPerfil: 'Barra Chata',
     tipo: 'perfil',
     constanteK: 0.00785,
@@ -103,6 +103,7 @@ export interface CalculoEntradaNFParams {
   qtdItensNF: number;
   precoVendaKg: number;
   aliquotaIPI?: number; // padrão 3.25% (0.0325)
+  isChapa?: boolean; // Para chapas, não força conversão em barras de 6 metros
 }
 
 export interface ResultadoCalculoEntradaNF {
@@ -132,7 +133,8 @@ export function calcularEntradaNotaFiscal({
   freteTotalNF,
   qtdItensNF,
   precoVendaKg,
-  aliquotaIPI = 0.0325
+  aliquotaIPI = 0.0325,
+  isChapa = false
 }: CalculoEntradaNFParams): ResultadoCalculoEntradaNF {
   const bitola = Number(bitolaMm) || 0;
   const k = Number(constanteK) || 0;
@@ -142,18 +144,20 @@ export function calcularEntradaNotaFiscal({
   const qtdItens = Math.max(1, Number(qtdItensNF) || 1);
   const precoVenda = Number(precoVendaKg) || 0;
 
-  // 1. Peso Teórico de 1 Barra de 6 Metros = (Bitola²) × k × 6
-  const pesoBarra6m = bitola > 0 && k > 0
-    ? Number(((bitola * bitola) * k * 6).toFixed(3))
-    : 0;
+  // 1. Peso Teórico de 1 Barra de 6 Metros = (Bitola²) × k × 6 (Não se aplica a Chapas/Placas)
+  const pesoBarra6m = isChapa || bitola <= 0 || k <= 0
+    ? 0
+    : Number(((bitola * bitola) * k * 6).toFixed(3));
 
   // 3.1 Quantidade de Barras de 6 Metros = (Peso Total Kg NF) ÷ (Peso da Barra 6m)
-  const qtdBarras6m = pesoBarra6m > 0 && pesoNF > 0
-    ? Number((pesoNF / pesoBarra6m).toFixed(2))
-    : 0;
+  const qtdBarras6m = isChapa || pesoBarra6m <= 0 || pesoNF <= 0
+    ? 0
+    : Number((pesoNF / pesoBarra6m).toFixed(2));
 
   // 3.2 Metro Linear Total = (Quantidade de Barras) × 6
-  const metroLinearTotal = Number((qtdBarras6m * 6).toFixed(2));
+  const metroLinearTotal = isChapa
+    ? 0
+    : Number((qtdBarras6m * 6).toFixed(2));
 
   // 3.3 Subtotal = Peso Total Kg × Valor Kg NF
   const subtotal = Number((pesoNF * valorKg).toFixed(2));

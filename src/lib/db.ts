@@ -46,6 +46,7 @@ function initSupabaseClient() {
 }
 
 export const db = initSupabaseClient();
+export const supabase = db;
 
 export type StatusCotacao = 'rascunho' | 'pendente' | 'aprovado' | 'rejeitado';
 
