@@ -149,9 +149,6 @@ export default function TopBar({
 
       {/* ÁREA DIREITA: Fechamento (Admin) & Instalação PWA & Dados da Sessão / Logout */}
       <div className="flex items-center gap-2">
-        {/* Botão de Instalação PWA (Disponível no Celular e PC) */}
-        <PWAInstallButton variant="topbar" />
-
         {/* Fechamento Mensal no Login: Apenas Admin */}
         {isAdmin && onOpenHistoricoFechamento && (
           <button
@@ -172,6 +169,9 @@ export default function TopBar({
             )}
           </button>
         )}
+
+        {/* Botão de Instalação PWA no canto superior direito, antes do perfil do usuário */}
+        <PWAInstallButton variant="topbar" />
 
         {/* Informação do Usuário Logado e Cargo / Opção de Encerrar Sessão */}
         {currentUser ? (

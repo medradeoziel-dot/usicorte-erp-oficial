@@ -135,9 +135,7 @@ export default function Sidebar({
               </button>
 
               {/* Botão de Instalação PWA para Operador */}
-              <div className="mt-2">
-                <PWAInstallButton variant="sidebar" />
-              </div>
+              <PWAInstallButton variant="sidebar" className="mt-2" />
             </div>
 
             {/* Opção de Encerrar Sessão (Sair) */}
@@ -358,9 +356,7 @@ export default function Sidebar({
             </button>
 
             {/* Botão de Instalação PWA para Administrador */}
-            <div className="pt-2">
-              <PWAInstallButton variant="sidebar" />
-            </div>
+            <PWAInstallButton variant="sidebar" className="mt-2" />
           </>
         )}
 

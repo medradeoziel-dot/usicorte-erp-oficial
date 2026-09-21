@@ -1,201 +1,77 @@
 const fs = require('fs');
-const zlib = require('zlib');
 const path = require('path');
+const sharp = require('sharp');
 
-// CRC32 table
-const crcTable = new Uint32Array(256);
-for (let n = 0; n < 256; n++) {
-  let c = n;
-  for (let k = 0; k < 8; k++) {
-    if (c & 1) {
-      c = 0xedb88320 ^ (c >>> 1);
-    } else {
-      c = c >>> 1;
-    }
-  }
-  crcTable[n] = c;
-}
-
-function crc32(buf) {
-  let c = 0xffffffff;
-  for (let i = 0; i < buf.length; i++) {
-    c = crcTable[(c ^ buf[i]) & 0xff] ^ (c >>> 8);
-  }
-  return (c ^ 0xffffffff) >>> 0;
-}
-
-function makeChunk(type, data) {
-  const len = data.length;
-  const buf = Buffer.alloc(12 + len);
-  buf.writeUInt32BE(len, 0);
-  buf.write(type, 4, 4, 'ascii');
-  data.copy(buf, 8);
-  const typeAndData = Buffer.concat([Buffer.from(type, 'ascii'), data]);
-  const crc = crc32(typeAndData);
-  buf.writeUInt32BE(crc, 8 + len);
-  return buf;
-}
-
-function createPng(width, height, drawPixel) {
-  const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-
-  // IHDR
-  const ihdrData = Buffer.alloc(13);
-  ihdrData.writeUInt32BE(width, 0);
-  ihdrData.writeUInt32BE(height, 4);
-  ihdrData.writeUInt8(8, 8); // 8 bits per channel
-  ihdrData.writeUInt8(6, 9); // RGBA
-  ihdrData.writeUInt8(0, 10); // compression
-  ihdrData.writeUInt8(0, 11); // filter
-  ihdrData.writeUInt8(0, 12); // interlace
-  const ihdrChunk = makeChunk('IHDR', ihdrData);
-
-  // Raw image data with 0 filter byte per row
-  const rowSize = 1 + width * 4;
-  const rawData = Buffer.alloc(height * rowSize);
-
-  for (let y = 0; y < height; y++) {
-    const rowOffset = y * rowSize;
-    rawData[rowOffset] = 0; // Filter: None
-    for (let x = 0; x < width; x++) {
-      const pixelOffset = rowOffset + 1 + x * 4;
-      const [r, g, b, a] = drawPixel(x, y, width, height);
-      rawData[pixelOffset] = r;
-      rawData[pixelOffset + 1] = g;
-      rawData[pixelOffset + 2] = b;
-      rawData[pixelOffset + 3] = a;
-    }
-  }
-
-  const idatData = zlib.deflateSync(rawData);
-  const idatChunk = makeChunk('IDAT', idatData);
-  const iendChunk = makeChunk('IEND', Buffer.alloc(0));
-
-  return Buffer.concat([signature, ihdrChunk, idatChunk, iendChunk]);
-}
-
-// Brand graphic drawer for UsiCorte
-function drawUsiCorteIcon(x, y, w, h) {
-  // Normalize to -1.0 to 1.0
-  const nx = (x / w) * 2 - 1;
-  const ny = (y / h) * 2 - 1;
-  const dist = Math.sqrt(nx * nx + ny * ny);
-
-  // Base background: #0f172a (15, 23, 42) with rounded corners
-  const cornerR = 0.25;
-  const dx = Math.max(0, Math.abs(nx) - (1 - cornerR));
-  const dy = Math.max(0, Math.abs(ny) - (1 - cornerR));
-  const outsideDist = Math.sqrt(dx * dx + dy * dy);
+// Logotipo Oficial da Usi Corte Metais em SVG vetorial puro com alta resolução (512x512)
+// Identidade:
+// - Fundo Escuro (#0f172a / #111827)
+// - "Usi" em BRANCO (#ffffff)
+// - "corte" em VERMELHO (#ef4444)
+// - "Metais" em BRANCO (#ffffff)
+const officialSvg = `<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="iconBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#111827" />
+      <stop offset="100%" stop-color="#0f172a" />
+    </linearGradient>
+  </defs>
   
-  if (outsideDist > cornerR) {
-    // Outside rounded border (transparent)
-    return [0, 0, 0, 0];
+  <!-- Fundo escuro oficial UsiCorte (#111827 a #0f172a) -->
+  <rect width="512" height="512" fill="url(#iconBg)" />
+  
+  <!-- Sutil moldura industrial e zona de segurança -->
+  <rect x="18" y="18" width="476" height="476" rx="88" fill="none" stroke="#1e293b" stroke-width="3" stroke-opacity="0.6" />
+  
+  <!-- Vetores matemáticos exatos da tipografia Comfortaa da Usi Corte Metais -->
+  <g id="usicorte-brand-mark">
+    <!-- Usi em BRANCO -->
+    <path d="M74.88 249.71L73.32 249.71Q69.40 249.71 66.33 247.86Q63.26 246.01 61.48 242.79Q59.71 239.57 59.71 235.43L59.71 184.28Q59.71 183.02 60.52 182.21Q61.34 181.39 62.59 181.39Q63.85 181.39 64.67 182.21Q65.48 183.02 65.48 184.28L65.48 235.43Q65.48 239.20 67.70 241.61Q69.92 244.01 73.40 244.01L74.88 244.01Q78.36 244.01 80.58 241.61Q82.80 239.20 82.80 235.43L82.80 184.28Q82.80 183.02 83.61 182.21Q84.43 181.39 85.69 181.39Q86.94 181.39 87.76 182.21Q88.57 183.02 88.57 184.28L88.57 235.43Q88.57 239.57 86.80 242.79Q85.02 246.01 81.95 247.86Q78.88 249.71 74.88 249.71M122.99 250.08Q117.29 250.08 112.78 247.38Q108.26 244.68 105.63 240.02Q103.01 235.36 103.01 229.51Q103.01 223.59 105.71 218.93Q108.41 214.27 113.07 211.56Q117.73 208.86 123.58 208.86Q129.43 208.86 134.05 211.56Q138.68 214.27 141.38 218.93Q144.08 223.59 144.15 229.51L141.86 231.29Q141.86 236.61 139.38 240.87Q136.90 245.12 132.64 247.60Q128.39 250.08 122.99 250.08M123.58 244.90Q127.87 244.90 131.24 242.90Q134.61 240.91 136.57 237.39Q138.53 233.88 138.53 229.51Q138.53 225.07 136.57 221.59Q134.61 218.11 131.24 216.08Q127.87 214.04 123.58 214.04Q119.36 214.04 115.96 216.08Q112.55 218.11 110.56 221.59Q108.56 225.07 108.56 229.51Q108.56 233.88 110.56 237.39Q112.55 240.91 115.96 242.90Q119.36 244.90 123.58 244.90M141.27 249.71Q140.01 249.71 139.19 248.94Q138.38 248.16 138.38 246.90L138.38 234.25L139.79 228.40L144.15 229.51L144.15 246.90Q144.15 248.16 143.34 248.94Q142.52 249.71 141.27 249.71M159.32 249.71Q157.99 249.71 157.21 248.94Q156.44 248.16 156.44 246.83L156.44 212.12Q156.44 210.79 157.21 210.01Q157.99 209.23 159.32 209.23Q160.58 209.23 161.36 210.01Q162.13 210.79 162.13 212.12L162.13 246.83Q162.13 248.16 161.36 248.94Q160.58 249.71 159.32 249.71M159.25 201.54Q157.62 201.54 156.44 200.35Q155.25 199.17 155.25 197.47Q155.25 195.62 156.47 194.55Q157.69 193.47 159.32 193.47Q160.88 193.47 162.10 194.55Q163.32 195.62 163.32 197.47Q163.32 199.17 162.13 200.35Q160.95 201.54 159.25 201.54" fill="#ffffff" />
+    
+    <!-- corte em VERMELHO #ef4444 -->
+    <path d="M208.94 250.08Q203.02 250.08 198.43 247.38Q193.84 244.68 191.37 240.02Q188.74 235.36 188.74 229.51Q188.74 223.59 191.26 218.93Q193.77 214.27 198.14 211.56Q202.50 208.86 208.20 208.86Q212.72 208.86 216.53 210.64Q220.34 212.42 223.22 215.97Q224.04 216.86 223.82 217.85Q223.59 218.85 222.56 219.59Q221.74 220.19 220.74 220Q219.75 219.82 219.01 218.93Q214.71 214.04 208.20 214.04Q204.06 214.04 200.91 216.04Q197.77 218.04 196.03 221.52Q194.29 225 194.29 229.51Q194.29 233.95 196.14 237.43Q197.99 240.91 201.32 242.90Q204.65 244.90 208.94 244.90Q211.83 244.90 214.23 244.13Q216.64 243.35 218.49 241.72Q219.38 240.98 220.34 240.91Q221.30 240.83 222.11 241.50Q223 242.31 223.11 243.35Q223.22 244.38 222.41 245.12Q217.01 250.08 208.94 250.08M253.34 250.08Q247.42 250.08 242.76 247.42Q238.10 244.75 235.43 240.09Q232.77 235.43 232.77 229.51Q232.77 223.52 235.43 218.85Q238.10 214.19 242.76 211.53Q247.42 208.86 253.34 208.86Q259.26 208.86 263.89 211.53Q268.51 214.19 271.18 218.85Q273.84 223.52 273.91 229.51Q273.91 235.43 271.21 240.09Q268.51 244.75 263.89 247.42Q259.26 250.08 253.34 250.08M253.34 244.90Q257.63 244.90 261.04 242.90Q264.44 240.91 266.37 237.43Q268.29 233.95 268.29 229.51Q268.29 225.07 266.37 221.55Q264.44 218.04 261.04 216.04Q257.63 214.04 253.34 214.04Q249.05 214.04 245.65 216.04Q242.24 218.04 240.28 221.55Q238.32 225.07 238.32 229.51Q238.32 233.95 240.28 237.43Q242.24 240.91 245.65 242.90Q249.05 244.90 253.34 244.90M290.64 224.77L287.38 224.77Q287.60 220.19 289.79 216.56Q291.97 212.93 295.49 210.86Q299 208.79 303.29 208.79Q306.70 208.79 308.55 209.75Q310.40 210.71 309.95 212.56Q309.66 213.67 308.95 214.04Q308.25 214.41 307.25 214.34Q306.25 214.27 304.99 214.19Q300.85 213.82 297.63 215.04Q294.41 216.26 292.52 218.78Q290.64 221.30 290.64 224.77M287.83 249.71Q286.49 249.71 285.75 248.97Q285.01 248.23 285.01 246.90L285.01 212.05Q285.01 210.71 285.75 209.97Q286.49 209.23 287.83 209.23Q289.16 209.23 289.90 209.97Q290.64 210.71 290.64 212.05L290.64 246.90Q290.64 248.23 289.90 248.97Q289.16 249.71 287.83 249.71M336.30 249.71L334.74 249.71Q330.82 249.71 327.75 247.86Q324.68 246.01 322.90 242.79Q321.13 239.57 321.13 235.43L321.13 199.24Q321.13 197.99 321.90 197.17Q322.68 196.36 323.94 196.36Q325.20 196.36 326.01 197.17Q326.82 197.99 326.82 199.24L326.82 235.43Q326.82 239.20 329.04 241.61Q331.26 244.01 334.74 244.01L336.74 244.01Q337.92 244.01 338.66 244.83Q339.40 245.64 339.40 246.90Q339.40 248.16 338.52 248.94Q337.63 249.71 336.30 249.71M335.19 215.67L316.32 215.67Q315.21 215.67 314.47 214.97Q313.73 214.27 313.73 213.23Q313.73 212.12 314.47 211.42Q315.21 210.71 316.32 210.71L335.19 210.71Q336.30 210.71 337.04 211.42Q337.78 212.12 337.78 213.23Q337.78 214.27 337.04 214.97Q336.30 215.67 335.19 215.67M367.01 250.08Q361.01 250.08 356.39 247.45Q351.76 244.83 349.13 240.17Q346.51 235.50 346.51 229.51Q346.51 223.44 348.99 218.82Q351.47 214.19 355.83 211.53Q360.20 208.86 365.90 208.86Q371.52 208.86 375.70 211.42Q379.88 213.97 382.18 218.48Q384.47 223 384.47 228.77Q384.47 229.95 383.73 230.66Q382.99 231.36 381.81 231.36L350.36 231.36L350.36 226.62L382.40 226.62L379.22 228.92Q379.29 224.63 377.66 221.22Q376.03 217.82 373.04 215.89Q370.04 213.97 365.90 213.97Q361.68 213.97 358.50 215.97Q355.31 217.97 353.57 221.48Q351.84 225 351.84 229.51Q351.84 234.02 353.80 237.50Q355.76 240.98 359.16 242.98Q362.57 244.98 367.01 244.98Q369.67 244.98 372.37 244.05Q375.07 243.13 376.70 241.72Q377.51 241.05 378.55 241.02Q379.59 240.98 380.33 241.57Q381.29 242.46 381.32 243.50Q381.36 244.53 380.47 245.27Q378.03 247.34 374.26 248.71Q370.48 250.08 367.01 250.08" fill="#ef4444" />
+    
+    <!-- Metais em BRANCO -->
+    <path d="M194.51 319.71Q193.33 319.71 192.48 318.86Q191.63 318.01 191.63 316.83L191.63 264.80Q191.63 263.55 192.48 262.73Q193.33 261.92 194.51 261.92Q196.29 261.92 197.10 263.40L222.04 312.98L219.52 312.98L244.02 263.40Q244.91 261.92 246.61 261.92Q247.79 261.92 248.61 262.73Q249.42 263.55 249.42 264.80L249.42 316.83Q249.42 318.01 248.61 318.86Q247.79 319.71 246.61 319.71Q245.35 319.71 244.50 318.86Q243.65 318.01 243.65 316.83L243.65 272.28L244.91 272.35L223.08 316.97Q222.26 318.38 220.56 318.38Q218.71 318.38 217.90 316.60L195.92 272.65L197.40 272.28L197.40 316.83Q197.40 318.01 196.55 318.86Q195.70 319.71 194.51 319.71M281.83 320.08Q275.84 320.08 271.21 317.45Q266.59 314.83 263.96 310.17Q261.33 305.50 261.33 299.51Q261.33 293.44 263.81 288.82Q266.29 284.19 270.66 281.53Q275.02 278.86 280.72 278.86Q286.35 278.86 290.53 281.42Q294.71 283.97 297 288.48Q299.30 293 299.30 298.77Q299.30 299.95 298.56 300.66Q297.82 301.36 296.63 301.36L265.18 301.36L265.18 296.62L297.22 296.62L294.04 298.92Q294.12 294.63 292.49 291.22Q290.86 287.82 287.86 285.89Q284.87 283.97 280.72 283.97Q276.50 283.97 273.32 285.97Q270.14 287.97 268.40 291.48Q266.66 295 266.66 299.51Q266.66 304.02 268.62 307.50Q270.58 310.98 273.99 312.98Q277.39 314.98 281.83 314.98Q284.50 314.98 287.20 314.05Q289.90 313.13 291.53 311.72Q292.34 311.05 293.38 311.02Q294.41 310.98 295.15 311.57Q296.11 312.46 296.15 313.50Q296.19 314.53 295.30 315.27Q292.86 317.34 289.08 318.71Q285.31 320.08 281.83 320.08M326.31 319.71L324.75 319.71Q320.83 319.71 317.76 317.86Q314.69 316.01 312.91 312.79Q311.14 309.57 311.14 305.43L311.14 269.24Q311.14 267.99 311.91 267.17Q312.69 266.36 313.95 266.36Q315.21 266.36 316.02 267.17Q316.83 267.99 316.83 269.24L316.83 305.43Q316.83 309.20 319.05 311.61Q321.27 314.01 324.75 314.01L326.75 314.01Q327.93 314.01 328.67 314.83Q329.41 315.64 329.41 316.90Q329.41 318.16 328.53 318.94Q327.64 319.71 326.31 319.71M325.20 285.67L306.33 285.67Q305.22 285.67 304.48 284.97Q303.74 284.27 303.74 283.23Q303.74 282.12 304.48 281.42Q305.22 280.71 306.33 280.71L325.20 280.71Q326.31 280.71 327.05 281.42Q327.79 282.12 327.79 283.23Q327.79 284.27 327.05 284.97Q326.31 285.67 325.20 285.67M356.50 320.08Q350.80 320.08 346.29 317.38Q341.77 314.68 339.14 310.02Q336.52 305.36 336.52 299.51Q336.52 293.59 339.22 288.93Q341.92 284.27 346.58 281.56Q351.24 278.86 357.09 278.86Q362.94 278.86 367.56 281.56Q372.19 284.27 374.89 288.93Q377.59 293.59 377.66 299.51L375.37 301.29Q375.37 306.61 372.89 310.87Q370.41 315.12 366.15 317.60Q361.90 320.08 356.50 320.08M357.09 314.90Q361.38 314.90 364.75 312.90Q368.12 310.91 370.08 307.39Q372.04 303.88 372.04 299.51Q372.04 295.07 370.08 291.59Q368.12 288.11 364.75 286.08Q361.38 284.04 357.09 284.04Q352.87 284.04 349.47 286.08Q346.06 288.11 344.07 291.59Q342.07 295.07 342.07 299.51Q342.07 303.88 344.07 307.39Q346.06 310.91 349.47 312.90Q352.87 314.90 357.09 314.90M374.78 319.71Q373.52 319.71 372.70 318.94Q371.89 318.16 371.89 316.90L371.89 304.25L373.30 298.40L377.66 299.51L377.66 316.90Q377.66 318.16 376.85 318.94Q376.03 319.71 374.78 319.71M392.83 319.71Q391.50 319.71 390.72 318.94Q389.95 318.16 389.95 316.83L389.95 282.12Q389.95 280.79 390.72 280.01Q391.50 279.23 392.83 279.23Q394.09 279.23 394.87 280.01Q395.64 280.79 395.64 282.12L395.64 316.83Q395.64 318.16 394.87 318.94Q394.09 319.71 392.83 319.71M392.76 271.54Q391.13 271.54 389.95 270.35Q388.76 269.17 388.76 267.47Q388.76 265.62 389.98 264.55Q391.20 263.47 392.83 263.47Q394.39 263.47 395.61 264.55Q396.83 265.62 396.83 267.47Q396.83 269.17 395.64 270.35Q394.46 271.54 392.76 271.54M424.28 320.08Q419.92 320.08 415.62 318.60Q411.33 317.12 408.67 314.16Q407.85 313.27 408 312.16Q408.15 311.05 409.11 310.24Q410.15 309.50 411.26 309.65Q412.37 309.80 413.11 310.61Q414.88 312.68 417.81 313.79Q420.73 314.90 424.28 314.90Q429.76 314.90 432.20 313.01Q434.64 311.13 434.72 308.46Q434.72 305.80 432.20 304.06Q429.68 302.32 423.91 301.36Q416.44 300.18 412.96 297.22Q409.48 294.26 409.48 290.19Q409.48 286.41 411.48 283.90Q413.48 281.38 416.81 280.12Q420.14 278.86 424.13 278.86Q429.09 278.86 432.68 280.57Q436.27 282.27 438.49 285.15Q439.23 286.12 439.08 287.15Q438.93 288.19 437.90 288.85Q437.01 289.37 435.86 289.19Q434.72 289 433.90 288.11Q432.05 285.97 429.61 284.97Q427.17 283.97 423.99 283.97Q419.92 283.97 417.47 285.63Q415.03 287.30 415.03 289.82Q415.03 291.52 415.96 292.78Q416.88 294.03 419.14 295Q421.40 295.96 425.47 296.62Q431.02 297.51 434.23 299.25Q437.45 300.99 438.82 303.32Q440.19 305.65 440.19 308.39Q440.19 311.87 438.16 314.50Q436.12 317.12 432.53 318.60Q428.94 320.08 424.28 320.08" fill="#ffffff" />
+  </g>
+</svg>`;
+
+async function generateAllIcons() {
+  const publicDir = path.join(__dirname, '..', 'public');
+  if (!fs.existsSync(publicDir)) {
+    fs.mkdirSync(publicDir, { recursive: true });
   }
 
-  // Smooth border edge
-  let bgAlpha = 255;
-  if (outsideDist > cornerR - 0.02) {
-    bgAlpha = Math.floor(255 * (1 - (outsideDist - (cornerR - 0.02)) / 0.02));
-  }
+  // 1. Salva o SVG oficial com todas as curvas vetoriais
+  fs.writeFileSync(path.join(publicDir, 'icon.svg'), officialSvg);
+  console.log('[PWA Icons] Salvo public/icon.svg');
 
-  // Slate gradient: #0f172a (top) to #1e293b (middle) to #090d16 (bottom)
-  const gradT = (ny + 1) / 2;
-  let bgR = Math.floor(15 + 15 * (1 - Math.abs(gradT - 0.5) * 2));
-  let bgG = Math.floor(23 + 18 * (1 - Math.abs(gradT - 0.5) * 2));
-  let bgB = Math.floor(42 + 25 * (1 - Math.abs(gradT - 0.5) * 2));
+  const svgBuffer = Buffer.from(officialSvg);
 
-  // Subtle inner border (slate-700 / #334155)
-  const innerDx = Math.max(0, Math.abs(nx) - (0.94 - cornerR));
-  const innerDy = Math.max(0, Math.abs(ny) - (0.94 - cornerR));
-  const innerDist = Math.sqrt(innerDx * innerDy);
-  if (Math.abs(Math.max(Math.abs(nx), Math.abs(ny)) - 0.94) < 0.015) {
-    bgR = 51; bgG = 65; bgB = 85;
-  }
+  // 2. Gera icon-512.png (512x512)
+  await sharp(svgBuffer)
+    .resize(512, 512)
+    .png({ quality: 100, compressionLevel: 9 })
+    .toFile(path.join(publicDir, 'icon-512.png'));
+  console.log('[PWA Icons] Gerado public/icon-512.png (512x512)');
 
-  // Laser circular ring (dist around 0.65)
-  const ringDist = Math.abs(dist - 0.62);
-  if (ringDist < 0.035 && ny < 0.55) {
-    const angle = Math.atan2(ny, nx);
-    // dashed laser ring
-    if (Math.sin(angle * 12) > -0.2) {
-      return [56, 189, 248, bgAlpha]; // Cyan
-    }
-  }
+  // 3. Gera icon-192.png (192x192)
+  await sharp(svgBuffer)
+    .resize(192, 192)
+    .png({ quality: 100, compressionLevel: 9 })
+    .toFile(path.join(publicDir, 'icon-192.png'));
+  console.log('[PWA Icons] Gerado public/icon-192.png (192x192)');
 
-  // Central Disc background
-  if (dist < 0.56 && ny < 0.55) {
-    bgR = 15; bgG = 23; bgB = 42;
-  }
+  // 4. Gera apple-touch-icon.png (180x180) para iOS Safari
+  await sharp(svgBuffer)
+    .resize(180, 180)
+    .png({ quality: 100, compressionLevel: 9 })
+    .toFile(path.join(publicDir, 'apple-touch-icon.png'));
+  console.log('[PWA Icons] Gerado public/apple-touch-icon.png (180x180)');
 
-  // Diamond cutting guide
-  const diamondDist = Math.abs(Math.abs(nx) + Math.abs(ny - 0.05) - 0.46);
-  if (diamondDist < 0.02 && ny < 0.5) {
-    return [37, 99, 235, bgAlpha]; // Electric Blue
-  }
-
-  // "U" shape in central disc
-  // Left pillar: nx ~ -0.22, ny between -0.25 and 0.1
-  // Right pillar: nx ~ 0.22, ny between -0.25 and 0.1
-  // Bottom curve: nx between -0.22 and 0.22, ny around 0.1
-  const uPillarLeft = Math.abs(nx - (-0.20)) < 0.05 && ny >= -0.25 && ny <= 0.12;
-  const uPillarRight = Math.abs(nx - (0.20)) < 0.05 && ny >= -0.25 && ny <= 0.0;
-  const uBottomDist = Math.abs(Math.sqrt(nx * nx + (ny - 0.02) * (ny - 0.02)) - 0.20);
-  const uBottom = uBottomDist < 0.05 && ny >= 0.02 && ny <= 0.24 && Math.abs(nx) <= 0.20;
-
-  if (uPillarLeft || uPillarRight || uBottom) {
-    return [37, 99, 235, bgAlpha]; // Royal Blue
-  }
-
-  // "C" arc notch (cyan & white cut through)
-  const cArcDist = Math.abs(Math.sqrt((nx - 0.04) * (nx - 0.04) + (ny + 0.05) * (ny + 0.05)) - 0.18);
-  if (cArcDist < 0.035 && (nx < 0.12 || Math.abs(ny + 0.05) > 0.08)) {
-    return [240, 249, 255, bgAlpha]; // White-Cyan spark
-  }
-
-  // Laser Spark Point (golden yellow flare at center ny ~ 0.02, nx ~ 0.0)
-  const sparkDist = Math.sqrt(nx * nx + (ny - 0.02) * (ny - 0.02));
-  if (sparkDist < 0.06) {
-    return [254, 240, 138, bgAlpha]; // Laser core
-  }
-  if (sparkDist < 0.12 && (Math.abs(nx) < 0.02 || Math.abs(ny - 0.02) < 0.02)) {
-    return [245, 158, 11, bgAlpha]; // Golden spark beams
-  }
-
-  // Bottom Label Area: "USICORTE" letters block
-  if (ny >= 0.58 && ny <= 0.76 && Math.abs(nx) <= 0.72) {
-    // Stylized high-contrast lettering bar
-    // Let's render a crisp modern badge
-    if (Math.abs(ny - 0.67) < 0.065 && Math.abs(nx) < 0.65) {
-      // White contrast emblem band with blue lettering
-      const letterBar = Math.floor((nx + 0.65) / 0.16);
-      if (letterBar % 2 === 0 || Math.abs(ny - 0.67) < 0.04) {
-        return [255, 255, 255, bgAlpha];
-      }
-    }
-  }
-
-  // Bottom accent line: Cyan
-  if (Math.abs(ny - 0.82) < 0.015 && Math.abs(nx) < 0.45) {
-    return [56, 189, 248, bgAlpha];
-  }
-
-  return [bgR, bgG, bgB, bgAlpha];
+  console.log('[PWA Icons] Todos os ícones oficiais Usi Corte Metais foram gerados com sucesso!');
 }
 
-const publicDir = path.join(__dirname, '..', 'public');
-if (!fs.existsSync(publicDir)) {
-  fs.mkdirSync(publicDir, { recursive: true });
-}
-
-console.log('Generating PWA icons...');
-const buf512 = createPng(512, 512, drawUsiCorteIcon);
-fs.writeFileSync(path.join(publicDir, 'icon-512.png'), buf512);
-console.log('Created icon-512.png (' + buf512.length + ' bytes)');
-
-const buf192 = createPng(192, 192, drawUsiCorteIcon);
-fs.writeFileSync(path.join(publicDir, 'icon-192.png'), buf192);
-console.log('Created icon-192.png (' + buf192.length + ' bytes)');
-
-const bufApple = createPng(180, 180, drawUsiCorteIcon);
-fs.writeFileSync(path.join(publicDir, 'apple-touch-icon.png'), bufApple);
-console.log('Created apple-touch-icon.png (' + bufApple.length + ' bytes)');
+generateAllIcons().catch((err) => {
+  console.error('[PWA Icons] Erro ao gerar ícones:', err);
+  process.exit(1);
+});

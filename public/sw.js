@@ -1,5 +1,5 @@
 // Service Worker para Usi Corte Metais PWA
-const CACHE_NAME = 'usicorte-pwa-v1';
+const CACHE_NAME = 'usicorte-pwa-v2';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
