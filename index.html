@@ -3,7 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link rel="icon" href="data:;base64,iVBORw0KGgo=">
+    <meta name="theme-color" content="#0f172a" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="UsiCorte" />
+    <meta name="application-name" content="Usi Corte Metais" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
     <title>Cadastro de Clientes & Vendas UsiCorte</title>
     <meta name="description" content="Sistema ERP industrial completo para UsiCorte: cadastro de clientes com consultas automáticas CNPJ/CPF, força de vendas, orçamentos com constantes e desenhos CAD/imagens, controle de estoque de chapas/barras/perfis e retalhos com baixa automática, gestão financeira de contas a pagar/receber e fluxo de caixa, sincronizados no Supabase e localStorage." />
     <meta property="og:title" content="Cadastro de Clientes & Vendas UsiCorte" />
@@ -11,6 +20,19 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Comfortaa:wght@700&display=swap" rel="stylesheet">
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js')
+            .then((reg) => {
+              console.log('[PWA] Service Worker registrado com sucesso no escopo:', reg.scope);
+            })
+            .catch((err) => {
+              console.warn('[PWA] Falha ao registrar o Service Worker:', err);
+            });
+        });
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

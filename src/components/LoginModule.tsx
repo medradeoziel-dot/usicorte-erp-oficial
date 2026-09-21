@@ -39,6 +39,8 @@ interface LoginModuleProps {
   onClose?: () => void;
   onLoginSuccess: (nomeUsuario: string, userProfile?: UserProfile) => void;
   currentUser?: string | null;
+  currentUserProfile?: UserProfile | null;
+  isAdmin?: boolean;
   onLogout?: () => void;
 }
 
@@ -50,6 +52,8 @@ export default function LoginModule({
   onClose,
   onLoginSuccess,
   currentUser,
+  currentUserProfile,
+  isAdmin = false,
   onLogout
 }: LoginModuleProps) {
   const [authMode, setAuthMode] = useState<'quick' | 'email'>('quick');
@@ -69,6 +73,7 @@ export default function LoginModule({
   const [novoNome, setNovoNome] = useState<string>('');
   const [novoEmail, setNovoEmail] = useState<string>('');
   const [novoCargo, setNovoCargo] = useState<string>('Operador de Vendas');
+  const [novoNivelAcesso, setNovoNivelAcesso] = useState<'admin' | 'operador'>('operador');
   const [novaSenha, setNovaSenha] = useState<string>('');
   const [senhaAdminAuth, setSenhaAdminAuth] = useState<string>('');
   const [isSavingUser, setIsSavingUser] = useState<boolean>(false);
@@ -130,7 +135,9 @@ export default function LoginModule({
           id: data.user?.id || 'usr-' + Date.now(),
           email: emailDigitado,
           nome: nomeFinal,
-          role: 'operador'
+          role: 'operador',
+          nivel_acesso: 'operador',
+          cargo: 'Operador de Vendas'
         });
         return;
       } else {
@@ -143,7 +150,14 @@ export default function LoginModule({
         }
         const profile = await getCurrentAuthUser();
         const nomeFinal = profile?.nome || data.user?.user_metadata?.nome || emailDigitado.split('@')[0];
-        concluirLogin(nomeFinal, profile || undefined);
+        concluirLogin(nomeFinal, profile || {
+          id: data.user?.id || 'usr-' + Date.now(),
+          email: emailDigitado,
+          nome: nomeFinal,
+          role: 'operador',
+          nivel_acesso: 'operador',
+          cargo: 'Operador de Vendas'
+        });
         return;
       }
     }
@@ -168,7 +182,9 @@ export default function LoginModule({
           id: 'admin-1',
           email: 'admin@usicorte.com.br',
           nome: 'ADMINISTRADOR',
-          role: 'admin'
+          role: 'admin',
+          nivel_acesso: 'admin',
+          cargo: 'Administrador'
         });
       } else {
         setLoading(false);
@@ -182,11 +198,22 @@ export default function LoginModule({
 
     if (usuarioEncontrado && (usuarioEncontrado.senha === senhaDigitada || senhaDigitada === '123')) {
       setLoading(false);
+      const rawNivel = (usuarioEncontrado.nivel_acesso || usuarioEncontrado.role || '').toLowerCase();
+      const isAdminUser = rawNivel === 'admin' || 
+                          (usuarioEncontrado.nome || '').toUpperCase() === 'ADMIN' || 
+                          (usuarioEncontrado.cargo || '').toLowerCase().includes('admin');
+      const roleFinal: 'admin' | 'operador' = isAdminUser ? 'admin' : 'operador';
+      const nivelFinal: 'admin' | 'operador' | 'calculadora' = isAdminUser 
+        ? 'admin' 
+        : (rawNivel === 'calculadora' ? 'calculadora' : 'operador');
+
       concluirLogin(usuarioEncontrado.nome, {
-        id: usuarioEncontrado.id || usuarioEncontrado.user_id || 'usr-' + usuarioEncontrado.nome,
+        id: String(usuarioEncontrado.id || usuarioEncontrado.user_id || 'usr-' + usuarioEncontrado.nome),
         email: usuarioEncontrado.email || `${usuarioEncontrado.nome.toLowerCase().replace(/[^a-z0-9]/g, '')}@usicorte.com.br`,
         nome: usuarioEncontrado.nome,
-        role: usuarioEncontrado.role || 'operador'
+        role: roleFinal,
+        nivel_acesso: nivelFinal,
+        cargo: usuarioEncontrado.cargo || (isAdminUser ? 'Administrador' : 'Operador')
       });
     } else {
       setLoading(false);
@@ -281,13 +308,14 @@ export default function LoginModule({
     try {
       const emailToUse = novoEmail.trim() || `${nomeTrim.toLowerCase().replace(/[^a-z0-9]/g, '')}@usicorte.com.br`;
 
-      // 1. Salva na tabela usuarios do Supabase com id, nome, email, senha e cargo
+      // 1. Salva na tabela usuarios do Supabase com id, nome, email, senha, cargo, nivel_acesso e role
       const res = await saveUsuarioDb({
         nome: nomeTrim,
         senha: novaSenha,
         email: emailToUse,
         cargo: novoCargo,
-        role: novoCargo.toLowerCase().includes('admin') ? 'admin' : 'operador'
+        role: novoNivelAcesso,
+        nivel_acesso: novoNivelAcesso
       });
 
       if (!res.success) {
@@ -304,7 +332,7 @@ export default function LoginModule({
       // 3. Recarrega dados reais do Supabase
       await carregarListaUsuarios();
 
-      alert(`Funcionário "${nomeTrim}" (${novoCargo}) gravado com sucesso no Supabase (tabela usuarios)!`);
+      alert(`Funcionário "${nomeTrim}" (${novoCargo} • ${novoNivelAcesso === 'admin' ? 'Admin' : 'Operador'}) gravado com sucesso no Supabase (tabela usuarios)!`);
       fecharModalNovoUsuario();
       setUsuarioSelecionado(nomeTrim);
     } catch (err: any) {
@@ -479,14 +507,17 @@ export default function LoginModule({
             </button>
           </form>
 
-          <button 
-            type="button" 
-            className="btn-admin-opt flex items-center justify-center gap-2 mt-3 cursor-pointer w-full" 
-            onClick={() => abrirModalNovoUsuario('lista')}
-          >
-            <Users className="w-4 h-4 text-blue-400" />
-            <span>⚙️ Gerenciar Equipe & Cadastrar Funcionários</span>
-          </button>
+          {/* Se o usuário for 'admin' ou ainda não tiver usuário logado: Exibe a opção de Gerenciar Equipe */}
+          {(!currentUser || isAdmin) && (
+            <button 
+              type="button" 
+              className="btn-admin-opt flex items-center justify-center gap-2 mt-3 cursor-pointer w-full" 
+              onClick={() => abrirModalNovoUsuario('lista')}
+            >
+              <Users className="w-4 h-4 text-blue-400" />
+              <span>⚙️ Gerenciar Equipe & Cadastrar Funcionários</span>
+            </button>
+          )}
 
           {/* Notificação / Informação sobre Fechamento Mensal no Login */}
           {new Date().getDate() === 1 ? (
@@ -702,7 +733,13 @@ export default function LoginModule({
                       id="novoCargo"
                       className="form-control text-xs"
                       value={novoCargo}
-                      onChange={(e) => setNovoCargo(e.target.value)}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setNovoCargo(val);
+                        if (val === 'Administrador') {
+                          setNovoNivelAcesso('admin');
+                        }
+                      }}
                     >
                       <option value="Operador de Vendas">Operador de Vendas</option>
                       <option value="Operador de Produção">Operador de Produção</option>
@@ -723,6 +760,27 @@ export default function LoginModule({
                       onChange={(e) => setNovoEmail(e.target.value)}
                     />
                   </div>
+                </div>
+
+                <div className="form-group text-left">
+                  <label className="text-xs font-semibold text-slate-300 flex items-center justify-between">
+                    <span>Nível de Acesso (Permissões RBAC):</span>
+                    <span className="text-[10px] text-blue-400 font-mono font-bold">Coluna 'nivel_acesso'</span>
+                  </label>
+                  <select
+                    id="novoNivelAcesso"
+                    className="form-control text-xs"
+                    value={novoNivelAcesso}
+                    onChange={(e) => setNovoNivelAcesso(e.target.value as 'admin' | 'operador')}
+                  >
+                    <option value="operador">⚡ Operador / Calculadora (Acesso Restrito: Calculadora & Orçamentos)</option>
+                    <option value="admin">👑 Administrador (Acesso Total: Estoque, NF, Fechamentos, etc.)</option>
+                  </select>
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    {novoNivelAcesso === 'admin'
+                      ? '👑 Acesso irrestrito a todos os módulos, fechamentos, estoque e configurações.'
+                      : '⚡ Acesso restrito estritamente à Calculadora de Pesos/Cortes e Força de Vendas.'}
+                  </p>
                 </div>
 
                 <div className="form-group text-left">
@@ -777,52 +835,73 @@ export default function LoginModule({
                 <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 text-xs text-slate-300 space-y-2">
                   <div className="font-bold text-amber-400 flex items-center gap-1.5">
                     <Database className="w-4 h-4" />
-                    <span>Script SQL para o Supabase (Tabela usuarios)</span>
+                    <span>Script SQL para o Supabase (Tabela usuarios & RBAC)</span>
                   </div>
                   <p className="text-[11px] text-slate-400">
-                    Se você ainda não criou a tabela <code className="text-emerald-400 font-mono">usuarios</code> no SQL Editor do seu Supabase, copie e execute o comando abaixo:
+                    Execute no <strong>SQL Editor</strong> do seu Supabase para criar ou atualizar a tabela <code className="text-emerald-400 font-mono">usuarios</code> com suporte completo a níveis de acesso (RBAC):
                   </p>
                   <pre className="p-2.5 bg-slate-900 rounded-lg text-[10px] font-mono text-emerald-300 overflow-x-auto border border-slate-800 select-all">
-{`CREATE TABLE IF NOT EXISTS usuarios (
+{`-- 1. Criar tabela usuarios com coluna nivel_acesso e role
+CREATE TABLE IF NOT EXISTS usuarios (
     id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
     nome VARCHAR(100) NOT NULL UNIQUE,
     email VARCHAR(150),
     senha VARCHAR(255) NOT NULL,
     cargo VARCHAR(50) DEFAULT 'Operador de Vendas',
+    nivel_acesso VARCHAR(50) DEFAULT 'operador', -- 'admin' ou 'operador'
+    role VARCHAR(50) DEFAULT 'operador',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW())
 );
 
--- Inserir dados iniciais da equipe
-INSERT INTO usuarios (nome, email, senha, cargo)
+-- 2. Garantir que as colunas de permissão existam se a tabela já foi criada
+ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS nivel_acesso VARCHAR(50) DEFAULT 'operador';
+ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS role VARCHAR(50) DEFAULT 'operador';
+
+-- 3. Inserir dados iniciais da equipe com níveis de acesso
+INSERT INTO usuarios (nome, email, senha, cargo, nivel_acesso, role)
 VALUES 
-('ADMIN', 'admin@usicorte.com.br', '1234', 'Administrador'),
-('MARCOS (VENDAS)', 'marcos@usicorte.com.br', '123', 'Operador de Vendas'),
-('CARLOS (PRODUÇÃO)', 'carlos@usicorte.com.br', '123', 'Operador de Produção')
-ON CONFLICT (nome) DO NOTHING;`}
+('ADMIN', 'admin@usicorte.com.br', '1234', 'Administrador', 'admin', 'admin'),
+('MARCOS (VENDAS)', 'marcos@usicorte.com.br', '123', 'Operador de Vendas', 'operador', 'operador'),
+('CARLOS (PRODUÇÃO)', 'carlos@usicorte.com.br', '123', 'Operador de Produção', 'operador', 'operador')
+ON CONFLICT (nome) DO UPDATE SET
+    nivel_acesso = EXCLUDED.nivel_acesso,
+    role = EXCLUDED.role,
+    cargo = EXCLUDED.cargo;`}
                   </pre>
                   <button
                     type="button"
                     onClick={() => {
-                      navigator.clipboard.writeText(`CREATE TABLE IF NOT EXISTS usuarios (
+                      navigator.clipboard.writeText(`-- 1. Criar tabela usuarios com coluna nivel_acesso e role
+CREATE TABLE IF NOT EXISTS usuarios (
     id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
     nome VARCHAR(100) NOT NULL UNIQUE,
     email VARCHAR(150),
     senha VARCHAR(255) NOT NULL,
     cargo VARCHAR(50) DEFAULT 'Operador de Vendas',
+    nivel_acesso VARCHAR(50) DEFAULT 'operador',
+    role VARCHAR(50) DEFAULT 'operador',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW())
 );
 
-INSERT INTO usuarios (nome, email, senha, cargo)
+-- 2. Garantir que as colunas de permissão existam se a tabela já foi criada
+ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS nivel_acesso VARCHAR(50) DEFAULT 'operador';
+ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS role VARCHAR(50) DEFAULT 'operador';
+
+-- 3. Inserir dados iniciais da equipe com níveis de acesso
+INSERT INTO usuarios (nome, email, senha, cargo, nivel_acesso, role)
 VALUES 
-('ADMIN', 'admin@usicorte.com.br', '1234', 'Administrador'),
-('MARCOS (VENDAS)', 'marcos@usicorte.com.br', '123', 'Operador de Vendas'),
-('CARLOS (PRODUÇÃO)', 'carlos@usicorte.com.br', '123', 'Operador de Produção')
-ON CONFLICT (nome) DO NOTHING;`);
-                      alert("Script SQL copiado para a área de transferência!");
+('ADMIN', 'admin@usicorte.com.br', '1234', 'Administrador', 'admin', 'admin'),
+('MARCOS (VENDAS)', 'marcos@usicorte.com.br', '123', 'Operador de Vendas', 'operador', 'operador'),
+('CARLOS (PRODUÇÃO)', 'carlos@usicorte.com.br', '123', 'Operador de Produção', 'operador', 'operador')
+ON CONFLICT (nome) DO UPDATE SET
+    nivel_acesso = EXCLUDED.nivel_acesso,
+    role = EXCLUDED.role,
+    cargo = EXCLUDED.cargo;`);
+                      alert("Script SQL RBAC copiado para a área de transferência!");
                     }}
                     className="w-full py-1.5 bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/30 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5"
                   >
-                    <span>📋 Copiar Script SQL</span>
+                    <span>📋 Copiar Script SQL RBAC</span>
                   </button>
                 </div>
 

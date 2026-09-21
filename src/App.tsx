@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Quote } from './types';
 import { INITIAL_QUOTE } from './data/initialData';
 import { useClients } from './hooks/useClients';
@@ -23,10 +23,13 @@ import FechamentoCotacoesModule from './components/FechamentoCotacoesModule';
 import AndamentoMovimentacoesModule from './components/AndamentoMovimentacoesModule';
 import FechamentoMensalModal from './components/FechamentoMensalModal';
 import UsicorteCalculatorModal from './components/UsicorteCalculatorModal';
+import CalculadoraView from './components/CalculadoraView';
+import { OfflineIndicator } from './components/OfflineIndicator';
 import { MaterialProfile } from './utils/calculator';
+import { UserProfile } from './lib/db';
 import { Users, FileCode, CheckCircle2, AlertTriangle, X } from 'lucide-react';
 
-export type ScreenType = 'home' | 'clientes' | 'produtos' | 'orcamento' | 'ordem_servico' | 'vendas' | 'relatorios' | 'estoque' | 'financeiro' | 'fechamento' | 'movimentacoes' | 'empresa' | 'php';
+export type ScreenType = 'home' | 'clientes' | 'produtos' | 'orcamento' | 'ordem_servico' | 'vendas' | 'calculadora' | 'relatorios' | 'estoque' | 'financeiro' | 'fechamento' | 'movimentacoes' | 'empresa' | 'php';
 
 export default function App() {
   const { 
@@ -43,7 +46,22 @@ export default function App() {
   } = useClients();
   const currentTime = useClock();
 
-  const [currentScreen, setCurrentScreen] = useState<ScreenType>('home');
+  const [currentScreen, setCurrentScreen] = useState<ScreenType>(() => {
+    try {
+      const user = sessionStorage.getItem('usuario_logado') || '';
+      const savedPerfil = sessionStorage.getItem('usuario_perfil');
+      const perfil = savedPerfil ? JSON.parse(savedPerfil) : null;
+      const nivel = (perfil?.nivel_acesso || perfil?.role || '').toLowerCase();
+      const userUpper = user.toUpperCase();
+      const isUserAdmin = nivel === 'admin' || nivel === 'administrador' || userUpper === 'ADMIN' || userUpper === 'ADMINISTRADOR';
+      if (user && !isUserAdmin) {
+        return 'calculadora';
+      }
+    } catch {
+      // ignore
+    }
+    return 'home';
+  });
   const [reportsTab, setReportsTab] = useState<'propostas' | 'consulta'>('propostas');
   const [selectedMaterialForQuote, setSelectedMaterialForQuote] = useState<MaterialProfile | null>(null);
   const [currentQuote, setCurrentQuote] = useState<Quote>(INITIAL_QUOTE);
@@ -51,8 +69,32 @@ export default function App() {
 
   // Autenticação & Modais
   const [currentUser, setCurrentUser] = useState<string | null>(() => sessionStorage.getItem('usuario_logado'));
+  const [currentUserProfile, setCurrentUserProfile] = useState<UserProfile | null>(() => {
+    try {
+      const saved = sessionStorage.getItem('usuario_perfil');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
   const [isLoginOpen, setIsLoginOpen] = useState<boolean>(() => !sessionStorage.getItem('usuario_logado'));
-  const [isQuickCalcOpen, setIsQuickCalcOpen] = useState<boolean>(false);
+  const [isQuickCalcOpen, setIsQuickCalcOpen] = useState<boolean>(() => {
+    try {
+      const user = sessionStorage.getItem('usuario_logado') || '';
+      const savedPerfil = sessionStorage.getItem('usuario_perfil');
+      const perfil = savedPerfil ? JSON.parse(savedPerfil) : null;
+      const nivel = (perfil?.nivel_acesso || perfil?.role || '').toLowerCase();
+      const userUpper = user.toUpperCase();
+      const isUserAdmin = nivel === 'admin' || nivel === 'administrador' || userUpper === 'ADMIN' || userUpper === 'ADMINISTRADOR';
+      if (user && !isUserAdmin) {
+        return true;
+      }
+    } catch {
+      // ignore
+    }
+    return false;
+  });
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
   const [isFechamentoModalOpen, setIsFechamentoModalOpen] = useState<boolean>(false);
   const [isAutoOpenDia1, setIsAutoOpenDia1] = useState<boolean>(false);
@@ -61,24 +103,82 @@ export default function App() {
     message: string;
   } | null>(null);
 
+  // RBAC: Identificação do nível de acesso do usuário logado
+  const isAdmin = useMemo(() => {
+    if (!currentUser) return true; // Modo flexível se não houver usuário logado
+    if (currentUserProfile) {
+      const nivel = (currentUserProfile.nivel_acesso || currentUserProfile.role || '').toLowerCase();
+      if (nivel === 'operador' || nivel === 'calculadora') return false;
+      if (nivel === 'admin' || nivel === 'administrador') return true;
+    }
+    const userUpper = currentUser.toUpperCase();
+    if (userUpper === 'ADMIN' || userUpper === 'ADMINISTRADOR') return true;
+    if (userUpper.includes('VENDAS') || userUpper.includes('PRODUÇÃO') || userUpper.includes('OPERADOR')) return false;
+    return true;
+  }, [currentUser, currentUserProfile]);
+
+  // 3. Proteção de Rotas e Redirecionamento Automático:
+  // Caso um usuário restrito tente acessar diretamente uma tela/módulo bloqueado (ex: Estoque), redirecione-o automaticamente para a 'calculadora' ou 'vendas'.
+  useEffect(() => {
+    if (currentUser && !isAdmin && currentScreen !== 'calculadora' && currentScreen !== 'vendas' && currentScreen !== 'orcamento') {
+      console.warn(`[RBAC Guard] Usuário '${currentUser}' com perfil restrito tentou acessar '${currentScreen}'. Redirecionando para Calculadora.`);
+      setCurrentScreen('calculadora');
+      setIsQuickCalcOpen(true);
+    }
+  }, [currentUser, isAdmin, currentScreen]);
+
   const abrirHistoricoFechamento = (autoDia1 = false) => {
+    if (!isAdmin) return; // Apenas admin pode abrir fechamento mensal
     setIsAutoOpenDia1(autoDia1);
     setIsFechamentoModalOpen(true);
   };
 
-  const handleLoginSuccess = (user: string) => {
+  const handleLoginSuccess = (user: string, profile?: UserProfile) => {
     setCurrentUser(user);
+    if (profile) {
+      setCurrentUserProfile(profile);
+      try {
+        sessionStorage.setItem('usuario_perfil', JSON.stringify(profile));
+      } catch (e) {
+        console.warn('Erro ao salvar usuario_perfil no sessionStorage:', e);
+      }
+    }
     setIsLoginOpen(false);
 
-    // 1. Disparo Automático em Todos os Logins do Dia de Fechamento:
-    // Ao fazer login no dia 1º de qualquer mês (ou primeiro dia do mês), abra AUTOMATICAMENTE o modal de 'Fechamento do Mês Anterior'.
-    // O modal deve abrir em todos os logins realizados ao longo desse dia para garantir que as informações sejam vistas e conferidas.
-    const hoje = new Date();
-    const isDia1 = hoje.getDate() === 1 || sessionStorage.getItem('simular_login_dia_1') === 'true';
-    if (isDia1) {
-      sessionStorage.removeItem('simular_login_dia_1');
-      abrirHistoricoFechamento(true);
+    const nivel = (profile?.nivel_acesso || profile?.role || '').toLowerCase();
+    const isUserAdmin = nivel === 'admin' || nivel === 'administrador' || user.toUpperCase() === 'ADMIN' || user.toUpperCase() === 'ADMINISTRADOR';
+
+    if (!isUserAdmin) {
+      // 1. Operador: direcione o usuário AUTOMATICAMENTE e OBRIGATORIAMENTE para a "Calculadora Usicorte ⚡"
+      // Definindo o estado inicial estritamente para a Calculadora
+      // NÃO abra a tela de "Vendas & Orçamentos" por padrão
+      // Abre o módulo/modal de cálculo imediatamente com foco visual
+      setCurrentScreen('calculadora');
+      setIsQuickCalcOpen(true);
+    } else {
+      // 1. Administrador (ADMIN): MANTENHA EXATAMENTE COMO ESTÁ ATUALMENTE:
+      // abre na tela inicial/dashboard padrão atual com acesso total a todos os módulos e menus.
+      setCurrentScreen('home');
+      setIsQuickCalcOpen(false);
+
+      // Disparo Automático em Todos os Logins do Dia de Fechamento (Admin):
+      const hoje = new Date();
+      const isDia1 = hoje.getDate() === 1 || sessionStorage.getItem('simular_login_dia_1') === 'true';
+      if (isDia1) {
+        sessionStorage.removeItem('simular_login_dia_1');
+        abrirHistoricoFechamento(true);
+      }
     }
+  };
+
+  const handleLogout = () => {
+    sessionStorage.removeItem('usuario_logado');
+    sessionStorage.removeItem('usuario_perfil');
+    setCurrentUser(null);
+    setCurrentUserProfile(null);
+    setIsLoginOpen(true);
+    setIsQuickCalcOpen(false);
+    setCurrentScreen('home'); // Retorna ao Início/Dashboard padrão para o próximo login
   };
 
   // 1. Leitura do LocalStorage ao carregar o sistema:
@@ -121,7 +221,17 @@ export default function App() {
   }, []);
 
   const trocarTela = (nomeTela: ScreenType, tab?: 'propostas' | 'consulta') => {
+    // Se o usuário for operador, proíbe navegação para módulos restritos e direciona para a Calculadora
+    if (currentUser && !isAdmin && nomeTela !== 'calculadora' && nomeTela !== 'vendas' && nomeTela !== 'orcamento') {
+      setCurrentScreen('calculadora');
+      setIsQuickCalcOpen(true);
+      setIsMobileSidebarOpen(false);
+      return;
+    }
     setCurrentScreen(nomeTela);
+    if (nomeTela === 'calculadora') {
+      setIsQuickCalcOpen(true);
+    }
     if (tab) {
       setReportsTab(tab);
     }
@@ -161,11 +271,15 @@ export default function App() {
       <TopBar 
         currentScreen={currentScreen}
         currentUser={currentUser}
+        currentUserProfile={currentUserProfile}
+        isAdmin={isAdmin}
         isMobileSidebarOpen={isMobileSidebarOpen}
         setIsMobileSidebarOpen={setIsMobileSidebarOpen}
         trocarTela={trocarTela}
         setIsLoginOpen={setIsLoginOpen}
         onOpenHistoricoFechamento={() => abrirHistoricoFechamento(false)}
+        setIsQuickCalcOpen={setIsQuickCalcOpen}
+        onLogout={handleLogout}
       />
 
       {migrationAlert && (
@@ -201,14 +315,18 @@ export default function App() {
           reportsTab={reportsTab}
           isMobileSidebarOpen={isMobileSidebarOpen}
           clientsCount={clients.length}
+          isAdmin={isAdmin}
+          currentUser={currentUser}
+          currentUserProfile={currentUserProfile}
           setIsMobileSidebarOpen={setIsMobileSidebarOpen}
           trocarTela={trocarTela}
           setIsQuickCalcOpen={setIsQuickCalcOpen}
           onOpenHistoricoFechamento={() => abrirHistoricoFechamento(false)}
+          onLogout={handleLogout}
         />
 
         <main className="flex-1 bg-slate-950 p-6 overflow-y-auto">
-          {currentScreen === 'home' && (
+          {isAdmin && currentScreen === 'home' && (
             <DashboardView 
               clients={clients}
               currentQuote={currentQuote}
@@ -217,7 +335,7 @@ export default function App() {
             />
           )}
 
-          {currentScreen === 'clientes' && (
+          {isAdmin && currentScreen === 'clientes' && (
             <div id="screen-clientes" className="space-y-6">
               <div className="flex items-center justify-between pb-4 border-b border-slate-800">
                 <div>
@@ -259,23 +377,31 @@ export default function App() {
             </div>
           )}
 
-          {currentScreen === 'produtos' && <ProductsModule onSelectProductForQuote={handleLaunchProductIntoQuote} />}
+          {isAdmin && currentScreen === 'produtos' && <ProductsModule onSelectProductForQuote={handleLaunchProductIntoQuote} />}
           
+          {currentScreen === 'calculadora' && (
+            <CalculadoraView 
+              onOpenCalculatorModal={() => setIsQuickCalcOpen(true)}
+              onNavigateToSales={() => trocarTela('vendas')}
+              isQuickCalcOpen={isQuickCalcOpen}
+            />
+          )}
+
           {(currentScreen === 'orcamento' || currentScreen === 'vendas') && (
             <SalesModule 
               clients={clients} 
               selectedMaterial={selectedMaterialForQuote} 
               onQuoteChange={setCurrentQuote} 
-              onNavigateToClients={() => trocarTela('clientes')} 
-              onNavigateToReports={() => trocarTela('relatorios')} 
+              onNavigateToClients={isAdmin ? () => trocarTela('clientes') : undefined} 
+              onNavigateToReports={isAdmin ? () => trocarTela('relatorios') : undefined} 
               quoteToEdit={quoteToEdit}
               onClearQuoteToEdit={() => setQuoteToEdit(null)}
             />
           )}
 
-          {currentScreen === 'ordem_servico' && <DailyOSModule clients={clients} onNavigateToClients={() => trocarTela('clientes')} />}
+          {isAdmin && currentScreen === 'ordem_servico' && <DailyOSModule clients={clients} onNavigateToClients={() => trocarTela('clientes')} />}
           
-          {currentScreen === 'relatorios' && (
+          {isAdmin && currentScreen === 'relatorios' && (
             <ReportsModule 
               currentQuote={currentQuote} 
               clients={clients} 
@@ -288,7 +414,7 @@ export default function App() {
             />
           )}
 
-          {currentScreen === 'movimentacoes' && (
+          {isAdmin && currentScreen === 'movimentacoes' && (
             <AndamentoMovimentacoesModule 
               clients={clients}
               onNavigateToReports={(tab) => trocarTela('relatorios', tab)}
@@ -296,7 +422,7 @@ export default function App() {
             />
           )}
 
-          {currentScreen === 'estoque' && (
+          {isAdmin && currentScreen === 'estoque' && (
             <InventoryFinanceModule 
               initialTab="estoque" 
               onNavigateToQuote={() => trocarTela('vendas')} 
@@ -305,7 +431,7 @@ export default function App() {
             />
           )}
 
-          {currentScreen === 'financeiro' && (
+          {isAdmin && currentScreen === 'financeiro' && (
             <InventoryFinanceModule 
               initialTab="financeiro" 
               onNavigateToQuote={() => trocarTela('vendas')} 
@@ -314,7 +440,7 @@ export default function App() {
             />
           )}
 
-          {currentScreen === 'fechamento' && (
+          {isAdmin && currentScreen === 'fechamento' && (
             <FechamentoCotacoesModule 
               clients={clients}
               onNavigateToFinanceiro={() => trocarTela('financeiro')}
@@ -323,13 +449,13 @@ export default function App() {
             />
           )}
 
-          {currentScreen === 'empresa' && (
+          {isAdmin && currentScreen === 'empresa' && (
             <CompanySettingsModule 
               onBackToDashboard={() => trocarTela('home')} 
             />
           )}
 
-          {currentScreen === 'php' && (
+          {isAdmin && currentScreen === 'php' && (
             <div id="screen-php" className="space-y-6">
               <div className="flex items-center justify-between pb-4 border-b border-slate-800">
                 <div>
@@ -346,14 +472,21 @@ export default function App() {
         </main>
       </div>
 
-      <FooterBar currentUser={currentUser} currentTime={currentTime} />
+      <FooterBar 
+        currentUser={currentUser} 
+        currentUserProfile={currentUserProfile} 
+        isAdmin={isAdmin} 
+        currentTime={currentTime} 
+      />
 
       <LoginModule 
         isOpen={isLoginOpen}
         onClose={() => setIsLoginOpen(false)}
         onLoginSuccess={handleLoginSuccess}
         currentUser={currentUser}
-        onLogout={() => { sessionStorage.removeItem('usuario_logado'); setCurrentUser(null); setIsLoginOpen(true); }}
+        currentUserProfile={currentUserProfile}
+        isAdmin={isAdmin}
+        onLogout={handleLogout}
       />
 
       <FechamentoMensalModal
@@ -368,6 +501,8 @@ export default function App() {
         onClose={() => setIsQuickCalcOpen(false)}
         onAddItemToQuote={handleAddItemFromQuickCalc}
       />
+
+      <OfflineIndicator />
     </div>
   );
 }

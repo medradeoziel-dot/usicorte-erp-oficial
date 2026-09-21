@@ -243,11 +243,16 @@ export interface SupabaseCotacaoItem {
   updated_at?: string;
 }
 
+export type UserRole = 'admin' | 'operador';
+export type NivelAcesso = 'admin' | 'operador' | 'calculadora';
+
 export interface UserProfile {
   id: string;
   email: string;
   nome: string;
-  role: 'admin' | 'operador';
+  role: UserRole;
+  nivel_acesso: 'admin' | 'operador' | 'calculadora';
+  cargo?: string;
 }
 
 /* =========================================================================
@@ -260,19 +265,68 @@ export async function getCurrentAuthUser(): Promise<UserProfile | null> {
     if (error || !user) return null;
 
     let role: 'admin' | 'operador' = 'operador';
+    let nivel_acesso: 'admin' | 'operador' | 'calculadora' = 'operador';
+    let cargo: string = 'Operador';
+
+    // 1. Verifica metadata do Supabase Auth
+    const metaNivel = user.user_metadata?.nivel_acesso || user.user_metadata?.role;
+    if (metaNivel) {
+      if (metaNivel === 'admin') {
+        role = 'admin';
+        nivel_acesso = 'admin';
+        cargo = 'Administrador';
+      } else {
+        role = 'operador';
+        nivel_acesso = metaNivel === 'calculadora' ? 'calculadora' : 'operador';
+        cargo = user.user_metadata?.cargo || 'Operador de Vendas';
+      }
+    }
+
+    // 2. Verifica na tabela usuarios do Supabase
+    try {
+      const { data: uData } = await db
+        .from('usuarios')
+        .select('nome, cargo, role, nivel_acesso')
+        .or(`email.eq.${user.email},nome.eq.${user.user_metadata?.nome || user.email?.split('@')[0]}`)
+        .maybeSingle();
+
+      if (uData) {
+        const rawNivel = (uData.nivel_acesso || uData.role || '').toLowerCase();
+        const isAdmin = rawNivel === 'admin' || 
+                        (uData.nome || '').toUpperCase() === 'ADMIN' || 
+                        (uData.cargo || '').toLowerCase().includes('admin');
+        if (isAdmin) {
+          role = 'admin';
+          nivel_acesso = 'admin';
+          cargo = uData.cargo || 'Administrador';
+        } else {
+          role = 'operador';
+          nivel_acesso = rawNivel === 'calculadora' ? 'calculadora' : 'operador';
+          cargo = uData.cargo || 'Operador de Vendas';
+        }
+      }
+    } catch {}
+
+    // 3. Fallback: tabela user_roles
     try {
       const { data: roleData } = await db
         .from('user_roles')
-        .select('role')
+        .select('role, nivel_acesso')
         .eq('user_id', user.id)
         .maybeSingle();
 
-      if (roleData?.role) {
-        role = roleData.role as 'admin' | 'operador';
+      if (roleData?.role || roleData?.nivel_acesso) {
+        const rawR = (roleData.nivel_acesso || roleData.role).toLowerCase();
+        if (rawR === 'admin') {
+          role = 'admin';
+          nivel_acesso = 'admin';
+          cargo = 'Administrador';
+        } else {
+          role = 'operador';
+          nivel_acesso = rawR === 'calculadora' ? 'calculadora' : 'operador';
+        }
       }
-    } catch (e) {
-      console.warn("Não foi possível carregar user_roles:", e);
-    }
+    } catch {}
 
     const nome = user.user_metadata?.nome || user.email?.split('@')[0] || 'Usuário';
 
@@ -280,7 +334,9 @@ export async function getCurrentAuthUser(): Promise<UserProfile | null> {
       id: user.id,
       email: user.email || '',
       nome,
-      role
+      role,
+      nivel_acesso,
+      cargo
     };
   } catch (err) {
     console.error("Erro ao obter usuário atual do Supabase:", err);
@@ -299,7 +355,9 @@ export async function signUpSupabase(email: string, password: string, nome: stri
     password,
     options: {
       data: {
-        nome
+        nome,
+        role: 'operador',
+        nivel_acesso: 'operador'
       }
     }
   });
@@ -318,15 +376,16 @@ export interface SupabaseUserRole {
   email: string;
   cargo: string;
   role: 'admin' | 'operador';
+  nivel_acesso?: 'admin' | 'operador' | 'calculadora';
   senha?: string;
   created_at?: string;
   updated_at?: string;
 }
 
 const DEFAULT_USUARIOS_EQUIPE: SupabaseUserRole[] = [
-  { nome: 'ADMIN', senha: '1234', email: 'admin@usicorte.com.br', cargo: 'Administrador', role: 'admin' },
-  { nome: 'MARCOS (VENDAS)', senha: '123', email: 'marcos@usicorte.com.br', cargo: 'Operador de Vendas', role: 'operador' },
-  { nome: 'CARLOS (PRODUÇÃO)', senha: '123', email: 'carlos@usicorte.com.br', cargo: 'Operador de Produção', role: 'operador' }
+  { nome: 'ADMIN', senha: '1234', email: 'admin@usicorte.com.br', cargo: 'Administrador', role: 'admin', nivel_acesso: 'admin' },
+  { nome: 'MARCOS (VENDAS)', senha: '123', email: 'marcos@usicorte.com.br', cargo: 'Operador de Vendas', role: 'operador', nivel_acesso: 'operador' },
+  { nome: 'CARLOS (PRODUÇÃO)', senha: '123', email: 'carlos@usicorte.com.br', cargo: 'Operador de Produção', role: 'operador', nivel_acesso: 'operador' }
 ];
 
 export async function fetchUsuariosDb(): Promise<SupabaseUserRole[]> {
@@ -339,11 +398,15 @@ export async function fetchUsuariosDb(): Promise<SupabaseUserRole[]> {
 
     if (!error && status !== 404 && data && data.length > 0) {
       return data.map((item: any) => {
-        const isAdmin = (item.nome || '').toUpperCase() === 'ADMIN' || 
-                        item.role === 'admin' || 
+        const rawNivel = (item.nivel_acesso || item.role || '').toLowerCase();
+        const isAdmin = rawNivel === 'admin' || 
+                        (item.nome || '').toUpperCase() === 'ADMIN' || 
                         (item.cargo || '').toLowerCase().includes('admin');
         const cargo = item.cargo || item.perfil || (isAdmin ? 'Administrador' : 'Operador');
-        const role = isAdmin ? 'admin' : 'operador';
+        const role: 'admin' | 'operador' = isAdmin ? 'admin' : 'operador';
+        const nivel_acesso: 'admin' | 'operador' | 'calculadora' = isAdmin 
+          ? 'admin' 
+          : (rawNivel === 'calculadora' ? 'calculadora' : 'operador');
 
         return {
           id: item.id ? String(item.id) : undefined,
@@ -352,6 +415,7 @@ export async function fetchUsuariosDb(): Promise<SupabaseUserRole[]> {
           email: item.email || '',
           cargo: cargo,
           role: role,
+          nivel_acesso: nivel_acesso,
           senha: item.senha || item.password || '123',
           created_at: item.created_at || item.criado_em,
           updated_at: item.updated_at || item.atualizado_em
@@ -367,7 +431,9 @@ export async function fetchUsuariosDb(): Promise<SupabaseUserRole[]> {
             nome: u.nome,
             email: u.email,
             senha: u.senha,
-            cargo: u.cargo
+            cargo: u.cargo,
+            nivel_acesso: u.nivel_acesso,
+            role: u.role
           }, { onConflict: 'nome' })
         ));
       } catch {}
@@ -380,17 +446,22 @@ export async function fetchUsuariosDb(): Promise<SupabaseUserRole[]> {
         .select('*');
 
       if (!roleError && roleStatus !== 404 && roleData && roleData.length > 0) {
-        return roleData.map((item: any) => ({
-          id: item.id ? String(item.id) : undefined,
-          user_id: item.user_id ? String(item.user_id) : undefined,
-          nome: item.nome || (item.email ? item.email.split('@')[0] : 'Usuário'),
-          email: item.email || '',
-          cargo: item.role === 'admin' ? 'Administrador' : 'Operador',
-          role: (item.role === 'admin' ? 'admin' : 'operador') as 'admin' | 'operador',
-          senha: item.senha || '123',
-          created_at: item.created_at,
-          updated_at: item.updated_at
-        }));
+        return roleData.map((item: any) => {
+          const rawNivel = (item.nivel_acesso || item.role || '').toLowerCase();
+          const isAdmin = rawNivel === 'admin' || (item.nome || '').toUpperCase() === 'ADMIN';
+          return {
+            id: item.id ? String(item.id) : undefined,
+            user_id: item.user_id ? String(item.user_id) : undefined,
+            nome: item.nome || (item.email ? item.email.split('@')[0] : 'Usuário'),
+            email: item.email || '',
+            cargo: isAdmin ? 'Administrador' : 'Operador',
+            role: (isAdmin ? 'admin' : 'operador') as 'admin' | 'operador',
+            nivel_acesso: (isAdmin ? 'admin' : (rawNivel === 'calculadora' ? 'calculadora' : 'operador')) as 'admin' | 'operador' | 'calculadora',
+            senha: item.senha || '123',
+            created_at: item.created_at,
+            updated_at: item.updated_at
+          };
+        });
       }
     } catch {}
 
@@ -407,21 +478,30 @@ export async function saveUsuarioDb(usuario: {
   email?: string;
   cargo?: string;
   role?: 'admin' | 'operador';
+  nivel_acesso?: 'admin' | 'operador' | 'calculadora';
 }): Promise<{ success: boolean; data?: any; error?: string }> {
   try {
     const nomeTrim = usuario.nome.trim();
     const emailToUse = usuario.email?.trim() || `${nomeTrim.toLowerCase().replace(/[^a-z0-9]/g, '')}@usicorte.com.br`;
-    const isAdmin = nomeTrim.toUpperCase() === 'ADMIN' || usuario.role === 'admin' || (usuario.cargo || '').toLowerCase().includes('admin');
+    const rawNivel = (usuario.nivel_acesso || usuario.role || '').toLowerCase();
+    const isAdmin = nomeTrim.toUpperCase() === 'ADMIN' || 
+                    rawNivel === 'admin' || 
+                    (usuario.cargo || '').toLowerCase().includes('admin');
     const roleToUse: 'admin' | 'operador' = isAdmin ? 'admin' : 'operador';
+    const nivelToUse: 'admin' | 'operador' | 'calculadora' = isAdmin 
+      ? 'admin' 
+      : (rawNivel === 'calculadora' ? 'calculadora' : 'operador');
     const cargoToUse = usuario.cargo || (isAdmin ? 'Administrador' : 'Operador');
     const senhaToUse = usuario.senha || '123';
 
-    // 1. Tenta gravar na tabela principal `usuarios` com todos os campos (id, nome, email, senha, cargo)
+    // 1. Tenta gravar na tabela principal `usuarios` com todos os campos incluindo nivel_acesso e role
     const payloadCompleto: any = {
       nome: nomeTrim,
       email: emailToUse,
       senha: senhaToUse,
-      cargo: cargoToUse
+      cargo: cargoToUse,
+      nivel_acesso: nivelToUse,
+      role: roleToUse
     };
 
     if (usuario.id && (typeof usuario.id === 'number' || isUuid(String(usuario.id)) || /^\d+$/.test(String(usuario.id)))) {
@@ -436,7 +516,7 @@ export async function saveUsuarioDb(usuario: {
       res = await db.from('usuarios').insert([payloadCompleto]).select();
     }
 
-    // Se ainda falhar por causa da coluna 'cargo', tenta variações de coluna (role / perfil)
+    // Se ainda falhar por causa da coluna 'nivel_acesso', tenta sem ela
     if (res.error) {
       console.warn("Tentando salvar em 'usuarios' com variações de colunas...", res.error.message);
       
@@ -452,11 +532,12 @@ export async function saveUsuarioDb(usuario: {
       res = await db.from('usuarios').insert([payloadVariacao]).select();
 
       if (res.error) {
-        // Tenta apenas nome, email, senha
+        // Tenta apenas nome, email, senha, cargo
         res = await db.from('usuarios').insert([{
           nome: nomeTrim,
           email: emailToUse,
-          senha: senhaToUse
+          senha: senhaToUse,
+          cargo: cargoToUse
         }]).select();
       }
     }
@@ -468,6 +549,7 @@ export async function saveUsuarioDb(usuario: {
         nome: nomeTrim,
         email: emailToUse,
         role: roleToUse,
+        nivel_acesso: nivelToUse,
         senha: senhaToUse
       }], { onConflict: 'email' }).select();
 
@@ -477,7 +559,7 @@ export async function saveUsuarioDb(usuario: {
 
       return { 
         success: false, 
-        error: `Erro no Supabase: ${res.error.message}. Certifique-se de que a tabela "usuarios" (com colunas nome, email, senha, cargo) foi criada.` 
+        error: `Erro no Supabase: ${res.error.message}. Certifique-se de que a tabela "usuarios" (com colunas nome, email, senha, cargo, nivel_acesso) foi criada.` 
       };
     }
 
