@@ -17,7 +17,8 @@ import {
   Lock,
   LogOut,
   LogIn,
-  ShieldCheck
+  ShieldCheck,
+  Receipt
 } from 'lucide-react';
 
 interface TopBarProps {
@@ -87,6 +88,7 @@ export default function TopBar({
             { id: 'vendas', label: 'Vendas & PDV', icon: ShoppingCart },
             { id: 'estoque', label: 'Estoque', icon: Boxes },
             { id: 'financeiro', label: 'Financeiro', icon: DollarSign },
+            { id: 'fechamento', label: 'Fechamento & Extrato', icon: Receipt },
             { id: 'relatorios', label: 'Relatórios', icon: FileText },
             { id: 'empresa', label: 'Emitente', icon: Building2 },
           ].map((item) => {
@@ -103,7 +105,7 @@ export default function TopBar({
                 }`}
               >
                 <Icon className="w-4 h-4 mb-0.5" />
-                <span className="text-[11px] font-semibold">{item.label}</span>
+                <span className="text-[11px] font-semibold whitespace-nowrap">{item.label}</span>
               </button>
             );
           })

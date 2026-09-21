@@ -4,10 +4,19 @@ import { Download, ExternalLink, Copy, Check, X, Smartphone, Laptop, Info } from
 
 interface PWAInstallButtonProps {
   variant?: 'topbar' | 'sidebar' | 'banner';
+  isCollapsed?: boolean;
   className?: string;
+  onHoverCollapsed?: (e: React.MouseEvent<HTMLButtonElement>) => void;
+  onLeaveCollapsed?: () => void;
 }
 
-export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ variant = 'sidebar', className = '' }) => {
+export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ 
+  variant = 'sidebar', 
+  isCollapsed = false,
+  className = '',
+  onHoverCollapsed,
+  onLeaveCollapsed
+}) => {
   const { isInstallable, isIOS, install } = usePWAInstall();
   const [isInstalling, setIsInstalling] = useState(false);
   const [showModal, setShowModal] = useState(false);
@@ -70,7 +79,32 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({ variant = 's
       )}
 
       {/* 2. Barra Lateral (Sidebar): Bloco verde escuro (#062c1d) SEMPRE VISÍVEL */}
-      {variant === 'sidebar' && (
+      {variant === 'sidebar' && isCollapsed && (
+        <div className={`relative flex justify-center py-1 ${className}`}>
+          <button
+            onClick={handleInstallClick}
+            disabled={isInstalling}
+            onMouseEnter={onHoverCollapsed}
+            onMouseLeave={onLeaveCollapsed}
+            className="w-11 h-11 rounded-xl bg-[#062c1d] border border-emerald-500/50 hover:border-emerald-400 p-1.5 flex items-center justify-center shadow-lg shadow-emerald-950/60 transition-all cursor-pointer hover:scale-105 active:scale-95 group relative"
+            title="Instalar Aplicativo (PWA) - Usi Corte Metais"
+          >
+            <img 
+              src="/icon-192.png" 
+              onError={(e) => { 
+                (e.currentTarget as HTMLImageElement).src = '/icon.svg'; 
+              }} 
+              alt="Usi Corte Metais" 
+              className="w-full h-full object-contain rounded-lg" 
+            />
+            <div className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-emerald-500 border border-slate-900 flex items-center justify-center text-white shadow-sm">
+              <Download className="w-2.5 h-2.5" />
+            </div>
+          </button>
+        </div>
+      )}
+
+      {variant === 'sidebar' && !isCollapsed && (
         <div className={`relative overflow-hidden p-3.5 bg-[#062c1d] border border-emerald-500/50 rounded-2xl text-left shadow-xl shadow-emerald-950/60 ring-1 ring-emerald-500/20 ${className}`}>
           {/* Brilho decorativo sutil de fundo */}
           <div className="absolute -top-8 -right-8 w-24 h-24 bg-emerald-500/15 rounded-full blur-xl pointer-events-none" />
