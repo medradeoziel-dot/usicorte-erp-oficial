@@ -23,6 +23,10 @@ import {
   X, 
   ChevronLeft, 
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
+  Receipt,
+  Layers,
   PanelLeftClose,
   PanelLeftOpen
 } from 'lucide-react';
@@ -75,6 +79,9 @@ export default function Sidebar({
   });
 
   const isCollapsed = propIsCollapsed !== undefined ? propIsCollapsed : internalCollapsed;
+
+  // Estado do menu recolhível da categoria FECHAMENTOS (CONSOLIDAÇÃO)
+  const [isFechamentoOpen, setIsFechamentoOpen] = useState<boolean>(true);
 
   const toggleCollapse = () => {
     if (onToggleCollapse) {
@@ -408,198 +415,201 @@ export default function Sidebar({
             </div>
           </div>
         ) : (
-          /* 3. MODO ADMINISTRADOR: MENU COMPLETO */
+          /* 3. MODO ADMINISTRADOR: EXATAMENTE AS 4 CATEGORIAS REQUISITADAS */
           <div className="flex-1 flex flex-col gap-0.5">
-            {/* Categoria 1: Navegação Principal */}
+            {/* Categoria 1: VENDAS & SERVIÇOS */}
             {!isCollapsed ? (
               <div className="text-[10px] uppercase font-bold tracking-wider text-slate-400 px-3 pt-1 pb-1">
-                Navegação Principal
+                VENDAS & SERVIÇOS
               </div>
             ) : (
               <div className="w-10 mx-auto my-1 border-t border-slate-800/60" />
             )}
 
-            {renderSidebarItem({
-              icon: Home,
-              label: 'Início / Dashboard',
-              isActive: currentScreen === 'home',
-              onClick: () => trocarTela('home')
-            })}
-
-            {renderSidebarItem({
-              icon: Users,
-              label: 'Cadastro de Clientes',
-              badge: clientsCount,
-              isActive: currentScreen === 'clientes',
-              onClick: () => trocarTela('clientes')
-            })}
-
-            {renderSidebarItem({
-              icon: Package,
-              label: 'Cadastro de Produtos',
-              badge: totalMateriaisCount,
-              isActive: currentScreen === 'produtos',
-              onClick: () => trocarTela('produtos')
-            })}
-
-            {/* Categoria 2: Vendas & Serviços */}
-            {!isCollapsed ? (
-              <div className="text-[10px] uppercase font-bold tracking-wider text-slate-400 px-3 pt-3 pb-1">
-                Vendas & Serviços
-              </div>
-            ) : (
-              <div className="w-10 mx-auto my-1 border-t border-slate-800/60" />
-            )}
-
+            {/* Calculadora Usicorte ⚡ (destacada em azul/roxo) */}
             {renderSidebarItem({
               icon: Calculator,
-              iconColor: 'text-blue-300',
+              iconColor: 'text-white',
               label: 'Calculadora Usicorte ⚡',
-              badge: '⚡ Rápido',
               isActive: currentScreen === 'calculadora',
-              activeClassName: 'bg-blue-600 text-white shadow-md shadow-blue-600/30 border border-blue-400/40',
-              inactiveClassName: 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-md shadow-blue-600/20 border border-blue-400/30',
+              activeClassName: 'bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 text-white font-extrabold shadow-lg shadow-indigo-600/30 border border-indigo-400/50',
+              inactiveClassName: 'bg-gradient-to-r from-blue-600/30 via-indigo-600/25 to-purple-600/20 text-blue-200 hover:text-white hover:from-blue-600 hover:to-indigo-600 border border-indigo-500/40 font-bold shadow-xs',
               onClick: () => {
                 trocarTela('calculadora');
                 setIsQuickCalcOpen(true);
               }
             })}
 
+            {/* Ordens de Serviço (OS) */}
             {renderSidebarItem({
               icon: ClipboardList,
               iconColor: 'text-red-400',
-              label: 'OS Diária (Expediente)',
+              label: 'Ordens de Serviço (OS)',
               isActive: currentScreen === 'ordem_servico',
               activeClassName: 'bg-red-600 text-white shadow-md shadow-red-600/30 font-bold',
               onClick: () => trocarTela('ordem_servico')
             })}
 
+            {/* Vendas & PDV */}
             {renderSidebarItem({
               icon: ShoppingCart,
+              iconColor: 'text-amber-400',
               label: 'Vendas & PDV',
-              badge: 'PDV',
               isActive: currentScreen === 'vendas',
+              activeClassName: 'bg-amber-600 text-white shadow-md shadow-amber-600/30 font-bold',
               onClick: () => trocarTela('vendas')
             })}
 
-            {/* Categoria 3: Estoque & Financeiro */}
+            {/* Categoria 2: ESTOQUE & FINANCEIRO */}
             {!isCollapsed ? (
               <div className="text-[10px] uppercase font-bold tracking-wider text-slate-400 px-3 pt-3 pb-1">
-                Estoque & Financeiro
+                ESTOQUE & FINANCEIRO
               </div>
             ) : (
               <div className="w-10 mx-auto my-1 border-t border-slate-800/60" />
             )}
 
+            {/* Fechamento (badge 1) */}
             {renderSidebarItem({
-              icon: Boxes,
-              iconColor: 'text-blue-400',
-              label: 'Estoque & Retalhos',
-              badge: getMateriaisEstoque().length,
-              badgeColor: 'bg-blue-500/20 text-blue-400 border border-blue-500/30',
-              isActive: currentScreen === 'estoque',
-              onClick: () => trocarTela('estoque')
+              icon: Receipt,
+              iconColor: 'text-purple-400',
+              label: 'Fechamento',
+              badge: 1,
+              badgeColor: 'bg-purple-600 text-white font-extrabold px-1.5',
+              isActive: currentScreen === 'fechamento',
+              activeClassName: 'bg-purple-600 text-white shadow-md shadow-purple-600/30 font-bold',
+              onClick: () => trocarTela('fechamento')
             })}
 
+            {/* Extrato */}
             {renderSidebarItem({
               icon: DollarSign,
               iconColor: 'text-emerald-400',
-              label: 'Caixa & Financeiro',
+              label: 'Extrato',
               isActive: currentScreen === 'financeiro',
-              activeClassName: 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30',
+              activeClassName: 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30 font-bold',
               onClick: () => trocarTela('financeiro')
             })}
 
-            {onOpenHistoricoFechamento && renderSidebarItem({
+            {/* Histórico (badge Supabase) */}
+            {renderSidebarItem({
+              icon: Calendar,
+              iconColor: 'text-emerald-400',
+              label: 'Histórico',
+              badge: 'Supabase',
+              badgeColor: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[9px] font-bold px-1.5',
+              isActive: false,
+              onClick: onOpenHistoricoFechamento ? onOpenHistoricoFechamento : () => trocarTela('movimentacoes')
+            })}
+
+            {/* Categoria 3: FECHAMENTOS */}
+            {!isCollapsed ? (
+              <div className="text-[10px] uppercase font-bold tracking-wider text-purple-400 px-3 pt-3 pb-1 flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-purple-400 shadow-[0_0_6px_#a855f7]"></span>
+                <span>FECHAMENTOS</span>
+              </div>
+            ) : (
+              <div className="w-10 mx-auto my-1 border-t border-purple-500/40" />
+            )}
+
+            {/* Consolidação Mensal */}
+            {renderSidebarItem({
+              icon: Layers,
+              iconColor: 'text-purple-400',
+              label: 'Consolidação Mensal',
+              isActive: currentScreen === 'fechamento',
+              activeClassName: 'bg-purple-600 text-white shadow-md shadow-purple-600/30 font-bold',
+              onClick: () => trocarTela('fechamento')
+            })}
+
+            {/* Relatório de Cobrança */}
+            {renderSidebarItem({
+              icon: FileText,
+              iconColor: 'text-purple-400',
+              label: 'Relatório de Cobrança',
+              isActive: false,
+              onClick: () => trocarTela('fechamento')
+            })}
+
+            {/* Histórico de Fechamentos */}
+            {renderSidebarItem({
               icon: Calendar,
               iconColor: 'text-purple-400',
               label: 'Histórico de Fechamentos',
-              badge: 'Supabase',
-              badgeColor: 'bg-purple-500/20 text-purple-300 border border-purple-500/30',
               isActive: false,
-              inactiveClassName: 'bg-purple-950/40 hover:bg-purple-900/60 text-purple-200 border border-purple-500/30 hover:border-purple-400 shadow-sm',
-              onClick: onOpenHistoricoFechamento
+              onClick: onOpenHistoricoFechamento ? onOpenHistoricoFechamento : () => trocarTela('fechamento')
             })}
 
-            {/* Categoria 4: Gestão & Fiscal */}
+            {/* Categoria 4: GESTÃO & FISCAL */}
             {!isCollapsed ? (
               <div className="text-[10px] uppercase font-bold tracking-wider text-slate-400 px-3 pt-3 pb-1">
-                Gestão & Fiscal
+                GESTÃO & FISCAL
               </div>
             ) : (
               <div className="w-10 mx-auto my-1 border-t border-slate-800/60" />
             )}
 
+            {/* Orçamentos */}
             {renderSidebarItem({
               icon: FileText,
-              iconColor: 'text-blue-400',
-              label: 'Emissão de Propostas & Etiquetas',
+              iconColor: 'text-slate-300',
+              label: 'Orçamentos',
               isActive: currentScreen === 'relatorios' && reportsTab === 'propostas',
               onClick: () => trocarTela('relatorios', 'propostas')
             })}
 
+            {/* Relatórios Gerais */}
             {renderSidebarItem({
               icon: Search,
-              iconColor: 'text-emerald-400',
-              label: 'Consulta & Relatório Geral',
+              iconColor: 'text-slate-300',
+              label: 'Relatórios Gerais',
               isActive: currentScreen === 'relatorios' && reportsTab === 'consulta',
               onClick: () => trocarTela('relatorios', 'consulta')
             })}
 
+            {/* Andamento e Boleto */}
             {renderSidebarItem({
               icon: Barcode,
-              iconColor: 'text-indigo-400',
-              label: 'Andamento das Movimentações',
-              badge: 'Boletos',
-              badgeColor: 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30',
+              iconColor: 'text-slate-300',
+              label: 'Andamento e Boleto',
               isActive: currentScreen === 'movimentacoes',
               activeClassName: 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30 font-bold',
               onClick: () => trocarTela('movimentacoes')
             })}
 
+            {/* Emitente */}
             {renderSidebarItem({
               icon: Building2,
-              iconColor: 'text-blue-400',
-              label: 'Dados da Empresa / Emitente',
-              badge: 'NF-e',
-              badgeColor: 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30',
+              iconColor: 'text-slate-300',
+              label: 'Emitente',
               isActive: currentScreen === 'empresa',
               onClick: () => trocarTela('empresa')
             })}
-
-            {renderSidebarItem({
-              icon: FileCode,
-              iconColor: 'text-emerald-400',
-              label: 'Código PHP / MySQL',
-              isActive: currentScreen === 'php',
-              activeClassName: 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30',
-              onClick: () => trocarTela('php')
-            })}
-
-            {/* Bloco de Instalação PWA */}
-            <PWAInstallButton 
-              variant="sidebar" 
-              isCollapsed={isCollapsed}
-              onHoverCollapsed={(e) => handleItemHover(e, 'Instalar Aplicativo (PWA)')}
-              onLeaveCollapsed={handleItemLeave}
-              className={isCollapsed ? 'mx-auto my-1.5' : 'mt-2'} 
-            />
           </div>
         )}
 
-        {/* 4. RODAPÉ DA SIDEBAR: STATUS E BOTÃO DE ALTERNÂNCIA INFERIOR */}
+        {/* 4. RODAPÉ DA SIDEBAR: CARD VERDE PWA, STATUS "ONLINE" E RODAPÉ DA EMPRESA "USICORTE METAIS EIRELI" */}
         {!isCollapsed ? (
           <div className="mt-auto pt-2 space-y-2">
-            <div className="p-3 bg-slate-950/60 rounded-xl border border-slate-800/80 text-[11px] space-y-1">
+            {/* Bloco de Instalação PWA: Card verde "Instalar Usicorte no Dispositivo" */}
+            <PWAInstallButton 
+              variant="sidebar" 
+              isCollapsed={false}
+              className="mt-2" 
+            />
+
+            <div className="p-3 bg-slate-950/80 rounded-xl border border-slate-800/80 text-[11px] space-y-1.5">
               <div className="flex items-center justify-between text-slate-400">
-                <span>Status Sistema:</span>
-                <span className="text-emerald-400 font-bold flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span className="font-medium text-slate-300">Status:</span>
+                <span className="text-emerald-400 font-extrabold flex items-center gap-1.5 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_#10b981]"></span>
                   ONLINE
                 </span>
               </div>
-              <div className="text-[10px] text-slate-500 truncate">
-                {isAdmin ? 'Acesso Total (Admin)' : 'Acesso Restrito (Operador)'}
+              <div className="pt-1.5 border-t border-slate-800/80 flex items-center justify-between">
+                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">
+                  USICORTE METAIS EIRELI
+                </span>
               </div>
             </div>
 
@@ -616,11 +626,19 @@ export default function Sidebar({
         ) : (
           /* Rodapé Compacto no Modo Recolhido (w-20) */
           <div className="mt-auto pt-2 flex flex-col items-center gap-2">
+            <PWAInstallButton 
+              variant="sidebar" 
+              isCollapsed={true}
+              onHoverCollapsed={(e) => handleItemHover(e, 'Instalar Aplicativo (PWA)')}
+              onLeaveCollapsed={handleItemLeave}
+              className="mx-auto my-1" 
+            />
+
             <div 
               className="flex justify-center cursor-help"
-              onMouseEnter={(e) => handleItemHover(e, 'Sistema Online - ' + (isAdmin ? 'Admin' : 'Operador'))}
+              onMouseEnter={(e) => handleItemHover(e, 'Status: ONLINE - USICORTE METAIS EIRELI')}
               onMouseLeave={handleItemLeave}
-              title={`Sistema Online - ${isAdmin ? 'Acesso Total (Admin)' : 'Acesso Restrito (Operador)'}`}
+              title="Status: ONLINE - USICORTE METAIS EIRELI"
             >
               <div className="w-10 h-10 rounded-xl bg-slate-950/80 border border-slate-800 flex items-center justify-center">
                 <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shadow-sm shadow-emerald-400/50"></span>
