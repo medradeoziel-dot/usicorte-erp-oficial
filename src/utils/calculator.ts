@@ -608,7 +608,14 @@ export function renderizarTabelaRelatorio(listaItens: any[]): void {
 
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td style="text-align: left; font-weight: bold;">${produtoMaterial}</td>
+      <td style="text-align: left; font-weight: bold;">
+        <div>
+          <div style="font-weight: bold;">${produtoMaterial}</div>
+          <div class="medida-obs" style="font-size: 9px; font-style: italic; color: #6b7280; font-weight: normal; margin-top: 2px; line-height: 1.2;">
+            ${formatSafeDate(item.data || item.created_at || item.createdAt || '22/09/2026')}
+          </div>
+        </div>
+      </td>
       <td style="text-align: center;">
         <div class="medida-bloco-center" style="display: flex; flex-direction: column; align-items: center; justify-content: center;">
           <span class="medida-dimensao" style="font-family: monospace; font-weight: bold;">${medidasFormatadas}</span>

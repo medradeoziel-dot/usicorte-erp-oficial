@@ -1,5 +1,5 @@
 import React from 'react';
-import { getObservacaoEspecificaItem } from '../../../../src/utils/calculator';
+import { getObservacaoEspecificaItem, formatSafeDate } from '../../../../src/utils/calculator';
 
 export interface ItemRelatorio {
   idVer?: string | number;
@@ -11,6 +11,9 @@ export interface ItemRelatorio {
   valorGeral: number;
   observacao?: string;
   pesoTotal?: number;
+  created_at?: string;
+  data?: string;
+  date?: string;
 }
 
 interface Props {
@@ -47,6 +50,11 @@ export default function RelatorioPropostaPrint({
   const subtotalGeral = itens.reduce((acc, item) => acc + (item.valorGeral || 0), 0);
   const pesoGeral = itens.reduce((acc, item) => acc + (item.pesoTotal || 0), 0);
   const valorTotal = subtotalGeral - desconto + frete;
+
+  const getItemDate = (item: ItemRelatorio) => {
+    const rawDate = item.created_at || item.data || item.date || (item as any).createdAt || data;
+    return formatSafeDate(rawDate);
+  };
 
   return (
     <div className="w-full bg-white text-slate-900 font-sans print:p-0 p-4 sm:p-8 max-w-[1000px] mx-auto box-border overflow-x-hidden">
@@ -106,9 +114,19 @@ export default function RelatorioPropostaPrint({
               key={item.idVer || index}
               className="border border-slate-200 rounded-lg p-3 bg-white space-y-2 text-xs shadow-xs"
             >
-              <div className="flex justify-between items-center border-b border-slate-100 pb-1.5">
+              <div className="flex justify-between items-start border-b border-slate-100 pb-1.5">
                 <span className="text-[10px] text-slate-400 uppercase font-bold">Material</span>
-                <strong className="font-bold text-slate-900 text-sm">{item.produto}</strong>
+                <div className="text-right">
+                  <div style={{ fontWeight: 'bold' }} className="font-bold text-slate-900 text-sm leading-tight">
+                    {item.produto}
+                  </div>
+                  <div
+                    className="medida-obs"
+                    style={{ fontSize: '9px', fontStyle: 'italic', color: '#6b7280', fontWeight: 'normal', marginTop: '2px', lineHeight: '1.2' }}
+                  >
+                    {getItemDate(item)}
+                  </div>
+                </div>
               </div>
 
               <div>
@@ -168,7 +186,19 @@ export default function RelatorioPropostaPrint({
               const obsItem = getObservacaoEspecificaItem(item);
               return (
                 <tr key={item.idVer || index} className="border-b border-slate-200">
-                  <td className="py-3 px-2 font-bold">{item.produto}</td>
+                  <td className="py-3 px-2 font-bold">
+                    <div>
+                      <div style={{ fontWeight: 'bold' }} className="leading-tight">
+                        {item.produto}
+                      </div>
+                      <div
+                        className="medida-obs"
+                        style={{ fontSize: '9px', fontStyle: 'italic', color: '#6b7280', fontWeight: 'normal', marginTop: '2px', lineHeight: '1.2' }}
+                      >
+                        {getItemDate(item)}
+                      </div>
+                    </div>
+                  </td>
                   <td className="py-3 px-2 text-center text-slate-600 font-medium whitespace-pre-line font-mono text-xs">
                     <div className="medida-bloco-center flex flex-col items-center justify-center">
                       <span className="medida-dimensao font-bold font-mono text-slate-900 leading-tight">{item.medida}</span>

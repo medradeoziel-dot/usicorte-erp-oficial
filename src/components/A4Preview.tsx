@@ -24,6 +24,18 @@ export default function A4Preview({ pedido, cliente, itens, fotosPorPeca, mode }
   const is2vias = mode === "a4-2vias";
   const is4col = mode === "proposta-4col";
 
+  const getItemDate = (item: ItemPedido) => {
+    const rawDate =
+      (item as any).created_at ||
+      (item as any).data ||
+      (item as any).date ||
+      (item as any).createdAt ||
+      pedido.data ||
+      (pedido as any).created_at ||
+      (pedido as any).data_orcamento;
+    return formatSafeDate(rawDate);
+  };
+
   const DocumentBlock = ({ label, tagColor = "blue" }: { label?: string; tagColor?: "blue" | "amber" | "emerald" | "slate" }) => (
     <div className="a4-doc bg-white text-black p-4 sm:p-6" style={{ fontFamily: "Arial, sans-serif" }}>
       {/* Header Centralizado da Empresa com Logo à Esquerda */}
@@ -61,7 +73,19 @@ export default function A4Preview({ pedido, cliente, itens, fotosPorPeca, mode }
                 ) : (
                   <div className="a4-card-no-img h-24 flex items-center justify-center bg-slate-100 text-slate-400 text-[10px] rounded">SEM DESENHO</div>
                 )}
-                <div className="a4-card-detail text-[11px]"><b>Material:</b> {item.material}</div>
+                <div className="a4-card-detail text-[11px]">
+                  <div>
+                    <div style={{ fontWeight: 'bold' }} className="text-slate-900 leading-tight">
+                      {item.material}
+                    </div>
+                    <div
+                      className="medida-obs"
+                      style={{ fontSize: '9px', fontStyle: 'italic', color: '#6b7280', fontWeight: 'normal', marginTop: '2px', lineHeight: '1.2' }}
+                    >
+                      {getItemDate(item)}
+                    </div>
+                  </div>
+                </div>
                 <div className="a4-card-detail text-[11px]">
                   <b>Medida:</b> <span className="font-mono font-bold text-slate-900">{item.medida}</span>
                   {getObservacaoEspecificaItem(item) && (
@@ -96,7 +120,19 @@ export default function A4Preview({ pedido, cliente, itens, fotosPorPeca, mode }
             <tbody className="divide-y divide-slate-200">
               {itens.map((item) => (
                 <tr key={item.id} className="a4-tr hover:bg-slate-50">
-                  <td className="a4-td font-bold text-slate-900 p-1.5">{item.material || "—"}</td>
+                  <td className="a4-td font-bold text-slate-900 p-1.5">
+                    <div>
+                      <div style={{ fontWeight: 'bold' }} className="leading-tight">
+                        {item.material || "—"}
+                      </div>
+                      <div
+                        className="medida-obs"
+                        style={{ fontSize: '9px', fontStyle: 'italic', color: '#6b7280', fontWeight: 'normal', marginTop: '2px', lineHeight: '1.2' }}
+                      >
+                        {getItemDate(item)}
+                      </div>
+                    </div>
+                  </td>
                   <td className="a4-td text-center p-1.5">
                     <div className="medida-bloco-center flex flex-col items-center justify-center">
                       <span className="medida-dimensao font-bold font-mono text-[11px] text-slate-900 leading-tight">{item.medida || "—"}</span>

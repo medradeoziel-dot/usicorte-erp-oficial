@@ -67,12 +67,16 @@ export default function QuotePrintModal({
       medidas: item.dimensions || item.dimensões || item.medidas || "",
       descricao: item.description || item.descrição || item.descricao || "",
       informacoes: item.info || item.informação || item.informacoes || "",
+      observacao: item.observacao || item.observacoes || item.obs || item.notes || "",
       quantidade: item.quantity || item.quantidade || 1,
       valorUnitario:
         item.unitPrice ||
         item.valorUnitario ||
         (item.totalPrice ? item.totalPrice / (item.quantity || 1) : 0),
       valorTotal: item.totalPrice || item.valorTotal || item.subtotal || 0,
+      drawingImage: item.drawingImage || item.fotoDesenho || item.desenhoUrl || "",
+      created_at: item.created_at || item.createdAt,
+      data: item.data || item.date || item.data_item || quote?.date || quote?.data_orcamento,
     })
   );
 

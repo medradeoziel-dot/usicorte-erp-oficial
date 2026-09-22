@@ -1,5 +1,5 @@
 import React from 'react';
-import { getObservacaoEspecificaItem } from '../../../../src/utils/calculator';
+import { getObservacaoEspecificaItem, formatSafeDate } from '../../../../src/utils/calculator';
 
 export interface ItemRelatorio {
   idVer?: string | number;
@@ -92,7 +92,19 @@ export default function RelatorioEmpresaPrint({ itens }: Props) {
               return (
                 <tr key={item.idVer || index} className="odd:bg-white even:bg-slate-50 text-slate-900 border-b border-slate-100">
                   <td className="py-2 px-1 text-center whitespace-nowrap font-mono text-xs">{item.data}</td>
-                  <td className="py-2 px-1 text-center font-medium">{item.produto}</td>
+                  <td className="py-2 px-1 text-center font-medium">
+                    <div>
+                      <div style={{ fontWeight: 'bold' }} className="leading-tight">
+                        {item.produto}
+                      </div>
+                      <div
+                        className="medida-obs"
+                        style={{ fontSize: '9px', fontStyle: 'italic', color: '#6b7280', fontWeight: 'normal', marginTop: '2px', lineHeight: '1.2' }}
+                      >
+                        {formatSafeDate(item.data || (item as any).created_at || (item as any).createdAt || '22/09/2026')}
+                      </div>
+                    </div>
+                  </td>
                   <td className="py-2 px-1 text-center font-mono text-xs">
                     <div className="medida-bloco-center flex flex-col items-center justify-center">
                       <span className="medida-dimensao font-bold font-mono text-slate-900 leading-tight">{item.medida}</span>

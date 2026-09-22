@@ -155,7 +155,24 @@ export const QuotePrintView: React.FC<QuotePrintViewProps> = (props) => {
     valorUnitario: item.valorUnitario ?? item.unitPrice ?? 0,
     valorTotal: item.valorTotal ?? item.subtotal ?? (Number(item.valorUnitario || item.unitPrice || 0) * Number(item.quantidade || item.qtd || item.quantity || 1)),
     drawingImage: item.drawingImage ?? item.fotoDesenho ?? item.desenhoUrl ?? item.desenho_url ?? item.foto ?? "",
+    created_at: item.created_at ?? item.createdAt ?? undefined,
+    data: item.data ?? item.date ?? item.data_orcamento ?? undefined,
   }));
+
+  const getItemDate = (item: QuoteItem) => {
+    const rawDate =
+      item.created_at ||
+      item.data ||
+      item.date ||
+      item.createdAt ||
+      item.data_item ||
+      quote?.date ||
+      quote?.data_orcamento ||
+      quote?.data ||
+      quote?.createdAt ||
+      dataEmissao;
+    return formatSafeDate(rawDate);
+  };
 
   const subtotal =
     props.subtotal ??
@@ -252,9 +269,19 @@ export const QuotePrintView: React.FC<QuotePrintViewProps> = (props) => {
                 key={item.id || index}
                 className="bg-white border border-slate-200 rounded-lg p-3 shadow-xs space-y-2 text-xs"
               >
-                <div className="border-b border-slate-100 pb-1.5 flex justify-between items-center">
+                <div className="border-b border-slate-100 pb-1.5 flex justify-between items-start">
                   <span className="text-[10px] text-slate-400 uppercase font-bold">Produto / Material</span>
-                  <span className="font-bold text-slate-800 text-sm">{item.material}</span>
+                  <div className="text-right">
+                    <div style={{ fontWeight: 'bold' }} className="text-slate-800 text-sm leading-tight">
+                      {item.material || (item as any).produto}
+                    </div>
+                    <div
+                      className="medida-obs"
+                      style={{ fontSize: '9px', fontStyle: 'italic', color: '#6b7280', fontWeight: 'normal', marginTop: '2px', lineHeight: '1.2' }}
+                    >
+                      {formatSafeDate(item.data || item.created_at || (item as any).createdAt || quote?.data_orcamento || quote?.date || quote?.createdAt || '22/09/2026')}
+                    </div>
+                  </div>
                 </div>
 
                 {item.drawingImage && (
@@ -383,7 +410,17 @@ export const QuotePrintView: React.FC<QuotePrintViewProps> = (props) => {
               {itens.map((item, index) => (
                 <tr key={item.id || index} className="align-top hover:bg-slate-50">
                   <td className="p-2 font-bold text-slate-900">
-                    <p>{item.material || "—"}</p>
+                    <div>
+                      <div style={{ fontWeight: 'bold' }} className="leading-tight">
+                        {item.material || (item as any).produto || "—"}
+                      </div>
+                      <div
+                        className="medida-obs"
+                        style={{ fontSize: '9px', fontStyle: 'italic', color: '#6b7280', fontWeight: 'normal', marginTop: '2px', lineHeight: '1.2' }}
+                      >
+                        {formatSafeDate(item.data || item.created_at || (item as any).createdAt || quote?.data_orcamento || quote?.date || quote?.createdAt || '22/09/2026')}
+                      </div>
+                    </div>
                     {item.drawingImage && (
                       <img
                         src={item.drawingImage}

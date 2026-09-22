@@ -1,5 +1,5 @@
 import React from 'react';
-import { getObservacaoEspecificaItem } from '../../../../src/utils/calculator';
+import { getObservacaoEspecificaItem, formatSafeDate } from '../../../../src/utils/calculator';
 
 export interface ItemRelatorio {
   idVer?: string | number;
@@ -8,6 +8,9 @@ export interface ItemRelatorio {
   descricao: string;
   qtd: number;
   observacao?: string;
+  created_at?: string;
+  data?: string;
+  date?: string;
 }
 
 interface Props {
@@ -17,6 +20,11 @@ interface Props {
 export default function RelatorioCortePrint({ itens }: Props) {
   const totalTiposItens = itens.length;
   const totalPecas = itens.reduce((acc, item) => acc + Number(item.qtd || 0), 0);
+
+  const getItemDate = (item: ItemRelatorio) => {
+    const rawDate = item.created_at || item.data || item.date || (item as any).createdAt || new Date();
+    return formatSafeDate(rawDate);
+  };
 
   return (
     <div className="w-full bg-white text-black font-sans print:p-0 p-4 sm:p-8 max-w-[1000px] mx-auto box-border overflow-x-hidden">
@@ -36,8 +44,18 @@ export default function RelatorioCortePrint({ itens }: Props) {
       <div className="block sm:hidden space-y-3 mb-6">
         {itens.map((item, index) => (
           <div key={item.idVer || index} className="border-2 border-slate-900 rounded-lg p-3 bg-white space-y-2 text-xs">
-            <div className="flex justify-between items-center border-b border-slate-200 pb-1.5">
-              <span className="font-bold text-slate-900 text-sm">{item.produto}</span>
+            <div className="flex justify-between items-start border-b border-slate-200 pb-1.5">
+              <div>
+                <div style={{ fontWeight: 'bold' }} className="text-slate-900 text-sm leading-tight">
+                  {item.produto}
+                </div>
+                <div
+                  className="medida-obs"
+                  style={{ fontSize: '9px', fontStyle: 'italic', color: '#6b7280', fontWeight: 'normal', marginTop: '2px', lineHeight: '1.2' }}
+                >
+                  {getItemDate(item)}
+                </div>
+              </div>
               <span className="bg-slate-100 border border-slate-300 px-2 py-0.5 rounded font-mono font-bold text-[11px]">
                 Qtd: {item.qtd}
               </span>
@@ -93,7 +111,19 @@ export default function RelatorioCortePrint({ itens }: Props) {
               return (
                 <tr key={item.idVer || index} className="text-gray-900">
                   <td className="border-y border-l border-black py-2 px-2 text-center whitespace-nowrap font-mono">{obsItem || '-'}</td>
-                  <td className="border-y border-black py-2 px-2 text-center font-medium">{item.produto}</td>
+                  <td className="border-y border-black py-2 px-2 text-center font-medium">
+                    <div>
+                      <div style={{ fontWeight: 'bold' }} className="leading-tight">
+                        {item.produto}
+                      </div>
+                      <div
+                        className="medida-obs"
+                        style={{ fontSize: '9px', fontStyle: 'italic', color: '#6b7280', fontWeight: 'normal', marginTop: '2px', lineHeight: '1.2' }}
+                      >
+                        {getItemDate(item)}
+                      </div>
+                    </div>
+                  </td>
                   <td className="border-y border-black py-2 px-2 text-center font-mono">
                     <div className="medida-bloco-center flex flex-col items-center justify-center">
                       <span className="medida-dimensao font-bold font-mono text-slate-900 leading-tight">{item.medida}</span>

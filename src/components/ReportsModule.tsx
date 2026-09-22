@@ -1780,6 +1780,20 @@ export default function ReportsModule({
   const shippingVal = displayQuote.shipping || 0;
   const grandTotal = displayQuote.grandTotal || (subtotalValue - discountVal + shippingVal);
 
+  const getItemDateReports = (item: any) => {
+    const rawDate =
+      item?.created_at ||
+      item?.data ||
+      item?.date ||
+      item?.createdAt ||
+      item?.data_item ||
+      (displayQuote as any)?.data_orcamento ||
+      (displayQuote as any)?.data ||
+      displayQuote?.date ||
+      (displayQuote as any)?.created_at;
+    return formatSafeDate(rawDate);
+  };
+
   const activeItem: Partial<QuoteItem> = displayQuote.items[selectedItemIndex] || displayQuote.items[0] || {
     material: 'BRONZE TM-23 REDONDO',
     constanteNome: 'BRONZE TM-23 REDONDO',
@@ -1909,9 +1923,19 @@ export default function ReportsModule({
 
               return (
                 <div key={item.id || idx} className="border border-slate-300 rounded-lg p-3 bg-white space-y-2 text-xs shadow-xs">
-                  <div className="flex justify-between items-center border-b border-slate-200 pb-1.5">
+                  <div className="flex justify-between items-start border-b border-slate-200 pb-1.5">
                     <span className="text-[10px] text-slate-500 uppercase font-bold">Produto / Material</span>
-                    <strong className="font-bold text-slate-900 text-sm">{produtoMaterial}</strong>
+                    <div className="text-right">
+                      <div style={{ fontWeight: 'bold' }} className="font-bold text-slate-900 text-sm leading-tight">
+                        {produtoMaterial}
+                      </div>
+                      <div
+                        className="medida-obs"
+                        style={{ fontSize: '9px', fontStyle: 'italic', color: '#6b7280', fontWeight: 'normal', marginTop: '2px', lineHeight: '1.2' }}
+                      >
+                        {getItemDateReports(item)}
+                      </div>
+                    </div>
                   </div>
 
                   <div>
@@ -1984,7 +2008,19 @@ export default function ReportsModule({
 
                 return (
                   <tr key={item.id || idx} className="hover:bg-slate-50">
-                    <td className="text-left font-bold text-slate-900 p-2">{produtoMaterial}</td>
+                    <td className="text-left font-bold text-slate-900 p-2">
+                      <div>
+                        <div style={{ fontWeight: 'bold' }} className="leading-tight">
+                          {produtoMaterial}
+                        </div>
+                        <div
+                          className="medida-obs"
+                          style={{ fontSize: '9px', fontStyle: 'italic', color: '#6b7280', fontWeight: 'normal', marginTop: '2px', lineHeight: '1.2' }}
+                        >
+                          {getItemDateReports(item)}
+                        </div>
+                      </div>
+                    </td>
                     <td className="text-center p-2">
                       <div className="medida-bloco-center flex flex-col items-center justify-center">
                         <span className="medida-dimensao font-bold font-mono text-[11px] text-slate-900 leading-tight">
@@ -2137,7 +2173,19 @@ export default function ReportsModule({
 
                   return (
                     <tr key={idx} className="hover:bg-slate-50">
-                      <td className="px-1.5 py-0.5 font-bold text-slate-900">{produtoMaterial}</td>
+                      <td className="px-1.5 py-0.5 font-bold text-slate-900">
+                        <div>
+                          <div style={{ fontWeight: 'bold' }} className="leading-tight">
+                            {produtoMaterial}
+                          </div>
+                          <div
+                            className="medida-obs"
+                            style={{ fontSize: '9px', fontStyle: 'italic', color: '#6b7280', fontWeight: 'normal', marginTop: '1px', lineHeight: '1.1' }}
+                          >
+                            {getItemDateReports(item)}
+                          </div>
+                        </div>
+                      </td>
                       <td className="px-1.5 py-0.5 text-center">
                         <div className="medida-bloco-center flex flex-col items-center justify-center">
                           <span className="medida-dimensao font-bold font-mono text-[9.5px] text-slate-900 leading-tight">
@@ -2259,7 +2307,19 @@ export default function ReportsModule({
 
                   return (
                     <tr key={idx} className="hover:bg-slate-50">
-                      <td className="px-1.5 py-0.5 font-bold text-slate-900">{produtoMaterial}</td>
+                      <td className="px-1.5 py-0.5 font-bold text-slate-900">
+                        <div>
+                          <div style={{ fontWeight: 'bold' }} className="leading-tight">
+                            {produtoMaterial}
+                          </div>
+                          <div
+                            className="medida-obs"
+                            style={{ fontSize: '9px', fontStyle: 'italic', color: '#6b7280', fontWeight: 'normal', marginTop: '1px', lineHeight: '1.1' }}
+                          >
+                            {getItemDateReports(item)}
+                          </div>
+                        </div>
+                      </td>
                       <td className="px-1.5 py-0.5 text-center">
                         <div className="medida-bloco-center flex flex-col items-center justify-center">
                           <span className="medida-dimensao font-bold font-mono text-[9.5px] text-slate-900 leading-tight">
@@ -2452,7 +2512,9 @@ export default function ReportsModule({
               dimensions: formatarMedidasLimpa(it) || 'Ø 50 x 200 mm',
               description: it.descricao || it.description || 'Corte / Usinagem Industrial',
               info: it.observacao || it.notes || it.info || '-',
-              drawingImage: getDrawing(idx)
+              drawingImage: getDrawing(idx),
+              created_at: it.created_at || (it as any).createdAt,
+              data: it.data || it.date || (it as any).data_item || (displayQuote as any).data || displayQuote.date,
             }))
           }}
         />
@@ -2503,7 +2565,19 @@ export default function ReportsModule({
               return (
                 <tr key={item.id || idx}>
                   <td className="border border-black p-1.5 font-bold uppercase">{obsItem || '-'}</td>
-                  <td className="border border-black p-1.5 uppercase">{item.constanteNome || item.material || 'MATERIAL'}</td>
+                  <td className="border border-black p-1.5 uppercase font-bold">
+                    <div>
+                      <div style={{ fontWeight: 'bold' }} className="leading-tight">
+                        {item.constanteNome || item.material || 'MATERIAL'}
+                      </div>
+                      <div
+                        className="medida-obs"
+                        style={{ fontSize: '9px', fontStyle: 'italic', color: '#6b7280', fontWeight: 'normal', marginTop: '2px', lineHeight: '1.2' }}
+                      >
+                        {getItemDateReports(item)}
+                      </div>
+                    </div>
+                  </td>
                   <td className="border border-black p-1.5">
                     <div className="medida-bloco flex flex-col">
                       <span className="medida-dimensao font-bold font-mono text-slate-900">{formatarMedidasLimpa(item)}</span>

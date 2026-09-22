@@ -1,5 +1,5 @@
 import React from 'react';
-import { getObservacaoEspecificaItem } from '../../../../src/utils/calculator';
+import { getObservacaoEspecificaItem, formatSafeDate } from '../../../../src/utils/calculator';
 
 export interface ItemRelatorio {
   idVer?: string | number;
@@ -9,6 +9,9 @@ export interface ItemRelatorio {
   valorGeral: number;
   pesoTotal?: number;
   observacao?: string;
+  created_at?: string;
+  data?: string;
+  date?: string;
 }
 
 interface Props {
@@ -27,6 +30,11 @@ export default function RelatorioPedidoPrint({ cliente, numeroPedido, data, iten
   const totalTiposItens = itens.length;
   const totalPecas = itens.reduce((acc, item) => acc + Number(item.qtd || 0), 0);
   const valorTotal = itens.reduce((acc, item) => acc + (item.valorGeral || 0), 0);
+
+  const getItemDate = (item: ItemRelatorio) => {
+    const rawDate = item.created_at || item.data || item.date || (item as any).createdAt || data;
+    return formatSafeDate(rawDate);
+  };
 
   const ViaDocumento = ({ tipo, bgTag }: { tipo: string; bgTag: string }) => (
     <div className="w-full box-border via-pedido flex flex-col justify-between" style={{ height: '48vh', maxHeight: '135mm', pageBreakInside: 'avoid', breakInside: 'avoid' }}>
@@ -66,8 +74,18 @@ export default function RelatorioPedidoPrint({ cliente, numeroPedido, data, iten
               key={item.idVer || index}
               className="border border-slate-200 rounded p-1.5 bg-slate-50 text-[11px] space-y-0.5"
             >
-              <div className="flex justify-between items-center font-bold">
-                <span className="text-slate-900">{item.produto}</span>
+              <div className="flex justify-between items-start font-bold">
+                <div>
+                  <div style={{ fontWeight: 'bold' }} className="text-slate-900 leading-tight">
+                    {item.produto}
+                  </div>
+                  <div
+                    className="medida-obs"
+                    style={{ fontSize: '9px', fontStyle: 'italic', color: '#6b7280', fontWeight: 'normal', marginTop: '2px', lineHeight: '1.2' }}
+                  >
+                    {getItemDate(item)}
+                  </div>
+                </div>
                 <span className="font-mono text-slate-900">{formatMoeda(item.valorGeral)}</span>
               </div>
               <div className="flex justify-between text-[10px] text-slate-600 font-mono">
@@ -100,7 +118,19 @@ export default function RelatorioPedidoPrint({ cliente, numeroPedido, data, iten
                 const obsItem = getObservacaoEspecificaItem(item);
                 return (
                   <tr key={item.idVer || index} className="border-b border-slate-100">
-                    <td className="py-1 px-1.5 font-bold">{item.produto}</td>
+                    <td className="py-1 px-1.5 font-bold">
+                      <div>
+                        <div style={{ fontWeight: 'bold' }} className="leading-tight">
+                          {item.produto}
+                        </div>
+                        <div
+                          className="medida-obs"
+                          style={{ fontSize: '9px', fontStyle: 'italic', color: '#6b7280', fontWeight: 'normal', marginTop: '1px', lineHeight: '1.1' }}
+                        >
+                          {getItemDate(item)}
+                        </div>
+                      </div>
+                    </td>
                     <td className="py-1 px-1.5 text-center text-slate-600 font-mono text-[10px]">
                       <div className="medida-bloco-center flex flex-col items-center justify-center">
                         <span className="medida-dimensao font-bold font-mono text-slate-900 leading-tight">{item.medida}</span>
