@@ -255,6 +255,8 @@ export const tabelaConstantes: TabelaConstanteItem[] = [
   { nome: "PAGAMENTO", k: 0, precoKg: 0.00, tipo: "chapa" },
   { nome: "MÃO DE OBRA", k: 0, precoKg: 0.00, tipo: "chapa" },
   { nome: "AÇO REDONDO SAE 1045", k: 0.00617, precoKg: 22.00, tipo: "macico" },
+  { nome: "TREFILADO SAE 1045", k: 0.00617, precoKg: 24.00, tipo: "macico" },
+  { nome: "TREFILADO SAE 1020", k: 0.00617, precoKg: 22.00, tipo: "macico" },
   { nome: "AÇO REDONDO SAE 4140", k: 0.00617, precoKg: 28.00, tipo: "macico" },
   { nome: "AÇO REDONDO SAE 8620", k: 0.00617, precoKg: 28.00, tipo: "macico" },
   { nome: "AÇO REDONDO SAE 4340", k: 0.00617, precoKg: 35.00, tipo: "macico" },

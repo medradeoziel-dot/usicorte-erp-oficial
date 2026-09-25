@@ -330,6 +330,9 @@ export default function App() {
           currentUserProfile={currentUserProfile}
           setIsMobileSidebarOpen={setIsMobileSidebarOpen}
           trocarTela={trocarTela}
+          setActiveTab={(tab: string) => {
+            trocarTela(tab as ScreenType);
+          }}
           setIsQuickCalcOpen={setIsQuickCalcOpen}
           onOpenHistoricoFechamento={() => abrirHistoricoFechamento(false)}
           onLogout={handleLogout}

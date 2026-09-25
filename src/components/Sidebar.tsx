@@ -42,6 +42,7 @@ interface SidebarProps {
   currentUserProfile?: UserProfile | null;
   setIsMobileSidebarOpen: (val: boolean) => void;
   trocarTela: (screen: ScreenType, tab?: 'propostas' | 'consulta') => void;
+  setActiveTab?: (tab: string) => void;
   setIsQuickCalcOpen: (val: boolean) => void;
   onOpenHistoricoFechamento?: () => void;
   onLogout?: () => void;
@@ -59,6 +60,7 @@ export default function Sidebar({
   currentUserProfile,
   setIsMobileSidebarOpen,
   trocarTela,
+  setActiveTab,
   setIsQuickCalcOpen,
   onOpenHistoricoFechamento,
   onLogout,
@@ -469,38 +471,55 @@ export default function Sidebar({
               <div className="w-10 mx-auto my-1 border-t border-slate-800/60" />
             )}
 
-            {/* Fechamento (badge 1) */}
-            {renderSidebarItem({
-              icon: Receipt,
-              iconColor: 'text-purple-400',
-              label: 'Fechamento',
-              badge: 1,
-              badgeColor: 'bg-purple-600 text-white font-extrabold px-1.5',
-              isActive: currentScreen === 'fechamento',
-              activeClassName: 'bg-purple-600 text-white shadow-md shadow-purple-600/30 font-bold',
-              onClick: () => trocarTela('fechamento')
-            })}
-
-            {/* Extrato */}
-            {renderSidebarItem({
-              icon: DollarSign,
-              iconColor: 'text-emerald-400',
-              label: 'Extrato',
-              isActive: currentScreen === 'financeiro',
-              activeClassName: 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30 font-bold',
-              onClick: () => trocarTela('financeiro')
-            })}
-
-            {/* Histórico (badge Supabase) */}
-            {renderSidebarItem({
-              icon: Calendar,
-              iconColor: 'text-emerald-400',
-              label: 'Histórico',
-              badge: 'Supabase',
-              badgeColor: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[9px] font-bold px-1.5',
-              isActive: false,
-              onClick: onOpenHistoricoFechamento ? onOpenHistoricoFechamento : () => trocarTela('movimentacoes')
-            })}
+            {/* Lista de itens da categoria ESTOQUE & FINANCEIRO */}
+            {[
+              {
+                id: 'fechamento',
+                label: 'Fechamento',
+                icon: Receipt,
+                iconColor: 'text-purple-400',
+                badge: 1,
+                badgeColor: 'bg-purple-600 text-white font-extrabold px-1.5',
+                isActive: currentScreen === 'fechamento',
+                activeClassName: 'bg-purple-600 text-white shadow-md shadow-purple-600/30 font-bold',
+                onClick: () => trocarTela('fechamento')
+              },
+              {
+                id: 'extrato',
+                label: 'Extrato',
+                icon: DollarSign,
+                iconColor: 'text-emerald-400',
+                isActive: currentScreen === 'financeiro',
+                activeClassName: 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30 font-bold',
+                onClick: () => trocarTela('financeiro')
+              },
+              {
+                id: 'historico',
+                label: 'Histórico',
+                icon: Calendar,
+                iconColor: 'text-emerald-400',
+                badge: 'Supabase',
+                badgeColor: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[9px] font-bold px-1.5',
+                isActive: false,
+                onClick: onOpenHistoricoFechamento ? onOpenHistoricoFechamento : () => trocarTela('movimentacoes')
+              },
+              {
+                id: 'produtos',
+                label: 'Produtos',
+                icon: Package,
+                iconColor: 'text-cyan-400',
+                badge: totalMateriaisCount > 0 ? totalMateriaisCount : undefined,
+                badgeColor: 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 text-[9px] font-bold px-1.5',
+                isActive: currentScreen === 'produtos',
+                activeClassName: 'bg-cyan-600 text-white shadow-md shadow-cyan-600/30 font-bold',
+                onClick: () => {
+                  if (setActiveTab) {
+                    setActiveTab('produtos');
+                  }
+                  trocarTela('produtos');
+                }
+              }
+            ].map((item) => renderSidebarItem(item))}
 
             {/* Categoria 3: FECHAMENTOS */}
             {!isCollapsed ? (
