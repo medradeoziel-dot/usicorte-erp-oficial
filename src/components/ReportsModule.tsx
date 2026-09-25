@@ -41,6 +41,7 @@ import {
   Camera,
   Upload,
   Trash2,
+  Copy,
   Eye,
   Pencil,
   CheckCircle2,
@@ -77,6 +78,7 @@ interface ReportsModuleProps {
   clients?: Client[];
   onNavigateToQuote?: () => void;
   onEditQuote?: (quote: Quote) => void;
+  onDuplicateQuote?: (quote: Quote, originalNumber: string) => void;
   initialTab?: 'propostas' | 'consulta';
   onTabChange?: (tab: 'propostas' | 'consulta') => void;
   onNavigateToMovimentacoes?: () => void;
@@ -178,6 +180,7 @@ export default function ReportsModule({
   clients = [], 
   onNavigateToQuote, 
   onEditQuote,
+  onDuplicateQuote,
   initialTab = 'propostas',
   onTabChange,
   onNavigateToMovimentacoes,
@@ -307,6 +310,207 @@ export default function ReportsModule({
       onNavigateToQuote();
     }
   };
+
+  // Helper para duplicar uma cotação completa e redirecionar para a tela Vendas & PDV com novo número
+  const handleDuplicateCotacaoFromConsulta = async (item: ConsultaItem) => {
+    const targetId = item.cotacaoId || item.cotacao;
+    const originalNumber = item.cotacao || (item.cotacaoId ? String(item.cotacaoId) : 'Cotação');
+    setDuplicatingQuoteKey(originalNumber);
+    setIsDuplicating(true);
+
+    try {
+      let quoteObj: Quote | null = null;
+
+      if (targetId) {
+        quoteObj = await carregarCotacaoPorId(targetId);
+      }
+
+      if (!quoteObj) {
+        // Tenta buscar no localStorage
+        try {
+          const saved = localStorage.getItem('s_orcamentos');
+          if (saved) {
+            const parsed: Quote[] = JSON.parse(saved);
+            const found = parsed.find(
+              q => (q.quoteNumber && q.quoteNumber.trim().toLowerCase() === String(item.cotacao).trim().toLowerCase()) ||
+                   (q.id && q.id === item.cotacaoId) ||
+                   (q.id && q.id === item.cotacao)
+            );
+            if (found) {
+              quoteObj = found;
+            }
+          }
+        } catch (e) {
+          console.warn('Erro ao carregar do localStorage:', e);
+        }
+      }
+
+      // Se ainda não encontrou, reconstrói a partir dos itens da consulta
+      if (!quoteObj) {
+        const sameQuoteItems = dbQuotesItems.filter(
+          i => (i.cotacao && i.cotacao === item.cotacao) || (i.cotacaoId && i.cotacaoId === item.cotacaoId)
+        );
+
+        const itemsToUse = sameQuoteItems.length > 0 ? sameQuoteItems : [item];
+        const sumTotal = itemsToUse.reduce((acc, curr) => acc + (curr.valorGeral || (curr.unitario * curr.qtd)), 0);
+
+        quoteObj = {
+          id: item.cotacaoId || item.cotacao || 'COT-TEMP',
+          quoteNumber: item.cotacao || 'COT-TEMP',
+          date: item.data || new Date().toISOString().slice(0, 10),
+          clientName: item.empresa || 'Cliente Balcão',
+          contactPerson: item.contato !== '-' ? item.contato : '',
+          status: 'Pendente',
+          validityDays: 10,
+          paymentTerms: 'À Vista / Pix (3% Desc.)',
+          observations: item.observacao || '',
+          items: itemsToUse.map((it, idx) => ({
+            id: String(it.itemId || it.idVer || idx + 1),
+            date: it.data || new Date().toISOString().slice(0, 10),
+            companyName: it.empresa,
+            description: it.descricao,
+            descricao: it.descricao,
+            constantName: it.produto,
+            constant: '0.00785',
+            measure: it.medida,
+            quantity: it.qtd,
+            qtd: it.qtd,
+            unitPrice: it.unitario,
+            valorUnitario: it.unitario,
+            subtotal: it.valorGeral,
+            notes: it.observacao || '',
+            drawingImage: it.desenhoUrl
+          })),
+          subtotalTotal: sumTotal,
+          grandTotal: sumTotal,
+          discount: 0,
+          shipping: 0,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+      }
+
+      if (quoteObj) {
+        if (onDuplicateQuote) {
+          onDuplicateQuote(quoteObj, originalNumber);
+        } else if (onEditQuote) {
+          onEditQuote(quoteObj);
+        } else if (onNavigateToQuote) {
+          onNavigateToQuote();
+        }
+      } else {
+        setDeleteFeedback({
+          message: `Não foi possível carregar os dados da cotação "${originalNumber}" para duplicação.`,
+          type: 'error'
+        });
+        setTimeout(() => setDeleteFeedback(null), 5000);
+      }
+    } catch (err: any) {
+      console.error('Erro ao duplicar cotação:', err);
+      setDeleteFeedback({
+        message: `Erro ao duplicar cotação: ${err?.message || 'Falha de comunicação'}`,
+        type: 'error'
+      });
+      setTimeout(() => setDeleteFeedback(null), 5000);
+    } finally {
+      setIsDuplicating(false);
+      setDuplicatingQuoteKey(null);
+    }
+  };
+
+  // Helper para buscar e duplicar por número digitado (cotações antigas ou paradas)
+  const handleDuplicateByNumero = async () => {
+    const cleanInput = duplicarNumeroInput.trim();
+    if (!cleanInput) return;
+
+    setIsDuplicating(true);
+    setDuplicatingQuoteKey(cleanInput);
+
+    try {
+      // 1. Tenta buscar direto no Supabase por ID ou Número exato
+      let cot = await fetchCotacaoById(cleanInput);
+
+      // 2. Se não encontrou, busca por correspondência em savedDbQuotes
+      if (!cot) {
+        const lower = cleanInput.toLowerCase();
+        const foundSaved = savedDbQuotes.find(
+          q => (q.numero && q.numero.toLowerCase() === lower) ||
+               (q.id && q.id.toLowerCase() === lower) ||
+               (q.numero && q.numero.toLowerCase().endsWith(lower)) ||
+               (q.numero && q.numero.toLowerCase().includes(lower))
+        );
+        if (foundSaved) {
+          cot = await fetchCotacaoById(foundSaved.id || foundSaved.numero);
+        }
+      }
+
+      // 3. Se ainda não encontrou, busca em dbQuotesItems
+      if (!cot) {
+        const lower = cleanInput.toLowerCase();
+        const foundItem = dbQuotesItems.find(
+          i => (i.cotacao && i.cotacao.toLowerCase() === lower) ||
+               (i.cotacaoId && i.cotacaoId.toLowerCase() === lower) ||
+               (i.cotacao && i.cotacao.toLowerCase().includes(lower))
+        );
+        if (foundItem) {
+          await handleDuplicateCotacaoFromConsulta(foundItem);
+          setDuplicarNumeroInput('');
+          return;
+        }
+      }
+
+      if (cot) {
+        const quoteObj = await carregarCotacaoPorId(cot.id || cot.numero);
+        if (quoteObj) {
+          const originalNum = cot.numero || cleanInput;
+          if (onDuplicateQuote) {
+            onDuplicateQuote(quoteObj, originalNum);
+          } else if (onEditQuote) {
+            onEditQuote(quoteObj);
+          } else if (onNavigateToQuote) {
+            onNavigateToQuote();
+          }
+          setDuplicarNumeroInput('');
+        }
+      } else {
+        setDeleteFeedback({
+          message: `Cotação com número "${cleanInput}" não foi encontrada no Supabase ou histórico. Verifique o número digitado.`,
+          type: 'error'
+        });
+        setTimeout(() => setDeleteFeedback(null), 5000);
+      }
+    } catch (err: any) {
+      console.error('Erro na duplicação por número:', err);
+      setDeleteFeedback({
+        message: `Erro ao buscar cotação "${cleanInput}": ${err?.message || 'Falha de conexão'}`,
+        type: 'error'
+      });
+      setTimeout(() => setDeleteFeedback(null), 5000);
+    } finally {
+      setIsDuplicating(false);
+      setDuplicatingQuoteKey(null);
+    }
+  };
+
+  // Helper para duplicar a partir do botão no topo (Ações em Massa) "DUPLICAR PEDIDO"
+  const handleDuplicateSelectedQuote = async () => {
+    if (selectedIds.length === 0) return;
+
+    // Encontra o item selecionado entre os itens da consulta
+    const firstSelectedId = selectedIds[0];
+    const selectedItem = filteredConsultaItems.find(it => it.idVer === firstSelectedId) || 
+                         dbQuotesItems.find(it => it.idVer === firstSelectedId);
+
+    if (selectedItem) {
+      await handleDuplicateCotacaoFromConsulta(selectedItem);
+    } else {
+      setDeleteFeedback({
+        message: 'Selecione um item na tabela para duplicar o pedido.',
+        type: 'error'
+      });
+      setTimeout(() => setDeleteFeedback(null), 4000);
+    }
+  };
   
   // Limpeza de classes de impressão ao desmontar ou após fechar caixa de impressão
   useEffect(() => {
@@ -368,6 +572,11 @@ export default function ReportsModule({
   const [isBulkDeleteOpen, setIsBulkDeleteOpen] = useState<boolean>(false);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
   const [deleteFeedback, setDeleteFeedback] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  // Estados para Duplicação de Cotação / Pedido para a tela Vendas & PDV
+  const [isDuplicating, setIsDuplicating] = useState<boolean>(false);
+  const [duplicatingQuoteKey, setDuplicatingQuoteKey] = useState<string | null>(null);
+  const [duplicarNumeroInput, setDuplicarNumeroInput] = useState<string>('');
 
   // Estados para anexo direto de Imagem/DXF na tabela de consulta
   const [targetImageItem, setTargetImageItem] = useState<ConsultaItem | null>(null);
@@ -2811,7 +3020,7 @@ export default function ReportsModule({
           <div className="filtros-bar btn-no-print">
             
             {/* Botões de Impressão e Ações */}
-            <div className="botoes-impressao grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5 w-full">
+            <div className="botoes-impressao grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-2.5 w-full">
               <button 
                 type="button" 
                 className="btn-print w-full min-w-0 cursor-pointer" 
@@ -2854,6 +3063,26 @@ export default function ReportsModule({
               </button>
               <button
                 type="button"
+                onClick={handleDuplicateSelectedQuote}
+                disabled={selectedIds.length === 0 || isDuplicating}
+                className={`btn-print w-full min-w-0 border transition-all cursor-pointer flex flex-col items-center justify-center ${
+                  selectedIds.length > 0
+                    ? 'bg-purple-600 hover:bg-purple-700 text-white border-purple-500 shadow-md shadow-purple-600/30'
+                    : 'bg-slate-800 text-slate-500 border-slate-700 cursor-not-allowed opacity-60'
+                }`}
+                title={selectedIds.length > 0 ? `Duplicar pedido selecionado no PDV` : 'Selecione 1 item na tabela para duplicar o pedido'}
+              >
+                <span className="flex items-center justify-center">
+                  {isDuplicating ? (
+                    <Loader2 className="w-4 h-4 mb-0.5 animate-spin" />
+                  ) : (
+                    <Copy className="w-4 h-4 mb-0.5" />
+                  )}
+                </span>
+                DUPLICAR PEDIDO
+              </button>
+              <button
+                type="button"
                 onClick={() => setIsBulkDeleteOpen(true)}
                 disabled={selectedIds.length === 0}
                 className={`btn-print w-full min-w-0 border transition-all cursor-pointer flex flex-col items-center justify-center ${
@@ -2868,6 +3097,67 @@ export default function ReportsModule({
                 </span>
                 EXCLUIR {selectedIds.length > 0 ? `(${selectedIds.length})` : ''}
               </button>
+            </div>
+
+            {/* Barra de Duplicar Cotação / Pedido por Número */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-3 bg-slate-900/90 border border-cyan-500/40 rounded-xl shadow-xs">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-cyan-500/20 text-cyan-400 rounded-lg border border-cyan-500/30 shrink-0">
+                  <Copy className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-slate-100">Duplicar Cotação / Pedido por Número</span>
+                    <span className="text-[10px] px-1.5 py-0.5 bg-cyan-950 text-cyan-300 border border-cyan-700/50 rounded-md font-semibold tracking-wide uppercase">
+                      Vendas & PDV
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    Digite o número de uma cotação antiga ou parada para carregar cliente e itens no PDV com um novo número sequencial gerado
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <div className="relative flex-1 sm:w-64">
+                  <input 
+                    type="text" 
+                    placeholder="Ex: COT-2026-000140..." 
+                    value={duplicarNumeroInput}
+                    onChange={(e) => setDuplicarNumeroInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleDuplicateByNumero();
+                      }
+                    }}
+                    className="w-full px-3 py-1.5 bg-slate-950 border border-slate-700 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/30 rounded-lg text-xs text-white placeholder-slate-500 outline-none font-mono"
+                  />
+                  {duplicarNumeroInput && (
+                    <button
+                      type="button"
+                      onClick={() => setDuplicarNumeroInput('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={handleDuplicateByNumero}
+                  disabled={!duplicarNumeroInput.trim() || isDuplicating}
+                  className="px-3.5 py-1.5 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 shadow-sm shadow-cyan-950/40"
+                  title="Buscar cotação no Supabase e transferir para o PDV com nova numeração"
+                >
+                  {isDuplicating ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Copy className="w-3.5 h-3.5" />
+                  )}
+                  <span>Duplicar no PDV</span>
+                </button>
+              </div>
             </div>
 
             {/* Filtros por Categoria e Campo de Texto */}
@@ -3055,7 +3345,7 @@ export default function ReportsModule({
                       onChange={(e) => handleSelectAll(e.target.checked)} 
                     />
                   </th>
-                  <th style={{ width: '205px', textAlign: 'center' }}>Ações</th>
+                  <th style={{ minWidth: '275px', textAlign: 'center' }}>Ações</th>
                   <th>Cotação</th>
                   <th style={{ minWidth: '135px', textAlign: 'center' }}>Situação</th>
                   <th>Data</th>
@@ -3109,6 +3399,23 @@ export default function ReportsModule({
                         </td>
                         <td style={{ textAlign: 'center' }}>
                           <div className="flex items-center justify-center gap-1">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDuplicateCotacaoFromConsulta(item);
+                              }}
+                              disabled={isDuplicating && duplicatingQuoteKey === (item.cotacao || String(item.idVer))}
+                              className="px-2.5 py-1 bg-purple-600 hover:bg-purple-700 text-white border border-purple-500 rounded text-[11px] font-semibold flex items-center gap-1 transition-all cursor-pointer shadow-xs disabled:opacity-50"
+                              title="Duplicar esta cotação para um novo pedido na tela Vendas & PDV"
+                            >
+                              {isDuplicating && duplicatingQuoteKey === (item.cotacao || String(item.idVer)) ? (
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                              ) : (
+                                <Copy className="w-3 h-3" />
+                              )}
+                              <span>Duplicar</span>
+                            </button>
                             <button
                               type="button"
                               onClick={(e) => {

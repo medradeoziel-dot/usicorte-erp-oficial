@@ -109,6 +109,8 @@ interface SalesModuleProps {
   onNavigateToReports?: () => void;
   quoteToEdit?: Quote | null;
   onClearQuoteToEdit?: () => void;
+  quoteToDuplicate?: { quote: Quote; originalNumber: string } | null;
+  onClearQuoteToDuplicate?: () => void;
 }
 
 export default function SalesModule({ 
@@ -118,7 +120,9 @@ export default function SalesModule({
   onQuoteChange,
   onNavigateToReports,
   quoteToEdit,
-  onClearQuoteToEdit
+  onClearQuoteToEdit,
+  quoteToDuplicate,
+  onClearQuoteToDuplicate
 }: SalesModuleProps) {
   // Catálogo dinâmico de materiais conectado ao Supabase
   const { profiles: dynamicMaterialProfiles } = useMaterialsCatalog();
@@ -583,6 +587,16 @@ export default function SalesModule({
       }
     }
   }, [quoteToEdit]);
+
+  // Carrega cotação para duplicação com novo número caso passada via prop quoteToDuplicate
+  useEffect(() => {
+    if (quoteToDuplicate) {
+      handleLoadQuoteForDuplication(quoteToDuplicate);
+      if (onClearQuoteToDuplicate) {
+        onClearQuoteToDuplicate();
+      }
+    }
+  }, [quoteToDuplicate]);
 
   // When selectedMaterial is passed from Products screen, apply it immediately
   useEffect(() => {
@@ -1946,6 +1960,69 @@ export default function SalesModule({
 
     setSuccessMessage(`Orçamento ${targetNum} carregado para edição com número e ID preservados!`);
     setTimeout(() => setSuccessMessage(null), 3000);
+  };
+
+  // Carrega dados de uma cotação para Duplicação no PDV, gerando um NOVO número sequencial e mantendo a cotação original intacta
+  const handleLoadQuoteForDuplication = async (payload: { quote: Quote; originalNumber: string }) => {
+    const { quote, originalNumber } = payload;
+    const oldNumber = originalNumber || quote.quoteNumber || 'antiga';
+
+    // 1. Zera dados de edição para garantir que NUNCA sobrescreva a cotação original no banco de dados
+    setEditingQuoteId(null);
+    setEditingOriginalQuoteNumber(null);
+    setEditingQuoteCreatedAt(null);
+    editingQuoteIdRef.current = null;
+    editingQuoteNumberRef.current = null;
+
+    // 2. Resolve e gera um NOVO número sequencial único para o novo pedido
+    let nextUniqueNumber = generateNextQuoteNumber(savedQuotes);
+    try {
+      const res = await resolveNextUniqueQuoteNumber(savedQuotes);
+      if (res?.quoteNumber) {
+        nextUniqueNumber = res.quoteNumber;
+        setAutoSuggestedNumber(res.quoteNumber);
+        setAutoSuggestedSeq(res.sequential);
+      }
+    } catch (err) {
+      console.warn('Aviso ao gerar nova numeração sequencial para duplicação:', err);
+    }
+    setNumeroCotacao(nextUniqueNumber);
+
+    // 3. Preenche dados do cliente
+    setSelectedClientId(quote.clientId || '');
+    setClientName(quote.clientName || 'Cliente Balcão (UsiCorte)');
+    setClientDocument(quote.clientDocument || '');
+    setContactPerson(quote.contactPerson || '');
+    setClientPhone(quote.clientPhone || '');
+    setClientEmail(quote.clientEmail || '');
+    setClientCity(quote.clientCity || '');
+    setClientState(quote.clientState || '');
+
+    // 4. Preenche cabeçalho do orçamento
+    setQuoteDate(new Date().toISOString().split('T')[0]);
+    setValidityDays(quote.validityDays || 10);
+    setPaymentTerms(quote.paymentTerms || 'À Vista / Pix (3% Desc.)');
+    setQuoteStatus('Pendente');
+    setObservations(quote.observations || 'Preços com impostos inclusos. Material sujeito a conferência no ato do recebimento.');
+    setDiscountAmount(quote.discount || 0);
+    setShippingAmount(quote.shipping || 0);
+
+    // 5. Clona todos os itens com IDs novos para o novo pedido
+    const clonedItems: QuoteItem[] = (quote.items || []).map((it, idx) => ({
+      ...it,
+      id: `item-${Date.now()}-${idx + 1}-${Math.random().toString(36).substring(2, 6)}`,
+      date: new Date().toISOString().split('T')[0],
+      subtotal: Number(it.subtotal || ((Number(it.unitPrice || (it as any).valorUnitario || 0)) * Number(it.quantity || (it as any).qtd || 1)))
+    }));
+    setItems(clonedItems);
+
+    // 6. Reseta formulário de inclusão de item
+    resetItemForm();
+
+    // 7. Toast de confirmação com a mensagem exata requerida:
+    // "Dados da cotação [NÚMERO_ANTIGO] carregados no PDV. Um novo número de pedido foi gerado."
+    setSuccessMessage(`Dados da cotação ${oldNumber} carregados no PDV. Um novo número de pedido foi gerado.`);
+    setTimeout(() => setSuccessMessage(null), 5000);
   };
 
   // Delete quote from history
@@ -3925,6 +4002,7 @@ export default function SalesModule({
           quotes={savedQuotes}
           onSelectQuote={handleLoadQuoteFromHistory}
           onDeleteQuote={handleDeleteSavedQuote}
+          onDuplicateQuote={(q) => handleLoadQuoteForDuplication({ quote: q, originalNumber: q.quoteNumber || q.id })}
           onClose={() => setShowHistoryModal(false)}
         />
       )}

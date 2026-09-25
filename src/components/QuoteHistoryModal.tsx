@@ -15,13 +15,15 @@ import {
   Calendar, 
   User, 
   DollarSign, 
-  Download 
+  Download,
+  Copy
 } from 'lucide-react';
 
 interface QuoteHistoryModalProps {
   quotes: Quote[];
   onSelectQuote: (quote: Quote) => void;
   onDeleteQuote: (id: string) => void;
+  onDuplicateQuote?: (quote: Quote) => void;
   onClose: () => void;
 }
 
@@ -29,6 +31,7 @@ export default function QuoteHistoryModal({
   quotes,
   onSelectQuote,
   onDeleteQuote,
+  onDuplicateQuote,
   onClose
 }: QuoteHistoryModalProps) {
   const [searchTerm, setSearchTerm] = useState('');
@@ -224,6 +227,20 @@ export default function QuoteHistoryModal({
                   </div>
 
                   <div className="flex items-center gap-1.5">
+                    {onDuplicateQuote && (
+                      <button
+                        onClick={() => {
+                          onDuplicateQuote(quote);
+                          onClose();
+                        }}
+                        className="px-3.5 py-2 bg-cyan-600 hover:bg-cyan-700 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+                        title="Duplicar este orçamento no PDV com nova numeração"
+                      >
+                        <Copy className="w-3.5 h-3.5" />
+                        Duplicar
+                      </button>
+                    )}
+
                     <button
                       onClick={() => {
                         onSelectQuote(quote);

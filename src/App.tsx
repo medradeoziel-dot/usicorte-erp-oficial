@@ -66,6 +66,7 @@ export default function App() {
   const [selectedMaterialForQuote, setSelectedMaterialForQuote] = useState<MaterialProfile | null>(null);
   const [currentQuote, setCurrentQuote] = useState<Quote>(INITIAL_QUOTE);
   const [quoteToEdit, setQuoteToEdit] = useState<Quote | null>(null);
+  const [quoteToDuplicate, setQuoteToDuplicate] = useState<{ quote: Quote; originalNumber: string } | null>(null);
 
   // Autenticação & Modais
   const [currentUser, setCurrentUser] = useState<string | null>(() => sessionStorage.getItem('usuario_logado'));
@@ -239,7 +240,16 @@ export default function App() {
   };
 
   const handleEditQuote = (quote: Quote) => {
+    setQuoteToDuplicate(null);
     setQuoteToEdit(quote);
+    setCurrentQuote(quote);
+    setCurrentScreen('vendas');
+    setIsMobileSidebarOpen(false);
+  };
+
+  const handleDuplicateQuote = (quote: Quote, originalNumber: string) => {
+    setQuoteToEdit(null); // Desativa modo edição para não atualizar cotação original
+    setQuoteToDuplicate({ quote, originalNumber });
     setCurrentQuote(quote);
     setCurrentScreen('vendas');
     setIsMobileSidebarOpen(false);
@@ -396,6 +406,8 @@ export default function App() {
               onNavigateToReports={isAdmin ? () => trocarTela('relatorios') : undefined} 
               quoteToEdit={quoteToEdit}
               onClearQuoteToEdit={() => setQuoteToEdit(null)}
+              quoteToDuplicate={quoteToDuplicate}
+              onClearQuoteToDuplicate={() => setQuoteToDuplicate(null)}
             />
           )}
 
@@ -407,6 +419,7 @@ export default function App() {
               clients={clients} 
               onNavigateToQuote={() => trocarTela('vendas')} 
               onEditQuote={handleEditQuote}
+              onDuplicateQuote={handleDuplicateQuote}
               initialTab={reportsTab}
               onTabChange={setReportsTab}
               onNavigateToMovimentacoes={() => trocarTela('movimentacoes')}
