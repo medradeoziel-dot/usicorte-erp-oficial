@@ -3345,7 +3345,7 @@ export default function ReportsModule({
                       onChange={(e) => handleSelectAll(e.target.checked)} 
                     />
                   </th>
-                  <th style={{ minWidth: '275px', textAlign: 'center' }}>Ações</th>
+                  <th style={{ minWidth: '190px', textAlign: 'center' }}>Ações</th>
                   <th>Cotação</th>
                   <th style={{ minWidth: '135px', textAlign: 'center' }}>Situação</th>
                   <th>Data</th>
@@ -3398,7 +3398,7 @@ export default function ReportsModule({
                           />
                         </td>
                         <td style={{ textAlign: 'center' }}>
-                          <div className="flex items-center justify-center gap-1">
+                          <div className="flex items-center justify-center space-x-1">
                             <button
                               type="button"
                               onClick={(e) => {
@@ -3406,15 +3406,14 @@ export default function ReportsModule({
                                 handleDuplicateCotacaoFromConsulta(item);
                               }}
                               disabled={isDuplicating && duplicatingQuoteKey === (item.cotacao || String(item.idVer))}
-                              className="px-2.5 py-1 bg-purple-600 hover:bg-purple-700 text-white border border-purple-500 rounded text-[11px] font-semibold flex items-center gap-1 transition-all cursor-pointer shadow-xs disabled:opacity-50"
-                              title="Duplicar esta cotação para um novo pedido na tela Vendas & PDV"
+                              className="p-1.5 bg-cyan-600/20 hover:bg-cyan-600 text-cyan-400 hover:text-white border border-cyan-500/40 rounded-md transition-all cursor-pointer flex items-center justify-center shadow-xs disabled:opacity-50"
+                              title="Duplicar Cotação"
                             >
                               {isDuplicating && duplicatingQuoteKey === (item.cotacao || String(item.idVer)) ? (
-                                <Loader2 className="w-3 h-3 animate-spin" />
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
                               ) : (
-                                <Copy className="w-3 h-3" />
+                                <Copy className="w-3.5 h-3.5" />
                               )}
-                              <span>Duplicar</span>
                             </button>
                             <button
                               type="button"
@@ -3422,11 +3421,10 @@ export default function ReportsModule({
                                 e.stopPropagation();
                                 handleEditCotacaoFromConsulta(item);
                               }}
-                              className="px-2 py-1 bg-amber-500/20 hover:bg-amber-500 text-amber-300 hover:text-white border border-amber-500/40 rounded text-[11px] font-semibold flex items-center gap-1 transition-all cursor-pointer shadow-xs"
-                              title="Editar esta cotação completa no formulário"
+                              className="p-1.5 bg-amber-500/20 hover:bg-amber-500 text-amber-300 hover:text-white border border-amber-500/40 rounded-md transition-all cursor-pointer flex items-center justify-center shadow-xs"
+                              title="Editar Cotação"
                             >
-                              <Pencil className="w-3 h-3" />
-                              <span>Editar</span>
+                              <Pencil className="w-3.5 h-3.5" />
                             </button>
                             <button
                               type="button"
@@ -3438,11 +3436,10 @@ export default function ReportsModule({
                                 }
                                 setActiveTab('propostas');
                               }}
-                              className="px-2 py-1 bg-blue-600/20 hover:bg-blue-600 text-blue-400 hover:text-white border border-blue-500/40 rounded text-[11px] font-semibold flex items-center gap-1 transition-all cursor-pointer"
-                              title="Abrir esta cotação para visualização e impressão"
+                              className="p-1.5 bg-blue-600/20 hover:bg-blue-600 text-blue-400 hover:text-white border border-blue-500/40 rounded-md transition-all cursor-pointer flex items-center justify-center shadow-xs"
+                              title="Abrir / Visualizar"
                             >
-                              <Eye className="w-3 h-3" />
-                              <span>Abrir</span>
+                              <Eye className="w-3.5 h-3.5" />
                             </button>
                             <button
                               type="button"
@@ -3450,7 +3447,7 @@ export default function ReportsModule({
                                 e.stopPropagation();
                                 abrirModalBoletosItem(item);
                               }}
-                              className="p-1 bg-indigo-600/20 hover:bg-indigo-600 text-indigo-400 hover:text-white border border-indigo-500/40 rounded text-[11px] transition-all cursor-pointer flex items-center justify-center shadow-xs"
+                              className="p-1.5 bg-indigo-600/20 hover:bg-indigo-600 text-indigo-400 hover:text-white border border-indigo-500/40 rounded-md transition-all cursor-pointer flex items-center justify-center shadow-xs"
                               title="Gerenciar Boletos / Condição de Pagamento desta Cotação"
                             >
                               <Barcode className="w-3.5 h-3.5" />
@@ -3461,9 +3458,9 @@ export default function ReportsModule({
                                 e.stopPropagation();
                                 handleItemImageButtonClick(item);
                               }}
-                              className={`p-1 rounded text-[11px] transition-all cursor-pointer flex items-center justify-center ${
+                              className={`p-1.5 rounded-md transition-all cursor-pointer flex items-center justify-center shadow-xs ${
                                 item.desenhoUrl
-                                  ? 'bg-emerald-600/25 hover:bg-emerald-600 text-emerald-400 hover:text-white border border-emerald-500/50 shadow-xs shadow-emerald-950/40'
+                                  ? 'bg-emerald-600/25 hover:bg-emerald-600 text-emerald-400 hover:text-white border border-emerald-500/50 shadow-emerald-950/40'
                                   : 'bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 border border-slate-700'
                               }`}
                               title={
@@ -3484,7 +3481,7 @@ export default function ReportsModule({
                                 e.stopPropagation();
                                 setItemToDelete(item);
                               }}
-                              className="p-1 bg-rose-600/20 hover:bg-rose-600 text-rose-400 hover:text-white border border-rose-500/40 rounded text-[11px] transition-all cursor-pointer"
+                              className="p-1.5 bg-rose-600/20 hover:bg-rose-600 text-rose-400 hover:text-white border border-rose-500/40 rounded-md transition-all cursor-pointer flex items-center justify-center shadow-xs"
                               title="Excluir este item/orçamento do banco de dados"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
