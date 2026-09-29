@@ -53,7 +53,7 @@ export default function UsicorteCalculatorModal({
   onAddItemToQuote
 }: UsicorteCalculatorModalProps) {
   // Catálogo dinâmico de materiais conectado ao Supabase
-  const { constantes: dynamicConstantes } = useMaterialsCatalog();
+  const { constantes: dynamicConstantes, materials } = useMaterialsCatalog();
   const activeConstantes = dynamicConstantes.length > 0 ? dynamicConstantes : tabelaConstantes;
 
   // Form State
@@ -143,11 +143,21 @@ export default function UsicorteCalculatorModal({
     const idx = parseInt(indexStr, 10);
     const mat = activeConstantes[idx];
     if (mat) {
+      // a) Localiza o objeto do material selecionado na lista carregada do Supabase
+      const material = materials.find(
+        m => m.nome.trim().toLowerCase() === mat.nome.trim().toLowerCase()
+      );
+      // b) Preenche automaticamente "Descrição do Produto / Serviço" com material.descricao
+      // c) Se material.descricao estiver vazio ou não definido, utiliza material.nome
+      const descFinal = (material && material.descricao && material.descricao.trim() !== '')
+        ? material.descricao.trim()
+        : (mat.descricao && mat.descricao.trim() !== '' ? mat.descricao.trim() : mat.nome);
+
       setTipo(mat.tipo);
       setKCustom(mat.k);
       setPrecoKg(String(Math.ceil(mat.precoKg)));
       setMaterialQuery(mat.nome);
-      setDescricao(mat.nome);
+      setDescricao(descFinal);
       setIsMaterialOpen(false);
       setIsDescricaoOpen(false);
 
@@ -422,6 +432,19 @@ export default function UsicorteCalculatorModal({
                 setMaterialQuery(val);
                 setMaterialHighlightIdx(0);
                 setIsMaterialOpen(true);
+                const material = materials.find(
+                  m => m.nome.trim().toLowerCase() === val.trim().toLowerCase()
+                );
+                if (material) {
+                  setDescricao(
+                    material.descricao && material.descricao.trim() !== ''
+                      ? material.descricao.trim()
+                      : material.nome
+                  );
+                  setTipo(material.tipo);
+                  setKCustom(material.k);
+                  setPrecoKg(String(Math.ceil(material.precoKg)));
+                }
               }}
               onInput={(e) => {
                 const val = (e.target as HTMLInputElement).value;

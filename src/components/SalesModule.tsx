@@ -145,6 +145,7 @@ export default function SalesModule({
       return {
         id: fromMaterials.id,
         name: fromMaterials.nome,
+        descricao: fromMaterials.descricao && fromMaterials.descricao.trim() !== '' ? fromMaterials.descricao.trim() : fromMaterials.nome,
         tipo: fromMaterials.tipo,
         k: fromMaterials.k,
         precoKg: fromMaterials.precoKg
@@ -691,11 +692,18 @@ export default function SalesModule({
   // When selectedMaterial is passed from Products screen, apply it immediately
   useEffect(() => {
     if (selectedMaterial) {
+      const material = materials.find(
+        m => m.id.toLowerCase() === selectedMaterial.id.toLowerCase() ||
+             m.nome.toLowerCase() === selectedMaterial.name.toLowerCase()
+      );
       const registered = findProductOrMaterialData(selectedMaterial.name) || findProductOrMaterialData(selectedMaterial.id);
-      const kVal = registered ? registered.k : selectedMaterial.k;
-      const precoVal = registered ? registered.precoKg : selectedMaterial.defaultPriceKg;
-      const tipoVal = registered ? registered.tipo : selectedMaterial.tipo;
-      const nameVal = registered ? registered.name : selectedMaterial.name;
+      const kVal = material ? material.k : (registered ? registered.k : selectedMaterial.k);
+      const precoVal = material ? material.precoKg : (registered ? registered.precoKg : selectedMaterial.defaultPriceKg);
+      const tipoVal = material ? material.tipo : (registered ? registered.tipo : selectedMaterial.tipo);
+      const nameVal = material ? material.nome : (registered ? registered.name : selectedMaterial.name);
+      const descVal = (material && material.descricao && material.descricao.trim() !== '')
+        ? material.descricao.trim()
+        : (selectedMaterial.description && selectedMaterial.description.trim() !== '' ? selectedMaterial.description.trim() : nameVal);
       const precoKgStr = precoVal.toFixed(2).replace('.', ',');
       const kStr = kVal.toString();
 
@@ -704,7 +712,7 @@ export default function SalesModule({
       setItemGeometryType(tipoVal);
       setItemConstant(kStr);
       setItemPricePerKg(precoKgStr);
-      setItemDescription(nameVal);
+      setItemDescription(descVal);
       setIsManualUnitPrice(false);
 
       // Executa o cálculo automático imediatamente com a constante k e preço/kg oficiais
@@ -819,26 +827,30 @@ export default function SalesModule({
     if (!val) return;
 
     // Busca nas constantes e materiais oficiais cadastrados no Supabase
+    const material = materials.find(
+      m => m.id.toLowerCase() === val.trim().toLowerCase() ||
+           m.nome.toLowerCase() === val.trim().toLowerCase()
+    );
     const matData = findProductOrMaterialData(val) ||
       DADOS_MATERIAIS_MAP[val] || 
       DADOS_MATERIAIS_MAP[val.toLowerCase()] ||
       activeMaterialProfiles.find(p => p.id === val || p.name.toLowerCase() === val.toLowerCase());
 
-    if (matData) {
-      const newGeom = matData.tipo;
-      const newConstant = matData.k.toString();
-      const newPriceKg = ('precoKg' in matData ? matData.precoKg : ('defaultPriceKg' in matData ? (matData as any).defaultPriceKg : 22.00)).toFixed(2).replace('.', ',');
-      const newProfileName = ('nome' in matData ? (matData as any).nome : ('name' in matData ? (matData as any).name : val));
+    if (material || matData) {
+      const newGeom = material ? material.tipo : matData!.tipo;
+      const newConstant = (material ? material.k : matData!.k).toString();
+      const newPriceKg = (material ? material.precoKg : ('precoKg' in matData! ? matData!.precoKg : ('defaultPriceKg' in matData! ? (matData as any).defaultPriceKg : 22.00))).toFixed(2).replace('.', ',');
+      const newProfileName = material ? material.nome : ('nome' in matData! ? (matData as any).nome : ('name' in matData! ? (matData as any).name : val));
+      const newDesc = (material && material.descricao && material.descricao.trim() !== '')
+        ? material.descricao.trim()
+        : newProfileName;
 
       setItemConstantName(newProfileName);
       setItemGeometryType(newGeom);
       setItemConstant(newConstant);
       setItemPricePerKg(newPriceKg);
+      setItemDescription(newDesc);
       setIsManualUnitPrice(false);
-
-      if (!itemDescription || activeMaterialProfiles.some(p => p.name === itemDescription)) {
-        setItemDescription(newProfileName);
-      }
 
       updateCascadingUnitPrice(
         newPriceKg,
@@ -959,27 +971,34 @@ export default function SalesModule({
 
   // Select Material Profile handler
   const handleSelectMaterialProfile = (profile: MaterialProfile) => {
-    // 1. Vínculo de Preço e Constante Cadastrados:
-    // Carrega obrigatoriamente o 'preco_kg' cadastrado na tabela de produtos/materiais
-    // Carrega obrigatoriamente a constante de cálculo 'k' vinculada a este produto
+    // a) Localiza o objeto do material selecionado na lista carregada do Supabase
+    const material = materials.find(
+      m => m.id.toLowerCase() === (profile.id || '').trim().toLowerCase() ||
+           m.nome.toLowerCase() === (profile.name || '').trim().toLowerCase()
+    );
     const registered = findProductOrMaterialData(profile.name) || findProductOrMaterialData(profile.id);
-    const kVal = registered ? registered.k : profile.k;
-    const precoVal = registered ? registered.precoKg : profile.defaultPriceKg;
-    const tipoVal = registered ? registered.tipo : profile.tipo;
-    const nameVal = registered ? registered.name : profile.name;
+    const kVal = material ? material.k : (registered ? registered.k : profile.k);
+    const precoVal = material ? material.precoKg : (registered ? registered.precoKg : profile.defaultPriceKg);
+    const tipoVal = material ? material.tipo : (registered ? registered.tipo : profile.tipo);
+    const nameVal = material ? material.nome : (registered ? registered.name : profile.name);
     const precoKgStr = precoVal.toFixed(2).replace('.', ',');
     const kStr = kVal.toString();
 
+    // b) Preenche automaticamente a caixa de texto "Descrição do Produto / Serviço" com material.descricao
+    // c) Se material.descricao estiver vazio ou não definido, utiliza material.nome como valor predefinido
+    const descricaoPreenchida = (material && material.descricao && material.descricao.trim() !== '')
+      ? material.descricao.trim()
+      : (profile.description && profile.description.trim() !== '' && !/\(k=.*R\$.*\/Kg\)$/i.test(profile.description)
+          ? profile.description.trim()
+          : nameVal);
+
     setItemConstantName(nameVal);
-    setItemConstantSelect(profile.id);
+    setItemConstantSelect(material ? material.id : profile.id);
     setItemGeometryType(tipoVal);
     setItemConstant(kStr);
     setItemPricePerKg(precoKgStr);
+    setItemDescription(descricaoPreenchida);
     setIsManualUnitPrice(false);
-
-    if (!itemDescription || activeMaterialProfiles.some(p => normalizeSearchText(p.name) === normalizeSearchText(itemDescription))) {
-      setItemDescription(nameVal);
-    }
 
     // Execute o cálculo automático do valor do item utilizando a constante 'k' e o 'preco_kg' oficiais do cadastro
     updateCascadingUnitPrice(
@@ -1157,19 +1176,28 @@ export default function SalesModule({
   // Handle selection from Description Combobox
   const handleSelectDescriptionPreset = (preset: any) => {
     const presetName = preset.name || preset.nome || '';
+    const material = materials.find(
+      m => m.nome.toLowerCase() === presetName.trim().toLowerCase() ||
+           m.id.toLowerCase() === String(preset.constantSelect || preset.id || '').trim().toLowerCase()
+    );
     const registered = findProductOrMaterialData(presetName) || findProductOrMaterialData(preset.constantSelect || preset.id);
 
-    const nameVal = registered ? registered.name : presetName;
-    const kVal = registered ? registered.k : (preset.constant ?? 0.00785);
-    const precoVal = registered ? registered.precoKg : (preset.defaultPriceKg ?? 22.00);
-    const tipoVal = registered ? registered.tipo : (preset.geometryType || 'chapa');
+    const nameVal = material ? material.nome : (registered ? registered.name : presetName);
+    const descVal = (material && material.descricao && material.descricao.trim() !== '')
+      ? material.descricao.trim()
+      : (preset.descricao && preset.descricao.trim() !== '' && !/\(k=.*R\$.*\/Kg\)$/i.test(preset.descricao)
+          ? preset.descricao.trim()
+          : nameVal);
+    const kVal = material ? material.k : (registered ? registered.k : (preset.constant ?? 0.00785));
+    const precoVal = material ? material.precoKg : (registered ? registered.precoKg : (preset.defaultPriceKg ?? 22.00));
+    const tipoVal = material ? material.tipo : (registered ? registered.tipo : (preset.geometryType || 'chapa'));
     const precoKgStr = precoVal.toFixed(2).replace('.', ',');
     const kStr = kVal.toString();
 
-    setItemDescription(nameVal);
+    setItemDescription(descVal);
     setItemConstantName(nameVal);
-    if (registered?.id || preset.constantSelect) {
-      setItemConstantSelect(registered?.id || preset.constantSelect);
+    if (material?.id || registered?.id || preset.constantSelect) {
+      setItemConstantSelect(material?.id || registered?.id || preset.constantSelect);
     }
     setItemGeometryType(tipoVal);
     setItemConstant(kStr);
@@ -1202,7 +1230,7 @@ export default function SalesModule({
       constantSelect: p.id,
       defaultPriceKg: p.defaultPriceKg,
       badge: `k=${p.k} • R$ ${p.defaultPriceKg.toFixed(2).replace('.', ',')}/Kg`,
-      description: `${p.name} (k=${p.k} | R$ ${p.defaultPriceKg.toFixed(2).replace('.', ',')}/Kg)`,
+      description: p.description || p.name,
       keywords: [p.name.toLowerCase(), p.id.toLowerCase(), p.tipo]
     })),
     ...PRODUCT_DESCRIPTION_PRESETS.filter(p => !activeMaterialProfiles.some(m => normalizeSearchText(m.name) === normalizeSearchText(p.name)))
@@ -1218,7 +1246,7 @@ export default function SalesModule({
       precoKg: m.precoKg,
       sae: m.sae || '',
       norma: m.norma || '',
-      descricao: m.descricao || `${m.nome} (k=${m.k} | R$ ${m.precoKg.toFixed(2).replace('.', ',')}/Kg)`
+      descricao: m.descricao ? m.descricao.trim() : ''
     })),
     ...PRODUCT_DESCRIPTION_PRESETS.filter(
       p => !materials.some(m => normalizeSearchText(m.nome) === normalizeSearchText(p.name))
@@ -2760,15 +2788,39 @@ export default function SalesModule({
                 onChangeText={(txt) => {
                   setItemConstantName(txt);
                   setConstantSearchQuery(txt);
+                  // No evento onChange do campo "Constante / Material":
+                  // a) Localiza o objeto do material selecionado na lista carregada do Supabase
+                  const material = materials.find(
+                    m => m.nome.trim().toLowerCase() === txt.trim().toLowerCase() ||
+                         m.id.trim().toLowerCase() === txt.trim().toLowerCase()
+                  );
+                  if (material) {
+                    // b) Preenche automaticamente "Descrição do Produto / Serviço" com material.descricao
+                    // c) Se material.descricao estiver vazio ou não definido, utiliza material.nome
+                    const descAuto = material.descricao && material.descricao.trim() !== ''
+                      ? material.descricao.trim()
+                      : material.nome;
+                    setItemDescription(descAuto);
+                    setItemConstantSelect(material.id);
+                    setItemGeometryType(material.tipo);
+                    setItemConstant(String(material.k));
+                    setItemPricePerKg(material.precoKg.toFixed(2).replace('.', ','));
+                  }
                 }}
                 onSelectOption={(opt) => {
+                  const material = materials.find(
+                    m => m.id === opt.id || m.nome.toLowerCase() === opt.nome.toLowerCase()
+                  );
+                  const descAuto = (material && material.descricao && material.descricao.trim() !== '')
+                    ? material.descricao.trim()
+                    : (opt.descricao && opt.descricao.trim() !== '' ? opt.descricao.trim() : opt.nome);
                   handleSelectMaterialProfile({
                     id: opt.id,
                     name: opt.nome,
                     tipo: opt.tipo,
                     k: opt.k,
                     defaultPriceKg: opt.precoKg,
-                    description: opt.descricao || opt.nome
+                    description: descAuto
                   });
                 }}
                 onAdvanceFocus={() => {
@@ -2980,8 +3032,14 @@ export default function SalesModule({
                   setDescriptionSearchQuery(txt);
                 }}
                 onSelectOption={(opt) => {
+                  const material = materials.find(
+                    m => m.id === opt.id || m.nome.toLowerCase() === opt.nome.toLowerCase()
+                  );
                   handleSelectDescriptionPreset({
                     name: opt.nome,
+                    descricao: (material && material.descricao && material.descricao.trim() !== '')
+                      ? material.descricao.trim()
+                      : (opt.descricao && opt.descricao.trim() !== '' ? opt.descricao.trim() : opt.nome),
                     constantSelect: opt.id,
                     constant: opt.k,
                     defaultPriceKg: opt.precoKg,

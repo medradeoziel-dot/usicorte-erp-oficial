@@ -56,6 +56,11 @@ export function mapSupabaseToItem(record: any): MaterialItem {
   const kVal = Number(record.constante != null ? record.constante : (record.k != null ? record.k : 0.00785));
   const precoVal = Number(record.preco_base != null ? record.preco_base : (record.precoKg != null ? record.precoKg : (record.preco_kg != null ? record.preco_kg : 22.00)));
   const nomeUpper = (record.nome || record.name || '').trim().toUpperCase();
+
+  let rawDescricao = record.descricao != null ? String(record.descricao).trim() : '';
+  if (rawDescricao && /\(k=.*\|\s*R\$.*\/Kg\)$/i.test(rawDescricao)) {
+    rawDescricao = '';
+  }
   
   return {
     id: String(record.id || record.nome),
@@ -68,20 +73,20 @@ export function mapSupabaseToItem(record: any): MaterialItem {
     precoKg: precoVal,
     sae: record.sae ? String(record.sae) : '',
     norma: record.norma ? String(record.norma) : '',
-    descricao: record.descricao ? String(record.descricao) : `${nomeUpper} (k=${kVal} | R$ ${precoVal.toFixed(2).replace('.', ',')}/Kg)`,
+    descricao: rawDescricao,
     created_at: record.created_at
   };
 }
 
 export function materialItemToProfile(item: MaterialItem): MaterialProfile {
-  const extraInfo = [item.sae, item.norma, item.descricao].filter(Boolean).join(' • ');
+  const cleanDesc = item.descricao && item.descricao.trim() !== '' ? item.descricao.trim() : '';
   return {
     id: item.id,
     name: item.nome,
     tipo: item.tipo,
     k: item.k,
     defaultPriceKg: item.precoKg,
-    description: extraInfo || `${item.nome} (k=${item.k} | R$ ${item.precoKg.toFixed(2).replace('.', ',')}/Kg)`
+    description: cleanDesc || item.nome
   };
 }
 
@@ -90,7 +95,8 @@ export function materialItemToConstante(item: MaterialItem): TabelaConstanteItem
     nome: item.nome,
     k: item.k,
     precoKg: item.precoKg,
-    tipo: item.tipo
+    tipo: item.tipo,
+    descricao: item.descricao ? item.descricao.trim() : ''
   };
 }
 
@@ -211,6 +217,7 @@ export async function fetchMateriaisDb(): Promise<MaterialItem[]> {
  */
 export async function createMaterialDb(payload: {
   nome: string;
+  descricao?: string;
   tipo: TipoGeometriaExtensa;
   constante: number;
   preco_base: number;
@@ -230,11 +237,14 @@ export async function createMaterialDb(payload: {
     return { data: null, error: 'O preço base por Kg deve ser um número válido maior ou igual a zero.' };
   }
 
+  const cleanDescricao = payload.descricao !== undefined ? payload.descricao.trim() : '';
+
   try {
     const { data, error } = await db
       .from('materiais')
       .insert({
         nome: cleanNome,
+        descricao: cleanDescricao,
         tipo: payload.tipo,
         constante: kVal,
         preco_base: precoVal
@@ -247,7 +257,7 @@ export async function createMaterialDb(payload: {
       return { data: null, error: error.message || 'Falha ao gravar material no banco.' };
     }
 
-    const newItem = mapSupabaseToItem(data);
+    const newItem = mapSupabaseToItem({ ...data, descricao: data?.descricao ?? cleanDescricao });
 
     // Atualiza cache e notifica
     const current = getCachedMaterials();
@@ -268,6 +278,7 @@ export async function updateMaterialDb(
   id: string,
   payload: {
     nome: string;
+    descricao?: string;
     tipo: TipoGeometriaExtensa;
     constante: number;
     preco_base: number;
@@ -288,11 +299,14 @@ export async function updateMaterialDb(
     return { data: null, error: 'O preço base por Kg deve ser um número válido maior ou igual a zero.' };
   }
 
+  const cleanDescricao = payload.descricao !== undefined ? payload.descricao.trim() : '';
+
   try {
     const { data, error } = await db
       .from('materiais')
       .update({
         nome: cleanNome,
+        descricao: cleanDescricao,
         tipo: payload.tipo,
         constante: kVal,
         preco_base: precoVal
@@ -306,7 +320,7 @@ export async function updateMaterialDb(
       return { data: null, error: error.message || 'Falha ao atualizar material no banco.' };
     }
 
-    const updatedItem = mapSupabaseToItem(data);
+    const updatedItem = mapSupabaseToItem({ ...data, descricao: data?.descricao ?? cleanDescricao });
 
     // Atualiza cache e notifica
     const current = getCachedMaterials();

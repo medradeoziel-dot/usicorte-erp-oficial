@@ -227,6 +227,7 @@ export interface TabelaConstanteItem {
   k: number;
   precoKg: number;
   tipo: 'chapa' | 'macico' | 'bucha';
+  descricao?: string;
 }
 
 // Tabela canônica oficial de Materiais / Constantes e Preços/Kg

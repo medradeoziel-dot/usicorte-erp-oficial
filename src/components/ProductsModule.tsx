@@ -40,10 +40,19 @@ export default function ProductsModule({ onSelectProductForQuote }: ProductsModu
   // Modal State (Novo / Editar Material)
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [editingMaterial, setEditingMaterial] = useState<MaterialItem | null>(null);
-  const [formNome, setFormNome] = useState<string>('');
-  const [formTipo, setFormTipo] = useState<TipoGeometriaExtensa>('Redondo / Maciço');
-  const [formConstante, setFormConstante] = useState<string>('0.0062');
-  const [formPrecoBase, setFormPrecoBase] = useState<string>('45,00');
+  const [formData, setFormData] = useState<{
+    nome: string;
+    descricao: string;
+    tipo: TipoGeometriaExtensa;
+    constante: string;
+    preco_base: string;
+  }>({
+    nome: '',
+    descricao: '',
+    tipo: 'Redondo / Maciço',
+    constante: '0.0062',
+    preco_base: '45,00'
+  });
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -63,36 +72,47 @@ export default function ProductsModule({ onSelectProductForQuote }: ProductsModu
 
   const handleOpenNewModal = () => {
     setEditingMaterial(null);
-    setFormNome('');
-    setFormTipo('Redondo / Maciço');
-    setFormConstante('0.0062');
-    setFormPrecoBase('45,00');
+    setFormData({
+      nome: '',
+      descricao: '',
+      tipo: 'Redondo / Maciço',
+      constante: '0.0062',
+      preco_base: '45,00'
+    });
     setFormError(null);
     setIsModalOpen(true);
   };
 
   const handleOpenEditModal = (mat: MaterialItem) => {
     setEditingMaterial(mat);
-    setFormNome(mat.nome);
-    setFormTipo(mat.tipoExtenso);
-    setFormConstante(String(mat.k));
-    setFormPrecoBase(mat.precoKg.toFixed(2).replace('.', ','));
+    setFormData({
+      nome: mat.nome,
+      descricao: mat.descricao || '',
+      tipo: mat.tipoExtenso,
+      constante: String(mat.k),
+      preco_base: mat.precoKg.toFixed(2).replace('.', ',')
+    });
     setFormError(null);
     setIsModalOpen(true);
   };
 
   const handleTipoChange = (newTipo: TipoGeometriaExtensa) => {
-    setFormTipo(newTipo);
+    let defaultK = formData.constante;
     // Sugestões inteligentes de constante k caso esteja criando novo
     if (!editingMaterial) {
       if (newTipo === 'Redondo / Maciço') {
-        setFormConstante('0.00617');
+        defaultK = '0.00617';
       } else if (newTipo === 'Chapa / Placa') {
-        setFormConstante('0.00785');
+        defaultK = '0.00785';
       } else if (newTipo === 'Bucha / Tubo') {
-        setFormConstante('0.00617');
+        defaultK = '0.00617';
       }
     }
+    setFormData(prev => ({
+      ...prev,
+      tipo: newTipo,
+      constante: defaultK
+    }));
   };
 
   const parseNumberInput = (str: string): number => {
@@ -106,19 +126,19 @@ export default function ProductsModule({ onSelectProductForQuote }: ProductsModu
     e.preventDefault();
     setFormError(null);
 
-    const cleanNome = formNome.trim().toUpperCase();
+    const cleanNome = formData.nome.trim().toUpperCase();
     if (!cleanNome) {
       setFormError('Por favor, informe o nome do material.');
       return;
     }
 
-    const kNum = parseNumberInput(formConstante);
+    const kNum = parseNumberInput(formData.constante);
     if (kNum < 0) {
       setFormError('A constante metalúrgica (k) deve ser um número válido (Ex: 0.0062).');
       return;
     }
 
-    const precoNum = parseNumberInput(formPrecoBase);
+    const precoNum = parseNumberInput(formData.preco_base);
     if (precoNum < 0) {
       setFormError('O preço base por Kg deve ser um número válido (Ex: 45,00).');
       return;
@@ -129,7 +149,8 @@ export default function ProductsModule({ onSelectProductForQuote }: ProductsModu
       if (editingMaterial) {
         const res = await updateMaterialDb(editingMaterial.id, {
           nome: cleanNome,
-          tipo: formTipo,
+          descricao: formData.descricao,
+          tipo: formData.tipo,
           constante: kNum,
           preco_base: precoNum
         });
@@ -139,12 +160,13 @@ export default function ProductsModule({ onSelectProductForQuote }: ProductsModu
         } else {
           showToast(`Material "${cleanNome}" atualizado com sucesso no Supabase e sincronizado com a Calculadora!`);
           setIsModalOpen(false);
-          reload();
+          await reload();
         }
       } else {
         const res = await createMaterialDb({
           nome: cleanNome,
-          tipo: formTipo,
+          descricao: formData.descricao,
+          tipo: formData.tipo,
           constante: kNum,
           preco_base: precoNum
         });
@@ -154,7 +176,7 @@ export default function ProductsModule({ onSelectProductForQuote }: ProductsModu
         } else {
           showToast(`Novo material "${cleanNome}" gravado com sucesso no Supabase e disponível na Calculadora!`);
           setIsModalOpen(false);
-          reload();
+          await reload();
         }
       }
     } catch (err: any) {
@@ -188,6 +210,7 @@ export default function ProductsModule({ onSelectProductForQuote }: ProductsModu
     const q = searchQuery.toLowerCase().trim();
     const matchesSearch = !q ||
       item.nome.toLowerCase().includes(q) ||
+      (item.descricao || '').toLowerCase().includes(q) ||
       item.id.toLowerCase().includes(q) ||
       item.tipo.toLowerCase().includes(q) ||
       item.tipoExtenso.toLowerCase().includes(q) ||
@@ -386,6 +409,7 @@ export default function ProductsModule({ onSelectProductForQuote }: ProductsModu
               <tr>
                 <th className="py-3 px-4 w-12 text-center">#</th>
                 <th className="py-3 px-4">Nome do Material</th>
+                <th className="py-3 px-4">Descrição</th>
                 <th className="py-3 px-4">Tipo / Geometria</th>
                 <th className="py-3 px-4 text-center">Constante Metalúrgica (k)</th>
                 <th className="py-3 px-4 text-right">Preço Base (R$/Kg)</th>
@@ -396,7 +420,7 @@ export default function ProductsModule({ onSelectProductForQuote }: ProductsModu
             <tbody className="divide-y divide-slate-700/50">
               {filteredMaterials.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-slate-400">
+                  <td colSpan={8} className="py-12 text-center text-slate-400">
                     {loading ? (
                       <div className="flex flex-col items-center justify-center gap-2">
                         <Loader2 className="w-6 h-6 animate-spin text-blue-400" />
@@ -417,9 +441,9 @@ export default function ProductsModule({ onSelectProductForQuote }: ProductsModu
                   </td>
                 </tr>
               ) : (
-                filteredMaterials.map((mat, idx) => (
+                filteredMaterials.map((item, idx) => (
                   <tr 
-                    key={mat.id}
+                    key={item.id}
                     className="hover:bg-slate-700/40 transition-colors group"
                   >
                     <td className="py-3 px-4 text-center font-mono text-slate-500 font-bold">
@@ -427,25 +451,28 @@ export default function ProductsModule({ onSelectProductForQuote }: ProductsModu
                     </td>
                     <td className="py-3 px-4 font-bold text-slate-100 flex items-center gap-2">
                       <span className="w-2 h-2 rounded-full bg-blue-400 group-hover:scale-125 transition-transform"></span>
-                      <span>{mat.nome}</span>
+                      <span>{item.nome}</span>
+                    </td>
+                    <td className="py-3 px-4 text-slate-300 font-medium">
+                      {item.descricao && item.descricao.trim() !== '' ? item.descricao : '—'}
                     </td>
                     <td className="py-3 px-4">
-                      {getGeometryBadge(mat.tipo)}
+                      {getGeometryBadge(item.tipo)}
                     </td>
                     <td className="py-3 px-4 text-center font-mono font-bold text-amber-300 bg-slate-900/30 rounded">
-                      {mat.k}
+                      {item.k}
                     </td>
                     <td className="py-3 px-4 text-right font-mono font-bold text-emerald-400">
-                      R$ {mat.precoKg.toFixed(2).replace('.', ',')}
+                      R$ {item.precoKg.toFixed(2).replace('.', ',')}
                     </td>
                     <td className="py-3 px-4 font-mono text-[11px] text-slate-400">
-                      {getFormula(mat.tipo, mat.k)}
+                      {getFormula(item.tipo, item.k)}
                     </td>
                     <td className="py-3 px-4 text-center">
                       <div className="flex items-center justify-center gap-1.5">
                         {onSelectProductForQuote && (
                           <button
-                            onClick={() => onSelectProductForQuote(materialItemToProfile(mat))}
+                            onClick={() => onSelectProductForQuote(materialItemToProfile(item))}
                             className="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-semibold text-xs transition-all flex items-center justify-center gap-1 cursor-pointer shadow-sm active:scale-95"
                             title="Lançar material diretamente no orçamento de cotação"
                           >
@@ -455,15 +482,15 @@ export default function ProductsModule({ onSelectProductForQuote }: ProductsModu
                         )}
 
                         <button
-                          onClick={() => handleOpenEditModal(mat)}
+                          onClick={() => handleOpenEditModal(item)}
                           className="p-1.5 bg-slate-700/80 hover:bg-indigo-600 text-slate-300 hover:text-white rounded-lg transition-colors cursor-pointer"
-                          title="Editar material, constante e preço no Supabase"
+                          title="Editar material, descrição, constante e preço no Supabase"
                         >
                           <Pencil className="w-3.5 h-3.5" />
                         </button>
 
                         <button
-                          onClick={() => setMaterialToDelete(mat)}
+                          onClick={() => setMaterialToDelete(item)}
                           className="p-1.5 bg-slate-700/80 hover:bg-rose-600 text-slate-300 hover:text-white rounded-lg transition-colors cursor-pointer"
                           title="Excluir material do Supabase"
                         >
@@ -540,13 +567,30 @@ export default function ProductsModule({ onSelectProductForQuote }: ProductsModu
                   type="text"
                   required
                   placeholder="Ex: AÇO REDONDO INOX"
-                  value={formNome}
-                  onChange={(e) => setFormNome(e.target.value.toUpperCase())}
+                  value={formData.nome}
+                  onChange={(e) => setFormData(prev => ({ ...prev, nome: e.target.value.toUpperCase() }))}
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-100 placeholder:text-slate-500 focus:outline-hidden focus:border-blue-500 focus:ring-1 focus:ring-blue-500 uppercase font-mono"
                   autoFocus
                 />
                 <span className="text-[10px] text-slate-500 mt-1 block">
                   Identificação visível no combobox de cotações e relatórios.
+                </span>
+              </div>
+
+              {/* Descrição do Material */}
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1">
+                  Descrição do Material
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ex: CHAPA DE AÇO CARBONO SAE 1020 / A36 CORTE A LASER"
+                  value={formData.descricao}
+                  onChange={(e) => setFormData(prev => ({ ...prev, descricao: e.target.value }))}
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-100 placeholder:text-slate-500 focus:outline-hidden focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                />
+                <span className="text-[10px] text-slate-500 mt-1 block">
+                  Preenchida automaticamente no campo "Descrição do Produto / Serviço" ao selecionar este material no PDV.
                 </span>
               </div>
 
@@ -556,7 +600,7 @@ export default function ProductsModule({ onSelectProductForQuote }: ProductsModu
                   Tipo / Geometria <span className="text-rose-400">*</span>
                 </label>
                 <select
-                  value={formTipo}
+                  value={formData.tipo}
                   onChange={(e) => handleTipoChange(e.target.value as TipoGeometriaExtensa)}
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs font-bold text-slate-100 focus:outline-hidden focus:border-blue-500 focus:ring-1 focus:ring-blue-500 cursor-pointer"
                 >
@@ -579,29 +623,29 @@ export default function ProductsModule({ onSelectProductForQuote }: ProductsModu
                     type="text"
                     required
                     placeholder="Ex: 0.0062"
-                    value={formConstante}
-                    onChange={(e) => setFormConstante(e.target.value)}
+                    value={formData.constante}
+                    onChange={(e) => setFormData(prev => ({ ...prev, constante: e.target.value }))}
                     className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs font-mono font-bold text-amber-300 placeholder:text-slate-500 focus:outline-hidden focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                   />
                   <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
                     <span className="text-[9px] text-slate-400">Exemplos:</span>
                     <button
                       type="button"
-                      onClick={() => setFormConstante('0.00617')}
+                      onClick={() => setFormData(prev => ({ ...prev, constante: '0.00617' }))}
                       className="text-[9px] bg-slate-800 hover:bg-slate-700 text-blue-300 px-1.5 py-0.5 rounded border border-slate-700 cursor-pointer"
                     >
                       Aço (0.00617)
                     </button>
                     <button
                       type="button"
-                      onClick={() => setFormConstante('0.00785')}
+                      onClick={() => setFormData(prev => ({ ...prev, constante: '0.00785' }))}
                       className="text-[9px] bg-slate-800 hover:bg-slate-700 text-blue-300 px-1.5 py-0.5 rounded border border-slate-700 cursor-pointer"
                     >
                       Chapa (0.00785)
                     </button>
                     <button
                       type="button"
-                      onClick={() => setFormConstante('0.00214')}
+                      onClick={() => setFormData(prev => ({ ...prev, constante: '0.00214' }))}
                       className="text-[9px] bg-slate-800 hover:bg-slate-700 text-blue-300 px-1.5 py-0.5 rounded border border-slate-700 cursor-pointer"
                     >
                       Alumínio (0.00214)
@@ -619,8 +663,8 @@ export default function ProductsModule({ onSelectProductForQuote }: ProductsModu
                       type="text"
                       required
                       placeholder="Ex: 45,00"
-                      value={formPrecoBase}
-                      onChange={(e) => setFormPrecoBase(e.target.value)}
+                      value={formData.preco_base}
+                      onChange={(e) => setFormData(prev => ({ ...prev, preco_base: e.target.value }))}
                       className="w-full bg-slate-800 border border-slate-700 rounded-xl pl-9 pr-3.5 py-2.5 text-xs font-mono font-bold text-emerald-400 placeholder:text-slate-500 focus:outline-hidden focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                     />
                   </div>
@@ -634,9 +678,9 @@ export default function ProductsModule({ onSelectProductForQuote }: ProductsModu
               <div className="p-3 bg-slate-950/60 rounded-xl border border-slate-800 text-[11px] space-y-1">
                 <span className="text-slate-400 font-medium block">Fórmula Teórica Resultante:</span>
                 <span className="font-mono text-blue-400 font-bold block">
-                  {formTipo === 'Redondo / Maciço' && `Ø² (mm) × Comp (mm) × ${formConstante || '0'}`}
-                  {formTipo === 'Chapa / Placa' && `Esp (mm) × Larg (mm) × Comp (mm) × ${formConstante || '0'}`}
-                  {formTipo === 'Bucha / Tubo' && `(ØExt² - ØInt²) × Comp (mm) × ${formConstante || '0'}`}
+                  {formData.tipo === 'Redondo / Maciço' && `Ø² (mm) × Comp (mm) × ${formData.constante || '0'}`}
+                  {formData.tipo === 'Chapa / Placa' && `Esp (mm) × Larg (mm) × Comp (mm) × ${formData.constante || '0'}`}
+                  {formData.tipo === 'Bucha / Tubo' && `(ØExt² - ØInt²) × Comp (mm) × ${formData.constante || '0'}`}
                 </span>
               </div>
 
