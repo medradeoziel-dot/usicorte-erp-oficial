@@ -15,6 +15,9 @@ export interface MaterialSupabaseRecord {
   tipo: string;
   constante: number;
   preco_base: number;
+  sae?: string;
+  norma?: string;
+  descricao?: string;
   created_at?: string;
 }
 
@@ -25,6 +28,9 @@ export interface MaterialItem {
   tipoExtenso: TipoGeometriaExtensa;
   k: number;
   precoKg: number;
+  sae?: string;
+  norma?: string;
+  descricao?: string;
   created_at?: string;
 }
 
@@ -48,29 +54,34 @@ export function tipoParaExtenso(tipoRaw?: string): TipoGeometriaExtensa {
 export function mapSupabaseToItem(record: any): MaterialItem {
   const normTipo = normalizarTipo(record.tipo);
   const kVal = Number(record.constante != null ? record.constante : (record.k != null ? record.k : 0.00785));
-  const precoVal = Number(record.preco_base != null ? record.preco_base : (record.precoKg != null ? record.precoKg : 22.00));
+  const precoVal = Number(record.preco_base != null ? record.preco_base : (record.precoKg != null ? record.precoKg : (record.preco_kg != null ? record.preco_kg : 22.00)));
+  const nomeUpper = (record.nome || record.name || '').trim().toUpperCase();
   
   return {
     id: String(record.id || record.nome),
-    nome: (record.nome || record.name || '').trim().toUpperCase(),
+    nome: nomeUpper,
     tipo: normTipo,
     tipoExtenso: record.tipo && ['Redondo / Maciço', 'Chapa / Placa', 'Bucha / Tubo'].includes(record.tipo)
       ? (record.tipo as TipoGeometriaExtensa)
       : tipoParaExtenso(normTipo),
     k: kVal,
     precoKg: precoVal,
+    sae: record.sae ? String(record.sae) : '',
+    norma: record.norma ? String(record.norma) : '',
+    descricao: record.descricao ? String(record.descricao) : `${nomeUpper} (k=${kVal} | R$ ${precoVal.toFixed(2).replace('.', ',')}/Kg)`,
     created_at: record.created_at
   };
 }
 
 export function materialItemToProfile(item: MaterialItem): MaterialProfile {
+  const extraInfo = [item.sae, item.norma, item.descricao].filter(Boolean).join(' • ');
   return {
     id: item.id,
     name: item.nome,
     tipo: item.tipo,
     k: item.k,
     defaultPriceKg: item.precoKg,
-    description: `${item.nome} (k=${item.k} | R$ ${item.precoKg.toFixed(2).replace('.', ',')}/Kg)`
+    description: extraInfo || `${item.nome} (k=${item.k} | R$ ${item.precoKg.toFixed(2).replace('.', ',')}/Kg)`
   };
 }
 

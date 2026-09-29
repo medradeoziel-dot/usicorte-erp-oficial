@@ -57,6 +57,7 @@ import {
 } from '../services/companyService';
 import QuotePrintModal from './QuotePrintModal';
 import QuoteHistoryModal from './QuoteHistoryModal';
+import MaterialAutocomplete, { AutocompleteOption } from './MaterialAutocomplete';
 import {
   FileSpreadsheet,
   PlusCircle,
@@ -414,6 +415,7 @@ export default function SalesModule({
   const [isConstantOpen, setIsConstantOpen] = useState<boolean>(false);
   const [constantSearchQuery, setConstantSearchQuery] = useState<string>('');
   const [constantCategoryFilter, setConstantCategoryFilter] = useState<string>('ALL');
+  const [constantHighlightIndex, setConstantHighlightIndex] = useState<number>(0);
   const constantComboboxRef = useRef<HTMLDivElement>(null);
   const constantInputRef = useRef<HTMLInputElement>(null);
 
@@ -427,8 +429,28 @@ export default function SalesModule({
   const [isDescriptionOpen, setIsDescriptionOpen] = useState<boolean>(false);
   const [descriptionSearchQuery, setDescriptionSearchQuery] = useState<string>('');
   const [descriptionCategoryFilter, setDescriptionCategoryFilter] = useState<string>('ALL');
+  const [descriptionHighlightIndex, setDescriptionHighlightIndex] = useState<number>(0);
   const descriptionComboboxRef = useRef<HTMLDivElement>(null);
   const descriptionInputRef = useRef<HTMLInputElement>(null);
+
+  // Normalizador sem acentos para busca inteligente em tempo real (ex: "oxi", "1045", "aço")
+  const normalizeSearchText = (str: string) =>
+    (str || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim();
+
+  const matchesSearchQuery = (queryRaw: string, ...targets: (string | number | undefined)[]) => {
+    const q = normalizeSearchText(queryRaw);
+    if (!q) return true;
+    const combinedTarget = targets
+      .map(t => normalizeSearchText(String(t ?? '')))
+      .join(' ');
+    if (combinedTarget.includes(q)) return true;
+    const tokens = q.split(/\s+/).filter(Boolean);
+    return tokens.length > 1 && tokens.every(tok => combinedTarget.includes(tok));
+  };
 
   // Auto-calculator helper state
   const [showAutoCalcHelp, setShowAutoCalcHelp] = useState<boolean>(false);
@@ -924,12 +946,15 @@ export default function SalesModule({
       if (constantCategoryFilter === 'bucha' && profile.tipo !== 'bucha') return false;
     }
     if (!constantSearchQuery.trim()) return true;
-    const q = constantSearchQuery.toLowerCase().trim();
-    const nameMatch = profile.name.toLowerCase().includes(q);
-    const idMatch = profile.id.toLowerCase().includes(q);
-    const descMatch = profile.description.toLowerCase().includes(q);
-    const kMatch = profile.k.toString().includes(q) || profile.k.toString().replace('.', ',').includes(q);
-    return nameMatch || idMatch || descMatch || kMatch;
+    return matchesSearchQuery(
+      constantSearchQuery,
+      profile.name,
+      profile.id,
+      profile.description,
+      profile.k,
+      profile.k.toString().replace('.', ','),
+      profile.tipo
+    );
   });
 
   // Select Material Profile handler
@@ -952,7 +977,7 @@ export default function SalesModule({
     setItemPricePerKg(precoKgStr);
     setIsManualUnitPrice(false);
 
-    if (!itemDescription || activeMaterialProfiles.some(p => p.name.toLowerCase() === itemDescription.toLowerCase())) {
+    if (!itemDescription || activeMaterialProfiles.some(p => normalizeSearchText(p.name) === normalizeSearchText(itemDescription))) {
       setItemDescription(nameVal);
     }
 
@@ -969,9 +994,14 @@ export default function SalesModule({
 
     setIsConstantOpen(false);
     setConstantSearchQuery('');
+    setConstantHighlightIndex(0);
     
-    // Jump to the next dimensional field automatically (diametro)
-    focusNextField('diametro');
+    // Passa o foco do cursor (focus()) para o próximo campo (Espessura para chapa, ou Diâmetro para maciço/bucha)
+    if (tipoVal === 'chapa' || (tipoVal as string) === 'CHAPA_RETANGULO') {
+      focusNextField('espessura');
+    } else {
+      focusNextField('diametro');
+    }
   };
 
   // 2. Campo de Nome/Descrição 100% Editável:
@@ -981,6 +1011,8 @@ export default function SalesModule({
     const digitado = e.target.value;
     setItemConstantName(digitado);
     setConstantSearchQuery(digitado);
+    setConstantHighlightIndex(0);
+    setIsConstantOpen(true);
   };
 
   // Match active preset for badge indicator
@@ -1089,15 +1121,37 @@ export default function SalesModule({
 
   // 1. Campo de Descrição 100% Livre e Editável:
   // Permite edição livre da Descrição do Produto / Serviço sem resetar ou desvincular a constante e preço já carregados
+  // Abre automaticamente o dropdown (isDescriptionOpen = true) ao digitar (onChange / onInput)
   const handleDescriptionInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const digitado = e.target.value;
     setItemDescription(digitado);
     setDescriptionSearchQuery(digitado);
+    setDescriptionHighlightIndex(0);
+    setIsDescriptionOpen(true);
   };
 
   // Auto-detect geometry suggestion when description changes directly
   const handleDescriptionChange = (value: string) => {
     setItemDescription(value);
+  };
+
+  // Helper para focar no próximo campo lógico após selecionar material na Descrição (Quantidade ou Espessura)
+  const focusNextAfterDescriptionSelect = (geomType?: GeometryType) => {
+    const targetGeom = geomType || itemGeometryType;
+    const hasDimensions = Boolean(
+      (targetGeom === 'chapa' || targetGeom === 'CHAPA_RETANGULO')
+        ? itemThickness.trim()
+        : itemDiameter.trim()
+    );
+    if (!hasDimensions) {
+      if (targetGeom === 'chapa' || targetGeom === 'CHAPA_RETANGULO') {
+        focusNextField('espessura');
+      } else {
+        focusNextField('diametro');
+      }
+    } else {
+      focusNextField('qtd');
+    }
   };
 
   // Handle selection from Description Combobox
@@ -1106,19 +1160,23 @@ export default function SalesModule({
     const registered = findProductOrMaterialData(presetName) || findProductOrMaterialData(preset.constantSelect || preset.id);
 
     const nameVal = registered ? registered.name : presetName;
-    const kVal = registered ? registered.k : (preset.constant || 0.00785);
-    const precoVal = registered ? registered.precoKg : (preset.defaultPriceKg || 22.00);
+    const kVal = registered ? registered.k : (preset.constant ?? 0.00785);
+    const precoVal = registered ? registered.precoKg : (preset.defaultPriceKg ?? 22.00);
     const tipoVal = registered ? registered.tipo : (preset.geometryType || 'chapa');
     const precoKgStr = precoVal.toFixed(2).replace('.', ',');
     const kStr = kVal.toString();
 
     setItemDescription(nameVal);
     setItemConstantName(nameVal);
+    if (registered?.id || preset.constantSelect) {
+      setItemConstantSelect(registered?.id || preset.constantSelect);
+    }
     setItemGeometryType(tipoVal);
     setItemConstant(kStr);
     setItemPricePerKg(precoKgStr);
     setIsManualUnitPrice(false);
     setDescriptionSearchQuery('');
+    setDescriptionHighlightIndex(0);
     setIsDescriptionOpen(false);
 
     updateCascadingUnitPrice(
@@ -1130,9 +1188,11 @@ export default function SalesModule({
       itemDiameter,
       itemThickness
     );
+
+    focusNextAfterDescriptionSelect(tipoVal);
   };
 
-  // Combina presets com todos os materiais cadastrados no Supabase para busca unificada
+  // Combina todos os materiais cadastrados no Supabase (prioridade máxima) com presets para busca unificada
   const allDescriptionOptions = [
     ...activeMaterialProfiles.map(p => ({
       name: p.name,
@@ -1145,21 +1205,50 @@ export default function SalesModule({
       description: `${p.name} (k=${p.k} | R$ ${p.defaultPriceKg.toFixed(2).replace('.', ',')}/Kg)`,
       keywords: [p.name.toLowerCase(), p.id.toLowerCase(), p.tipo]
     })),
-    ...PRODUCT_DESCRIPTION_PRESETS.filter(p => !activeMaterialProfiles.some(m => m.name.toLowerCase() === p.name.toLowerCase()))
+    ...PRODUCT_DESCRIPTION_PRESETS.filter(p => !activeMaterialProfiles.some(m => normalizeSearchText(m.name) === normalizeSearchText(p.name)))
   ];
 
-  // Filter description presets
+  // Lista unificada para o componente MaterialAutocomplete (buscando em nome, sae, norma e descricao da tabela materiais)
+  const autocompleteMaterialOptions: AutocompleteOption[] = [
+    ...materials.map(m => ({
+      id: m.id,
+      nome: m.nome,
+      tipo: m.tipo,
+      k: m.k,
+      precoKg: m.precoKg,
+      sae: m.sae || '',
+      norma: m.norma || '',
+      descricao: m.descricao || `${m.nome} (k=${m.k} | R$ ${m.precoKg.toFixed(2).replace('.', ',')}/Kg)`
+    })),
+    ...PRODUCT_DESCRIPTION_PRESETS.filter(
+      p => !materials.some(m => normalizeSearchText(m.nome) === normalizeSearchText(p.name))
+    ).map(p => ({
+      id: p.constantSelect || p.name,
+      nome: p.name,
+      tipo: p.geometryType,
+      k: p.constant,
+      precoKg: p.defaultPriceKg,
+      sae: (p.keywords || []).join(' '),
+      norma: p.category,
+      descricao: p.description
+    }))
+  ];
+
+  // Filter description presets em tempo real (suporta "oxi", "1045", "aço" com ou sem acento)
   const filteredDescriptionPresets = allDescriptionOptions.filter(preset => {
     if (descriptionCategoryFilter !== 'ALL' && preset.category !== descriptionCategoryFilter) {
       return false;
     }
-    const query = (descriptionSearchQuery || '').toLowerCase().trim();
+    const query = (descriptionSearchQuery || '').trim();
     if (!query) return true;
-    const nameMatch = preset.name.toLowerCase().includes(query);
-    const descMatch = preset.description.toLowerCase().includes(query);
-    const badgeMatch = (preset.badge || '').toLowerCase().includes(query);
-    const kwMatch = preset.keywords ? preset.keywords.some((k: string) => k.toLowerCase().includes(query)) : false;
-    return nameMatch || descMatch || badgeMatch || kwMatch;
+    return matchesSearchQuery(
+      query,
+      preset.name,
+      preset.description,
+      preset.badge,
+      preset.constant,
+      ...(preset.keywords || [])
+    );
   });
 
   // Add or Update item
@@ -2468,7 +2557,7 @@ export default function SalesModule({
       </div>
 
       {/* 2. FORMULÁRIO DE ADIÇÃO DE ITEM & CÁLCULO DE PESO */}
-      <div id="item-input-form" className="bg-white rounded-2xl border-2 border-indigo-200/90 p-6 shadow-sm space-y-6 relative overflow-hidden">
+      <div id="item-input-form" className="bg-white rounded-2xl border-2 border-indigo-200/90 p-6 shadow-sm space-y-6 relative overflow-visible">
         
         {/* Glow accent */}
         <div className="absolute top-0 right-0 w-80 h-80 bg-indigo-500/5 rounded-full blur-3xl pointer-events-none"></div>
@@ -2648,7 +2737,7 @@ export default function SalesModule({
           {/* Linha 1 */}
           <div className="form-row flex flex-col md:flex-row gap-2.5 items-end w-full">
             
-            {/* Constante / Material com Autocompletar Inline e Busca Dinâmica */}
+            {/* Constante / Material com Componente Autocomplete Flutuante (z-50) */}
             <div className="field relative w-full md:w-[26%] shrink-0 space-y-1" ref={constantComboboxRef}>
               <label htmlFor="constante" className="block text-xs font-bold text-slate-700 flex items-center justify-between">
                 <span className="flex items-center gap-1 text-indigo-950 truncate">
@@ -2660,169 +2749,37 @@ export default function SalesModule({
                 </span>
               </label>
 
-              <div className="relative">
-                <input
-                  type="text"
-                  id="constante"
-                  ref={constantInputRef}
-                  placeholder="Ex: BRONZE REDONDO, CHAPA, BUCHA..."
-                  value={itemConstantName}
-                  autoComplete="off"
-                  onChange={handleConstantInputChange}
-                  onFocus={(e) => {
-                    if (e.target && typeof e.target.select === 'function') {
-                      e.target.select();
-                    }
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      setIsConstantOpen(false);
-                      const input = e.currentTarget;
-                      input.setSelectionRange(input.value.length, input.value.length);
-                      
-                      // Sincroniza se houver correspondência exata ou aproximada
-                      const matData = DADOS_MATERIAIS_MAP[itemConstantName] || 
-                        DADOS_MATERIAIS_MAP[itemConstantName.toLowerCase()] ||
-                        activeMaterialProfiles.find(p => p.name.toLowerCase() === itemConstantName.toLowerCase());
-                      if (matData) {
-                        const profileId = 'id' in matData ? matData.id : 'chapa';
-                        handleConstantSelectChange(profileId);
-                      }
-
-                      focusNextField('diametro');
-                    } else if (e.key === 'Escape') {
-                      setIsConstantOpen(false);
-                    }
-                  }}
-                  className="w-full pl-3 pr-8 py-2 bg-white border border-slate-300 hover:border-indigo-500 focus:border-indigo-600 rounded-xl text-xs font-bold text-slate-800 shadow-2xs transition-all outline-hidden"
-                />
-
-                <button
-                  type="button"
-                  tabIndex={-1}
-                  onClick={() => setIsConstantOpen(!isConstantOpen)}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-indigo-600 cursor-pointer p-0.5"
-                  title="Abrir catálogo de materiais"
-                >
-                  <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${isConstantOpen ? 'rotate-180 text-indigo-600' : ''}`} />
-                </button>
-              </div>
-
-              {/* Dropdown Menu com Busca Dinâmica (Select2 style) */}
-              {isConstantOpen && (
-                <div className="absolute left-0 top-full mt-1 bg-white border border-slate-200 rounded-2xl shadow-2xl z-50 p-2.5 max-h-[380px] overflow-hidden flex flex-col w-[320px] sm:w-[360px] animate-in fade-in slide-in-from-top-2 duration-150">
-                  
-                  {/* Search Bar inside Select2 popup */}
-                  <div className="relative mb-2 shrink-0">
-                    <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <input
-                      type="text"
-                      placeholder="Buscar material, perfil, k..."
-                      value={constantSearchQuery}
-                      onChange={(e) => setConstantSearchQuery(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          if (filteredMaterialProfiles.length > 0) {
-                            handleSelectMaterialProfile(filteredMaterialProfiles[0]);
-                          }
-                        } else if (e.key === 'Escape') {
-                          setIsConstantOpen(false);
-                        }
-                      }}
-                      className="w-full pl-8 pr-7 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:outline-hidden focus:border-indigo-500 focus:bg-white"
-                      autoFocus
-                    />
-                    {constantSearchQuery && (
-                      <button
-                        type="button"
-                        onClick={() => setConstantSearchQuery('')}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Category Filter Tabs */}
-                  <div className="flex gap-1 overflow-x-auto pb-1.5 mb-1.5 border-b border-slate-100 shrink-0 text-[10px] no-scrollbar">
-                    {[
-                      { id: 'ALL', label: 'Todos' },
-                      { id: 'chapa', label: 'Chapas' },
-                      { id: 'macico', label: 'Maciços' },
-                      { id: 'bucha', label: 'Tubos / Buchas' }
-                    ].map((cat) => (
-                      <button
-                        key={cat.id}
-                        type="button"
-                        onClick={() => setConstantCategoryFilter(cat.id)}
-                        className={`px-2 py-0.5 rounded-full font-bold whitespace-nowrap transition-colors cursor-pointer ${
-                          constantCategoryFilter === cat.id
-                            ? 'bg-indigo-600 text-white'
-                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                        }`}
-                      >
-                        {cat.label}
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* Material Options List */}
-                  <div className="overflow-y-auto space-y-1 pr-1 flex-1 max-h-[220px]">
-                    {filteredMaterialProfiles.length > 0 ? (
-                      filteredMaterialProfiles.map((profile) => {
-                        const isSelected = itemConstantSelect === profile.id;
-                        return (
-                          <button
-                            key={profile.id}
-                            type="button"
-                            onClick={() => handleSelectMaterialProfile(profile)}
-                            className={`w-full text-left p-2 rounded-xl transition-all flex items-center justify-between gap-2.5 cursor-pointer border ${
-                              isSelected
-                                ? 'bg-indigo-50 border-indigo-300 text-indigo-950 font-bold shadow-2xs'
-                                : 'bg-white border-transparent hover:bg-slate-50 hover:border-slate-200 text-slate-800'
-                            }`}
-                          >
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                <span className="text-xs font-bold text-slate-900">{profile.name}</span>
-                                <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-indigo-100 text-indigo-700 capitalize">
-                                  {profile.tipo === 'macico' ? 'Maciço' : profile.tipo === 'bucha' ? 'Bucha' : 'Chapa'}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-2 text-[9px] text-slate-600 mt-0.5">
-                                <span className="font-mono text-indigo-600 font-bold">k={profile.k}</span>
-                                <span>•</span>
-                                <span className="font-mono text-emerald-700 font-bold">R$ {profile.defaultPriceKg.toFixed(2).replace('.', ',')}/Kg</span>
-                              </div>
-                            </div>
-                            {isSelected && (
-                              <Check className="w-4 h-4 text-indigo-600 shrink-0" />
-                            )}
-                          </button>
-                        );
-                      })
-                    ) : (
-                      <div className="text-center py-6 text-slate-400 text-xs">
-                        Nenhum material encontrado para "{constantSearchQuery}".
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Footer */}
-                  <div className="mt-2 pt-1.5 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-600 shrink-0">
-                    <span>{filteredMaterialProfiles.length} materiais disponíveis</span>
-                    <button
-                      type="button"
-                      onClick={() => setIsConstantOpen(false)}
-                      className="text-indigo-600 hover:text-indigo-800 font-bold cursor-pointer"
-                    >
-                      Fechar
-                    </button>
-                  </div>
-                </div>
-              )}
+              <MaterialAutocomplete
+                id="constante"
+                inputRef={constantInputRef}
+                value={itemConstantName}
+                options={autocompleteMaterialOptions}
+                placeholder="Digite ex: oxi, 1045, aço, bronze..."
+                currentK={currentFormConstant}
+                currentPriceKg={itemPricePerKg}
+                onChangeText={(txt) => {
+                  setItemConstantName(txt);
+                  setConstantSearchQuery(txt);
+                }}
+                onSelectOption={(opt) => {
+                  handleSelectMaterialProfile({
+                    id: opt.id,
+                    name: opt.nome,
+                    tipo: opt.tipo,
+                    k: opt.k,
+                    defaultPriceKg: opt.precoKg,
+                    description: opt.descricao || opt.nome
+                  });
+                }}
+                onAdvanceFocus={() => {
+                  if (itemGeometryType === 'chapa' || itemGeometryType === 'CHAPA_RETANGULO') {
+                    focusNextField('espessura');
+                  } else {
+                    focusNextField('diametro');
+                  }
+                }}
+                inputClassName="w-full pl-3 pr-8 py-2 bg-white border border-slate-300 hover:border-indigo-500 focus:border-indigo-600 rounded-xl text-xs font-bold text-slate-800 shadow-2xs transition-all outline-hidden"
+              />
             </div>
 
             {/* Diâmetro (Ø) / Diâmetro Ext. (Ø) */}
@@ -3000,221 +2957,42 @@ export default function SalesModule({
               />
             </div>
 
-            {/* Descrição do Produto / Serviço Combobox (Estilo Select2 Dinâmico) */}
+            {/* Descrição do Produto / Serviço com Componente Autocomplete Flutuante (z-50) */}
             <div className="field relative w-full md:flex-1 min-w-[220px] space-y-1" ref={descriptionComboboxRef}>
               <label htmlFor="descricao" className="block text-xs font-bold text-slate-700 flex items-center justify-between">
                 <span className="truncate">Descrição do Produto / Serviço *</span>
-                <button
-                  type="button"
-                  onClick={() => setIsDescriptionOpen(!isDescriptionOpen)}
-                  className="text-[10px] text-indigo-700 hover:text-indigo-900 font-bold bg-indigo-50 hover:bg-indigo-100 px-1.5 py-0.5 rounded transition-all flex items-center gap-1 cursor-pointer"
-                  title="Abrir catálogo com busca"
-                >
-                  <Search className="w-2.5 h-2.5" />
-                  {isDescriptionOpen ? 'Fechar Lista' : 'Combobox'}
-                </button>
+                <span className="text-[10px] font-mono text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded shrink-0">
+                  R$ {itemPricePerKg}/Kg • k={currentFormConstant}
+                </span>
               </label>
-              
-              <div className="relative">
-                <input
-                  ref={descriptionInputRef}
-                  type="text"
-                  id="descricao"
-                  placeholder="Ex: CONF DESENHO, TREFILADO SAE 1045, ALUMINIO..."
-                  value={itemDescription}
-                  autoComplete="off"
-                  onChange={handleDescriptionInputChange}
-                  onFocus={(e) => {
-                    if (e.target && typeof e.target.select === 'function') {
-                      e.target.select();
-                    }
-                    if (!itemDescription) {
-                      setIsDescriptionOpen(true);
-                    }
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault(); // Impede submeter o formulário
-                      setIsDescriptionOpen(false);
-                      
-                      // Mova o cursor para o final do texto
-                      const input = e.currentTarget;
-                      input.setSelectionRange(input.value.length, input.value.length);
 
-                      // Sincroniza preset se existir
-                      const matched = PRODUCT_DESCRIPTION_PRESETS.find(
-                        p => p.name.toLowerCase() === itemDescription.toLowerCase()
-                      );
-                      if (matched) {
-                        handleSelectDescriptionPreset(matched);
-                      }
-
-                      // Pula o foco para o próximo campo (observação)
-                      focusNextField('observacao');
-                    } else if (e.key === 'Escape') {
-                      setIsDescriptionOpen(false);
-                    }
-                  }}
-                  className="w-full pl-3 pr-8 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-hidden transition-all uppercase placeholder:normal-case placeholder:font-normal auto-inline"
-                  required
-                />
-                <button
-                  type="button"
-                  onClick={() => setIsDescriptionOpen(!isDescriptionOpen)}
-                  className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-indigo-600 rounded-lg transition-colors cursor-pointer"
-                  title="Abrir opções do combobox"
-                >
-                  <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${isDescriptionOpen ? 'rotate-180 text-indigo-600' : ''}`} />
-                </button>
-              </div>
-
-              {/* Combobox Dropdown Menu (Select2 style) */}
-              {isDescriptionOpen && (
-                <div className="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-2xl shadow-2xl z-50 p-2.5 max-h-[380px] overflow-hidden flex flex-col min-w-[320px] md:min-w-[420px] animate-in fade-in slide-in-from-top-2 duration-150">
-                  
-                  {/* Search bar inside dropdown */}
-                  <div className="relative mb-2 shrink-0">
-                    <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <input
-                      type="text"
-                      placeholder="Filtrar por nome, SAE, norma, material..."
-                      value={descriptionSearchQuery}
-                      onChange={(e) => setDescriptionSearchQuery(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          if (filteredDescriptionPresets.length > 0) {
-                            handleSelectDescriptionPreset(filteredDescriptionPresets[0]);
-                            focusNextField('observacao');
-                          } else {
-                            setIsDescriptionOpen(false);
-                            focusNextField('observacao');
-                          }
-                        }
-                      }}
-                      className="w-full pl-8 pr-7 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:outline-hidden focus:border-indigo-500 focus:bg-white"
-                      autoFocus
-                    />
-                    {descriptionSearchQuery && (
-                      <button
-                        type="button"
-                        onClick={() => setDescriptionSearchQuery('')}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Category filter tabs */}
-                  <div className="flex gap-1 overflow-x-auto pb-1.5 mb-1.5 border-b border-slate-100 shrink-0 text-[10px] no-scrollbar">
-                    {[
-                      { id: 'ALL', label: 'Todos' },
-                      { id: 'Trefilados & Eixos', label: 'Trefilados / Aços' },
-                      { id: 'Chapas & Desenhos', label: 'Chapas / Desenho' },
-                      { id: 'Inox', label: 'Inox' },
-                      { id: 'Bronze & Latão', label: 'Bronze & Latão' },
-                      { id: 'Tubos & Buchas', label: 'Tubos / Buchas' },
-                      { id: 'Alumínio & Plásticos', label: 'Alumínio / Plásticos' }
-                    ].map((cat) => (
-                      <button
-                        key={cat.id}
-                        type="button"
-                        onClick={() => setDescriptionCategoryFilter(cat.id)}
-                        className={`px-2 py-0.5 rounded-full font-bold whitespace-nowrap transition-colors cursor-pointer ${
-                          descriptionCategoryFilter === cat.id
-                            ? 'bg-indigo-600 text-white'
-                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                        }`}
-                      >
-                        {cat.label}
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* Custom text button if user typed something not in list */}
-                  {itemDescription.trim() && !PRODUCT_DESCRIPTION_PRESETS.some(p => p.name.toLowerCase() === itemDescription.toLowerCase()) && (
-                    <div className="mb-2 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsDescriptionOpen(false);
-                          focusNextField('observacao');
-                        }}
-                        className="w-full text-left p-2 rounded-xl bg-indigo-50/80 border border-indigo-200 hover:bg-indigo-100/80 transition-colors flex items-center justify-between gap-2 text-xs text-indigo-900 font-bold cursor-pointer"
-                      >
-                        <div className="truncate">
-                          <span className="text-[10px] text-indigo-600 font-normal block">Usar descrição digitada:</span>
-                          <span className="font-extrabold uppercase">"{itemDescription}"</span>
-                        </div>
-                        <Check className="w-4 h-4 text-indigo-600 shrink-0" />
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Preset Items List */}
-                  <div className="overflow-y-auto space-y-1 pr-1 flex-1 max-h-[220px]">
-                    {filteredDescriptionPresets.length > 0 ? (
-                      filteredDescriptionPresets.map((preset) => {
-                        const isSelected = itemDescription === preset.name;
-                        return (
-                          <button
-                            key={preset.name}
-                            type="button"
-                            onClick={() => {
-                              handleSelectDescriptionPreset(preset);
-                              focusNextField('observacao');
-                            }}
-                            className={`w-full text-left p-2 rounded-xl transition-all flex items-center justify-between gap-2.5 cursor-pointer border ${
-                              isSelected
-                                ? 'bg-indigo-50 border-indigo-300 text-indigo-950 font-bold shadow-2xs'
-                                : 'bg-white border-transparent hover:bg-slate-50 hover:border-slate-200 text-slate-800'
-                            }`}
-                          >
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                <span className="text-xs font-bold text-slate-900">{preset.name}</span>
-                                <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-indigo-100 text-indigo-700">
-                                  {preset.badge}
-                                </span>
-                              </div>
-                              <div className="text-[10px] text-slate-600 truncate mt-0.5">
-                                {preset.description}
-                              </div>
-                              <div className="flex items-center gap-2 text-[9px] text-slate-600 mt-0.5">
-                                <span className="font-mono text-indigo-600 font-bold">k={preset.constant}</span>
-                                <span>•</span>
-                                <span className="font-mono text-emerald-700 font-bold">R$ {preset.defaultPriceKg.toFixed(2).replace('.', ',')}/Kg</span>
-                                <span>•</span>
-                                <span className="capitalize text-slate-600">{preset.geometryType === 'macico' ? 'Maciço' : preset.geometryType === 'bucha' ? 'Bucha' : 'Chapa'}</span>
-                              </div>
-                            </div>
-                            {isSelected && (
-                              <Check className="w-4 h-4 text-indigo-600 shrink-0" />
-                            )}
-                          </button>
-                        );
-                      })
-                    ) : (
-                      <div className="text-center py-6 text-slate-400 text-xs">
-                        Nenhum produto encontrado para "{descriptionSearchQuery}".
-                      </div>
-                    )}
-                  </div>
-                  
-                  {/* Footer summary */}
-                  <div className="mt-2 pt-1.5 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-600 shrink-0">
-                    <span>{filteredDescriptionPresets.length} itens no catálogo</span>
-                    <button
-                      type="button"
-                      onClick={() => setIsDescriptionOpen(false)}
-                      className="text-indigo-600 hover:text-indigo-800 font-bold cursor-pointer"
-                    >
-                      Fechar
-                    </button>
-                  </div>
-                </div>
-              )}
+              <MaterialAutocomplete
+                id="descricao"
+                inputRef={descriptionInputRef}
+                value={itemDescription}
+                options={autocompleteMaterialOptions}
+                placeholder="Digite ex: oxi, 1045, aço, chapa..."
+                required
+                currentK={currentFormConstant}
+                currentPriceKg={itemPricePerKg}
+                onChangeText={(txt) => {
+                  setItemDescription(txt);
+                  setDescriptionSearchQuery(txt);
+                }}
+                onSelectOption={(opt) => {
+                  handleSelectDescriptionPreset({
+                    name: opt.nome,
+                    constantSelect: opt.id,
+                    constant: opt.k,
+                    defaultPriceKg: opt.precoKg,
+                    geometryType: opt.tipo
+                  });
+                }}
+                onAdvanceFocus={() => {
+                  focusNextAfterDescriptionSelect();
+                }}
+                inputClassName="w-full pl-3 pr-8 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-hidden transition-all uppercase placeholder:normal-case placeholder:font-normal auto-inline"
+              />
             </div>
 
           </div>

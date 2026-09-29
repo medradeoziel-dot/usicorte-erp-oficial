@@ -20,6 +20,7 @@ import {
   TabelaConstanteItem 
 } from '../utils/calculator';
 import { useMaterialsCatalog } from '../services/materialsService';
+import MaterialAutocomplete, { AutocompleteOption } from './MaterialAutocomplete';
 
 interface UsicorteCalculatorModalProps {
   isOpen: boolean;
@@ -58,7 +59,12 @@ export default function UsicorteCalculatorModal({
   // Form State
   const defaultLaserIdx = activeConstantes.findIndex(m => m.nome === 'LASER A36');
   const [materialIndex, setMaterialIndex] = useState<string>(() => defaultLaserIdx !== -1 ? String(defaultLaserIdx) : '19'); // Default: LASER A36
+  const [materialQuery, setMaterialQuery] = useState<string>('LASER A36');
+  const [isMaterialOpen, setIsMaterialOpen] = useState<boolean>(false);
+  const [materialHighlightIdx, setMaterialHighlightIdx] = useState<number>(0);
+
   const [tipo, setTipo] = useState<'chapa' | 'macico' | 'bucha'>('chapa');
+  const [kCustom, setKCustom] = useState<number>(0.00785);
   const [precoKg, setPrecoKg] = useState<string>('22');
   
   const [diametro, setDiametro] = useState<string>('0');
@@ -67,6 +73,8 @@ export default function UsicorteCalculatorModal({
   const [comprimento, setComprimento] = useState<string>('');
   const [quantidade, setQuantidade] = useState<string>('1');
   const [descricao, setDescricao] = useState<string>('LASER A36');
+  const [isDescricaoOpen, setIsDescricaoOpen] = useState<boolean>(false);
+  const [descricaoHighlightIdx, setDescricaoHighlightIdx] = useState<number>(0);
   const [observacao, setObservacao] = useState<string>('');
 
   const [showBitolasModal, setShowBitolasModal] = useState<boolean>(false);
@@ -74,22 +82,61 @@ export default function UsicorteCalculatorModal({
   const [addedMessage, setAddedMessage] = useState<boolean>(false);
   const [nestingMessage, setNestingMessage] = useState<boolean>(false);
 
-  // Refs for tab loop navigation
-  const constanteRef = useRef<HTMLSelectElement>(null);
+  // Refs for tab loop navigation and click outside
+  const materialBoxRef = useRef<HTMLDivElement>(null);
+  const descricaoBoxRef = useRef<HTMLDivElement>(null);
+  const constanteRef = useRef<HTMLInputElement>(null);
   const diametroRef = useRef<HTMLInputElement>(null);
   const espessuraRef = useRef<HTMLInputElement>(null);
   const larguraRef = useRef<HTMLInputElement>(null);
   const comprimentoRef = useRef<HTMLInputElement>(null);
+  const descricaoRef = useRef<HTMLInputElement>(null);
   const qtdRef = useRef<HTMLInputElement>(null);
   const precoKgRef = useRef<HTMLInputElement>(null);
   const btnAdicionarRef = useRef<HTMLButtonElement>(null);
 
+  // Close dropdowns on outside click
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (materialBoxRef.current && !materialBoxRef.current.contains(event.target as Node)) {
+        setIsMaterialOpen(false);
+      }
+      if (descricaoBoxRef.current && !descricaoBoxRef.current.contains(event.target as Node)) {
+        setIsDescricaoOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const normalizeSearch = (str: string) =>
+    (str || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim();
+
+  const matchesSearch = (queryRaw: string, item: TabelaConstanteItem) => {
+    const q = normalizeSearch(queryRaw);
+    if (!q) return true;
+    const target = normalizeSearch(`${item.nome} ${item.tipo} ${item.k} ${item.precoKg}`);
+    if (target.includes(q)) return true;
+    const tokens = q.split(/\s+/).filter(Boolean);
+    return tokens.length > 1 && tokens.every(t => target.includes(t));
+  };
+
+  const filteredMaterialsForConstante = activeConstantes
+    .map((mat, idx) => ({ mat, idx }))
+    .filter(({ mat }) => matchesSearch(materialQuery, mat));
+
+  const filteredMaterialsForDescricao = activeConstantes
+    .map((mat, idx) => ({ mat, idx }))
+    .filter(({ mat }) => matchesSearch(descricao, mat));
+
   // Sync material selection
-  const handleMaterialSelect = (indexStr: string) => {
+  const handleMaterialSelect = (indexStr: string, fromField: 'constante' | 'descricao' = 'constante') => {
     setMaterialIndex(indexStr);
     if (indexStr === "") {
-      setPrecoKg('');
-      setDescricao('');
       return;
     }
 
@@ -97,8 +144,12 @@ export default function UsicorteCalculatorModal({
     const mat = activeConstantes[idx];
     if (mat) {
       setTipo(mat.tipo);
+      setKCustom(mat.k);
       setPrecoKg(String(Math.ceil(mat.precoKg)));
+      setMaterialQuery(mat.nome);
       setDescricao(mat.nome);
+      setIsMaterialOpen(false);
+      setIsDescricaoOpen(false);
 
       if (mat.tipo === 'chapa') {
         setDiametro('0');
@@ -107,6 +158,19 @@ export default function UsicorteCalculatorModal({
         setLargura('');
       } else if (mat.tipo === 'bucha') {
         setLargura('');
+      }
+
+      if (fromField === 'constante') {
+        if (mat.tipo === 'chapa') focusNextField(espessuraRef);
+        else focusNextField(diametroRef);
+      } else {
+        const hasDims = mat.tipo === 'chapa' ? Boolean(espessura.trim()) : Boolean(diametro.trim() && diametro !== '0');
+        if (!hasDims) {
+          if (mat.tipo === 'chapa') focusNextField(espessuraRef);
+          else focusNextField(diametroRef);
+        } else {
+          focusNextField(qtdRef);
+        }
       }
     }
   };
@@ -119,7 +183,7 @@ export default function UsicorteCalculatorModal({
 
   // Calculations strictly per UsiCorte official formulas & Math.ceil rounding
   const selectedMat: TabelaConstanteItem | undefined = materialIndex !== "" ? activeConstantes[parseInt(materialIndex, 10)] : undefined;
-  const kConst = selectedMat ? selectedMat.k : 0.00785;
+  const kConst = selectedMat ? selectedMat.k : kCustom;
   const tipoMat = selectedMat ? selectedMat.tipo : tipo;
 
   const diaNum = parseDimensionToMm(diametro);
@@ -132,7 +196,7 @@ export default function UsicorteCalculatorModal({
   // Calculate Unit Weight
   let pesoUnitario = 0;
 
-  if (selectedMat) {
+  if (kConst >= 0) {
     if (tipoMat === 'chapa') {
       pesoUnitario = (espNum * largNum * compNum * kConst) / 1000;
     } else if (tipoMat === 'macico') {
@@ -338,30 +402,108 @@ export default function UsicorteCalculatorModal({
         {/* FORMULÁRIO COM NAVEGAÇÃO EM LOOP */}
         <form onSubmit={(e) => e.preventDefault()} className="space-y-4">
           
-          {/* SELEÇÃO DE MATERIAL (TABINDEX 1) */}
-          <div>
-            <label className="block text-xs text-gray-400 mb-1 font-medium">Constante / Material</label>
-            <select 
+          {/* SELEÇÃO DE MATERIAL (TABINDEX 1) COM AUTOCOMPLETE AUTOMÁTICO */}
+          <div className="relative" ref={materialBoxRef}>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-xs text-gray-400 font-medium">Constante / Material</label>
+              <span className="text-[10px] font-mono text-blue-400 bg-blue-950/60 border border-blue-800/50 px-1.5 py-0.2 rounded">
+                k={kConst} • R$ {precoKg || '0'}/Kg
+              </span>
+            </div>
+            <input
               ref={constanteRef}
-              tabIndex={1} 
-              value={materialIndex}
-              onChange={(e) => handleMaterialSelect(e.target.value)}
+              type="text"
+              tabIndex={1}
+              value={materialQuery}
+              autoComplete="off"
+              placeholder="Digite o material (ex: oxi, 1045, aço, laser...)"
+              onChange={(e) => {
+                const val = e.target.value;
+                setMaterialQuery(val);
+                setMaterialHighlightIdx(0);
+                setIsMaterialOpen(true);
+              }}
+              onInput={(e) => {
+                const val = (e.target as HTMLInputElement).value;
+                setMaterialQuery(val);
+                setMaterialHighlightIdx(0);
+                setIsMaterialOpen(true);
+              }}
+              onFocus={(e) => {
+                setIsMaterialOpen(true);
+                setMaterialHighlightIdx(0);
+                e.target.select();
+              }}
+              onClick={() => setIsMaterialOpen(true)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') {
+                if (e.key === 'ArrowDown') {
                   e.preventDefault();
-                  if (tipoMat === 'chapa') focusNextField(espessuraRef);
-                  else focusNextField(diametroRef);
+                  setIsMaterialOpen(true);
+                  if (filteredMaterialsForConstante.length > 0) {
+                    setMaterialHighlightIdx(prev => (prev + 1) % filteredMaterialsForConstante.length);
+                  }
+                } else if (e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  setIsMaterialOpen(true);
+                  if (filteredMaterialsForConstante.length > 0) {
+                    setMaterialHighlightIdx(prev => (prev - 1 + filteredMaterialsForConstante.length) % filteredMaterialsForConstante.length);
+                  }
+                } else if (e.key === 'Enter' || e.key === 'Tab') {
+                  if (isMaterialOpen && filteredMaterialsForConstante.length > 0) {
+                    e.preventDefault();
+                    const picked = filteredMaterialsForConstante[materialHighlightIdx] || filteredMaterialsForConstante[0];
+                    handleMaterialSelect(String(picked.idx), 'constante');
+                    return;
+                  }
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    setIsMaterialOpen(false);
+                    if (tipoMat === 'chapa') focusNextField(espessuraRef);
+                    else focusNextField(diametroRef);
+                  } else if (e.key === 'Tab') {
+                    setIsMaterialOpen(false);
+                  }
+                } else if (e.key === 'Escape') {
+                  setIsMaterialOpen(false);
                 }
               }}
-              className="w-full bg-[#131f37] border border-gray-700 rounded-lg p-2.5 text-white focus:outline-hidden focus:border-blue-500 font-medium cursor-pointer"
-            >
-              <option value="">Selecione o perfil/material...</option>
-              {activeConstantes.map((mat, index) => (
-                <option key={index} value={index}>
-                  {mat.nome} (k: {mat.k} | R$ {Math.ceil(mat.precoKg)}/kg)
-                </option>
-              ))}
-            </select>
+              className="w-full bg-[#131f37] border border-gray-700 rounded-lg p-2.5 text-white focus:outline-hidden focus:border-blue-500 font-bold"
+            />
+
+            {isMaterialOpen && (
+              <div className="absolute top-full left-0 w-full z-50 bg-slate-900 border border-slate-700 rounded-md shadow-2xl max-h-60 overflow-y-auto mt-1 p-1.5 space-y-1">
+                {filteredMaterialsForConstante.length > 0 ? (
+                  filteredMaterialsForConstante.map(({ mat, idx }, listIdx) => {
+                    const isHighlighted = listIdx === materialHighlightIdx;
+                    return (
+                      <button
+                        key={`${mat.nome}-${idx}`}
+                        type="button"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          handleMaterialSelect(String(idx), 'constante');
+                        }}
+                        onMouseEnter={() => setMaterialHighlightIdx(listIdx)}
+                        className={`w-full text-left px-3 py-2 rounded-lg text-xs flex items-center justify-between transition cursor-pointer ${
+                          isHighlighted
+                            ? 'bg-blue-600 text-white font-bold'
+                            : 'text-gray-200 hover:bg-[#1a2946]'
+                        }`}
+                      >
+                        <span>{mat.nome}</span>
+                        <span className={`font-mono text-[11px] ${isHighlighted ? 'text-blue-100' : 'text-blue-400'}`}>
+                          k: {mat.k} | R$ {Math.ceil(mat.precoKg)}/kg
+                        </span>
+                      </button>
+                    );
+                  })
+                ) : (
+                  <div className="px-3 py-2 text-xs text-gray-400">
+                    Personalizado: <strong className="text-white">"{materialQuery}"</strong> (mantendo k={kConst} | R$ {precoKg}/kg)
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* BOTÕES DE DIMENSÕES PADRÃO DA CHAPA */}
@@ -556,17 +698,106 @@ export default function UsicorteCalculatorModal({
 
           </div>
 
-          {/* DESCRIÇÃO (TABINDEX 6) */}
-          <div>
-            <label className="block text-xs text-gray-400 mb-1 font-medium">Descrição do Produto / Serviço</label>
+          {/* DESCRIÇÃO (TABINDEX 6) COM AUTOCOMPLETE AUTOMÁTICO */}
+          <div className="relative" ref={descricaoBoxRef}>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-xs text-gray-400 font-medium">Descrição do Produto / Serviço</label>
+              <span className="text-[10px] font-mono text-emerald-400">
+                k={kConst} • R$ {precoKg || '0'}/Kg
+              </span>
+            </div>
             <input 
+              ref={descricaoRef}
               type="text" 
               tabIndex={6} 
               value={descricao}
-              onChange={(e) => setDescricao(e.target.value)}
-              placeholder="Ex: Chapa Cortada Aço 1020..." 
-              className="w-full bg-[#131f37] border border-gray-700 rounded-lg p-2.5 text-white focus:outline-hidden focus:border-blue-500"
+              autoComplete="off"
+              onChange={(e) => {
+                const val = e.target.value;
+                setDescricao(val);
+                setDescricaoHighlightIdx(0);
+                setIsDescricaoOpen(true);
+              }}
+              onInput={(e) => {
+                const val = (e.target as HTMLInputElement).value;
+                setDescricao(val);
+                setDescricaoHighlightIdx(0);
+                setIsDescricaoOpen(true);
+              }}
+              onFocus={() => {
+                setIsDescricaoOpen(true);
+                setDescricaoHighlightIdx(0);
+              }}
+              onClick={() => setIsDescricaoOpen(true)}
+              onKeyDown={(e) => {
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  setIsDescricaoOpen(true);
+                  if (filteredMaterialsForDescricao.length > 0) {
+                    setDescricaoHighlightIdx(prev => (prev + 1) % filteredMaterialsForDescricao.length);
+                  }
+                } else if (e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  setIsDescricaoOpen(true);
+                  if (filteredMaterialsForDescricao.length > 0) {
+                    setDescricaoHighlightIdx(prev => (prev - 1 + filteredMaterialsForDescricao.length) % filteredMaterialsForDescricao.length);
+                  }
+                } else if (e.key === 'Enter' || e.key === 'Tab') {
+                  if (isDescricaoOpen && filteredMaterialsForDescricao.length > 0) {
+                    e.preventDefault();
+                    const picked = filteredMaterialsForDescricao[descricaoHighlightIdx] || filteredMaterialsForDescricao[0];
+                    handleMaterialSelect(String(picked.idx), 'descricao');
+                    return;
+                  }
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    setIsDescricaoOpen(false);
+                    focusNextField(qtdRef);
+                  } else if (e.key === 'Tab') {
+                    setIsDescricaoOpen(false);
+                  }
+                } else if (e.key === 'Escape') {
+                  setIsDescricaoOpen(false);
+                }
+              }}
+              placeholder="Digite ex: oxi, 1045, aço, chapa..." 
+              className="w-full bg-[#131f37] border border-gray-700 rounded-lg p-2.5 text-white focus:outline-hidden focus:border-blue-500 font-bold"
             />
+
+            {isDescricaoOpen && (
+              <div className="absolute top-full left-0 w-full z-50 bg-slate-900 border border-slate-700 rounded-md shadow-2xl max-h-60 overflow-y-auto mt-1 p-1.5 space-y-1">
+                {filteredMaterialsForDescricao.length > 0 ? (
+                  filteredMaterialsForDescricao.map(({ mat, idx }, listIdx) => {
+                    const isHighlighted = listIdx === descricaoHighlightIdx;
+                    return (
+                      <button
+                        key={`${mat.nome}-desc-${idx}`}
+                        type="button"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          handleMaterialSelect(String(idx), 'descricao');
+                        }}
+                        onMouseEnter={() => setDescricaoHighlightIdx(listIdx)}
+                        className={`w-full text-left px-3 py-2 rounded-lg text-xs flex items-center justify-between transition cursor-pointer ${
+                          isHighlighted
+                            ? 'bg-blue-600 text-white font-bold'
+                            : 'text-gray-200 hover:bg-[#1a2946]'
+                        }`}
+                      >
+                        <span>{mat.nome}</span>
+                        <span className={`font-mono text-[11px] ${isHighlighted ? 'text-blue-100' : 'text-emerald-400'}`}>
+                          k: {mat.k} | R$ {Math.ceil(mat.precoKg)}/kg
+                        </span>
+                      </button>
+                    );
+                  })
+                ) : (
+                  <div className="px-3 py-2 text-xs text-gray-400">
+                    Texto livre mantido: <strong className="text-white">"{descricao}"</strong> (preservando k={kConst} | R$ {precoKg}/kg)
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* OBSERVAÇÃO (TABINDEX 7) */}
