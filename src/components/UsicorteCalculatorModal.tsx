@@ -93,6 +93,7 @@ export default function UsicorteCalculatorModal({
   const larguraRef = useRef<HTMLInputElement>(null);
   const comprimentoRef = useRef<HTMLInputElement>(null);
   const descricaoRef = useRef<HTMLInputElement>(null);
+  const observacaoRef = useRef<HTMLInputElement>(null);
   const qtdRef = useRef<HTMLInputElement>(null);
   const pesoManualRef = useRef<HTMLInputElement>(null);
   const precoKgRef = useRef<HTMLInputElement>(null);
@@ -803,23 +804,20 @@ export default function UsicorteCalculatorModal({
                   setEspessura('');
                   setLargura('');
                   setComprimento('');
-                  if (normVal === 'retalho' || normVal === 'mao de obra') {
-                    if (normVal === 'retalho') {
-                      setMaterialQuery('RETALHO');
-                      setKCustom(0);
-                      setPrecoKg('15');
-                    } else if (normVal === 'mao de obra') {
-                      setMaterialQuery('MÃO DE OBRA');
-                      setKCustom(0);
-                    }
-                    focusNextField(qtdRef);
+                  if (normVal === 'retalho') {
+                    setMaterialQuery('RETALHO');
+                    setKCustom(0);
+                    setPrecoKg('15');
+                  } else if (normVal === 'mao de obra') {
+                    setMaterialQuery('MÃO DE OBRA');
+                    setKCustom(0);
                   }
                 }
               }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   e.preventDefault();
-                  focusNextField(qtdRef);
+                  focusNextField(observacaoRef);
                 }
               }}
               placeholder="Preenchido pelo material ou digite manualmente..." 
@@ -831,10 +829,18 @@ export default function UsicorteCalculatorModal({
           <div>
             <label className="block text-xs text-gray-400 mb-1 font-medium">Observação</label>
             <input 
+              ref={observacaoRef}
               type="text" 
               tabIndex={7} 
               value={observacao}
+              onFocus={(e) => e.target.select()}
               onChange={(e) => setObservacao(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  focusNextField(qtdRef);
+                }
+              }}
               placeholder="Ex: CONF DESENHO, NYLON, TREFILADO SAE 1045..." 
               className="w-full bg-[#131f37] border border-gray-700 rounded-lg p-2.5 text-white focus:outline-hidden focus:border-blue-500"
             />

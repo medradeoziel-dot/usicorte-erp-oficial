@@ -1210,27 +1210,9 @@ export default function SalesModule({
     setItemDescription(value);
   };
 
-  // Helper para focar no próximo campo lógico após selecionar material na Descrição (Quantidade ou Espessura)
-  const focusNextAfterDescriptionSelect = (geomType?: GeometryType, matText?: string, descText?: string) => {
-    if (isRetalhoOrMaoDeObra(matText ?? itemConstantName, descText ?? itemDescription)) {
-      focusNextField('qtd');
-      return;
-    }
-    const targetGeom = geomType || itemGeometryType;
-    const hasDimensions = Boolean(
-      (targetGeom === 'chapa' || targetGeom === 'CHAPA_RETANGULO')
-        ? itemThickness.trim()
-        : itemDiameter.trim()
-    );
-    if (!hasDimensions) {
-      if (targetGeom === 'chapa' || targetGeom === 'CHAPA_RETANGULO') {
-        focusNextField('espessura');
-      } else {
-        focusNextField('diametro');
-      }
-    } else {
-      focusNextField('qtd');
-    }
+  // Helper para focar no próximo campo lógico após a Descrição -> vai para Observação
+  const focusNextAfterDescriptionSelect = () => {
+    focusNextField('observacao');
   };
 
   // Handle selection from Description Combobox
@@ -1273,7 +1255,7 @@ export default function SalesModule({
       setItemWidthLength('');
       setItemManualUnitWeightKg('0');
       setItemUnitPrice(precoVal > 0 ? precoVal.toFixed(2).replace('.', ',') : '');
-      focusNextField('qtd');
+      focusNextField('observacao');
       return;
     }
 
@@ -1287,7 +1269,7 @@ export default function SalesModule({
       itemThickness
     );
 
-    focusNextAfterDescriptionSelect(tipoVal, nameVal, descVal);
+    focusNextField('observacao');
   };
 
   // Combina todos os materiais cadastrados no Supabase (prioridade máxima) com presets para busca unificada
@@ -3224,23 +3206,20 @@ export default function SalesModule({
                     setItemWidthMm('');
                     setItemLengthMm('');
                     setItemWidthLength('');
-                    if (normTxt === 'retalho' || normTxt === 'mao de obra') {
-                      if (normTxt === 'retalho') {
-                        setItemConstantName('RETALHO');
-                        setItemConstant('0');
-                        setItemPricePerKg('15,00');
-                      } else if (normTxt === 'mao de obra') {
-                        setItemConstantName('MÃO DE OBRA');
-                        setItemConstant('0');
-                      }
-                      focusNextField('qtd');
+                    if (normTxt === 'retalho') {
+                      setItemConstantName('RETALHO');
+                      setItemConstant('0');
+                      setItemPricePerKg('15,00');
+                    } else if (normTxt === 'mao de obra') {
+                      setItemConstantName('MÃO DE OBRA');
+                      setItemConstant('0');
                     }
                   }
                 }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     e.preventDefault();
-                    focusNextAfterDescriptionSelect();
+                    focusNextField('observacao');
                   }
                 }}
                 className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-hidden transition-all placeholder:normal-case placeholder:font-normal"
@@ -3281,6 +3260,7 @@ export default function SalesModule({
                 {itemDrawingImage && (
                   <button
                     type="button"
+                    tabIndex={-1}
                     onClick={() => setItemDrawingImage(null)}
                     className="text-[10px] text-rose-600 hover:text-rose-800 font-bold cursor-pointer"
                   >
@@ -3291,6 +3271,7 @@ export default function SalesModule({
 
               <input
                 type="file"
+                tabIndex={-1}
                 ref={itemFileInputRef}
                 accept="image/*,.dxf"
                 className="hidden"
@@ -3330,6 +3311,7 @@ export default function SalesModule({
               <div className="flex items-center gap-2">
                 <button
                   type="button"
+                  tabIndex={-1}
                   onClick={() => itemFileInputRef.current?.click()}
                   className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 border rounded-xl text-xs font-semibold transition-all cursor-pointer shadow-2xs ${
                     itemDrawingImage
