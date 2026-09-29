@@ -58,7 +58,11 @@ export function mapSupabaseToItem(record: any): MaterialItem {
   const nomeUpper = (record.nome || record.name || '').trim().toUpperCase();
 
   let rawDescricao = record.descricao != null ? String(record.descricao).trim() : '';
-  if (rawDescricao && /\(k=.*\|\s*R\$.*\/Kg\)$/i.test(rawDescricao)) {
+  if (
+    rawDescricao &&
+    (/\(\s*k\s*=/i.test(rawDescricao) ||
+     /chapa cortada em formato retangular/i.test(rawDescricao))
+  ) {
     rawDescricao = '';
   }
   

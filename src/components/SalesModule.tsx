@@ -726,7 +726,7 @@ export default function SalesModule({
       const nameVal = material ? material.nome : (registered ? registered.name : selectedMaterial.name);
       const descVal = (material && material.descricao && material.descricao.trim() !== '')
         ? material.descricao.trim()
-        : (selectedMaterial.description && selectedMaterial.description.trim() !== '' ? selectedMaterial.description.trim() : nameVal);
+        : nameVal;
       const precoKgStr = precoVal.toFixed(2).replace('.', ',');
       const kStr = kVal.toString();
 
@@ -1026,13 +1026,11 @@ export default function SalesModule({
     const precoKgStr = precoVal.toFixed(2).replace('.', ',');
     const kStr = kVal.toString();
 
-    // b) Preenche automaticamente a caixa de texto "Descrição do Produto / Serviço" com material.descricao
-    // c) Se material.descricao estiver vazio ou não definido, utiliza material.nome como valor predefinido
+    // b) Preenche automaticamente a caixa de texto "Descrição do Produto / Serviço" APENAS com material.descricao
+    // c) Se material.descricao estiver vazio ou nulo, utiliza apenas material.nome (sem sufixos ou prefixos)
     const descricaoPreenchida = (material && material.descricao && material.descricao.trim() !== '')
       ? material.descricao.trim()
-      : (profile.description && profile.description.trim() !== '' && !/\(k=.*R\$.*\/Kg\)$/i.test(profile.description)
-          ? profile.description.trim()
-          : nameVal);
+      : nameVal;
 
     setItemConstantName(nameVal);
     setItemConstantSelect(material ? material.id : profile.id);
@@ -1247,9 +1245,7 @@ export default function SalesModule({
     const nameVal = material ? material.nome : (registered ? registered.name : presetName);
     const descVal = (material && material.descricao && material.descricao.trim() !== '')
       ? material.descricao.trim()
-      : (preset.descricao && preset.descricao.trim() !== '' && !/\(k=.*R\$.*\/Kg\)$/i.test(preset.descricao)
-          ? preset.descricao.trim()
-          : nameVal);
+      : nameVal;
     const kVal = material ? material.k : (registered ? registered.k : (preset.constant ?? 0.00785));
     const precoVal = material ? material.precoKg : (registered ? registered.precoKg : (preset.defaultPriceKg ?? 22.00));
     const tipoVal = material ? material.tipo : (registered ? registered.tipo : (preset.geometryType || 'chapa'));
@@ -1310,31 +1306,17 @@ export default function SalesModule({
     ...PRODUCT_DESCRIPTION_PRESETS.filter(p => !activeMaterialProfiles.some(m => normalizeSearchText(m.name) === normalizeSearchText(p.name)))
   ];
 
-  // Lista unificada para o componente MaterialAutocomplete (buscando em nome, sae, norma e descricao da tabela materiais)
-  const autocompleteMaterialOptions: AutocompleteOption[] = [
-    ...materials.map(m => ({
-      id: m.id,
-      nome: m.nome,
-      tipo: m.tipo,
-      k: m.k,
-      precoKg: m.precoKg,
-      sae: m.sae || '',
-      norma: m.norma || '',
-      descricao: m.descricao ? m.descricao.trim() : ''
-    })),
-    ...PRODUCT_DESCRIPTION_PRESETS.filter(
-      p => !materials.some(m => normalizeSearchText(m.nome) === normalizeSearchText(p.name))
-    ).map(p => ({
-      id: p.constantSelect || p.name,
-      nome: p.name,
-      tipo: p.geometryType,
-      k: p.constant,
-      precoKg: p.defaultPriceKg,
-      sae: (p.keywords || []).join(' '),
-      norma: p.category,
-      descricao: p.description
-    }))
-  ];
+  // Lista estritamente vinculada ao Cadastro de Produtos (tabela materiais do Supabase)
+  const autocompleteMaterialOptions: AutocompleteOption[] = materials.map(m => ({
+    id: m.id,
+    nome: m.nome,
+    tipo: m.tipo,
+    k: m.k,
+    precoKg: m.precoKg,
+    sae: m.sae || '',
+    norma: m.norma || '',
+    descricao: m.descricao ? m.descricao.trim() : ''
+  }));
 
   // Filter description presets em tempo real (suporta "oxi", "1045", "aço" com ou sem acento)
   const filteredDescriptionPresets = allDescriptionOptions.filter(preset => {
@@ -3007,7 +2989,7 @@ export default function SalesModule({
                   );
                   const descAuto = (material && material.descricao && material.descricao.trim() !== '')
                     ? material.descricao.trim()
-                    : (opt.descricao && opt.descricao.trim() !== '' ? opt.descricao.trim() : opt.nome);
+                    : (material ? material.nome : opt.nome);
                   handleSelectMaterialProfile({
                     id: opt.id,
                     name: opt.nome,
@@ -3214,7 +3196,7 @@ export default function SalesModule({
               />
             </div>
 
-            {/* Descrição do Produto / Serviço com Componente Autocomplete Flutuante (z-50) */}
+            {/* Descrição do Produto / Serviço (100% limpa do Cadastro de Produtos + Edição Manual Livre) */}
             <div className="field relative w-full md:flex-1 min-w-[220px] space-y-1" ref={descriptionComboboxRef}>
               <label htmlFor="descricao" className="block text-xs font-bold text-slate-700 flex items-center justify-between">
                 <span className="truncate">Descrição do Produto / Serviço *</span>
@@ -3223,18 +3205,18 @@ export default function SalesModule({
                 </span>
               </label>
 
-              <MaterialAutocomplete
+              <input
                 id="descricao"
-                inputRef={descriptionInputRef}
+                ref={descriptionInputRef}
+                type="text"
                 value={itemDescription}
-                options={autocompleteMaterialOptions}
-                placeholder="Digite ex: oxi, 1045, aço, chapa..."
+                placeholder="Preenchido pelo material ou digite manualmente..."
                 required
-                currentK={currentFormConstant}
-                currentPriceKg={itemPricePerKg}
-                onChangeText={(txt) => {
+                autoComplete="off"
+                onFocus={(e) => e.target.select()}
+                onChange={(e) => {
+                  const txt = e.target.value;
                   setItemDescription(txt);
-                  setDescriptionSearchQuery(txt);
                   const normTxt = txt.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
                   if (isRetalhoOrMaoDeObra(itemConstantName, txt)) {
                     setItemDiameter('');
@@ -3255,25 +3237,13 @@ export default function SalesModule({
                     }
                   }
                 }}
-                onSelectOption={(opt) => {
-                  const material = materials.find(
-                    m => m.id === opt.id || m.nome.toLowerCase() === opt.nome.toLowerCase()
-                  );
-                  handleSelectDescriptionPreset({
-                    name: opt.nome,
-                    descricao: (material && material.descricao && material.descricao.trim() !== '')
-                      ? material.descricao.trim()
-                      : (opt.descricao && opt.descricao.trim() !== '' ? opt.descricao.trim() : opt.nome),
-                    constantSelect: opt.id,
-                    constant: opt.k,
-                    defaultPriceKg: opt.precoKg,
-                    geometryType: opt.tipo
-                  });
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    focusNextAfterDescriptionSelect();
+                  }
                 }}
-                onAdvanceFocus={() => {
-                  focusNextAfterDescriptionSelect();
-                }}
-                inputClassName="w-full pl-3 pr-8 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-hidden transition-all uppercase placeholder:normal-case placeholder:font-normal auto-inline"
+                className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-hidden transition-all placeholder:normal-case placeholder:font-normal"
               />
             </div>
 

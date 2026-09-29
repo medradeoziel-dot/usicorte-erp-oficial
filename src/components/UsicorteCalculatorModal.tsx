@@ -150,11 +150,11 @@ export default function UsicorteCalculatorModal({
       const material = materials.find(
         m => m.nome.trim().toLowerCase() === mat.nome.trim().toLowerCase()
       );
-      // b) Preenche automaticamente "Descrição do Produto / Serviço" com material.descricao
-      // c) Se material.descricao estiver vazio ou não definido, utiliza material.nome
+      // b) Preenche automaticamente "Descrição do Produto / Serviço" APENAS com material.descricao
+      // c) Se material.descricao estiver vazio ou nulo, utiliza apenas material.nome
       const descFinal = (material && material.descricao && material.descricao.trim() !== '')
         ? material.descricao.trim()
-        : (mat.descricao && mat.descricao.trim() !== '' ? mat.descricao.trim() : mat.nome);
+        : (material ? material.nome : mat.nome);
 
       setTipo(mat.tipo);
       setKCustom(mat.k);
@@ -779,7 +779,7 @@ export default function UsicorteCalculatorModal({
 
           </div>
 
-          {/* DESCRIÇÃO (TABINDEX 6) COM AUTOCOMPLETE AUTOMÁTICO */}
+          {/* DESCRIÇÃO (TABINDEX 6) - PREENCHIDA A PARTIR DO CADASTRO DE PRODUTOS E EDITÁVEL MANUALMENTE */}
           <div className="relative" ref={descricaoBoxRef}>
             <div className="flex items-center justify-between mb-1">
               <label className="block text-xs text-gray-400 font-medium">Descrição do Produto / Serviço</label>
@@ -793,11 +793,10 @@ export default function UsicorteCalculatorModal({
               tabIndex={6} 
               value={descricao}
               autoComplete="off"
+              onFocus={(e) => e.target.select()}
               onChange={(e) => {
                 const val = e.target.value;
                 setDescricao(val);
-                setDescricaoHighlightIdx(0);
-                setIsDescricaoOpen(true);
                 const normVal = val.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
                 if (isRetalhoOrMaoDeObra(materialQuery, val)) {
                   setDiametro('');
@@ -805,7 +804,6 @@ export default function UsicorteCalculatorModal({
                   setLargura('');
                   setComprimento('');
                   if (normVal === 'retalho' || normVal === 'mao de obra') {
-                    setIsDescricaoOpen(false);
                     if (normVal === 'retalho') {
                       setMaterialQuery('RETALHO');
                       setKCustom(0);
@@ -818,86 +816,15 @@ export default function UsicorteCalculatorModal({
                   }
                 }
               }}
-              onInput={(e) => {
-                const val = (e.target as HTMLInputElement).value;
-                setDescricao(val);
-                setDescricaoHighlightIdx(0);
-                setIsDescricaoOpen(true);
-              }}
-              onFocus={() => {
-                setIsDescricaoOpen(true);
-                setDescricaoHighlightIdx(0);
-              }}
-              onClick={() => setIsDescricaoOpen(true)}
               onKeyDown={(e) => {
-                if (e.key === 'ArrowDown') {
+                if (e.key === 'Enter') {
                   e.preventDefault();
-                  setIsDescricaoOpen(true);
-                  if (filteredMaterialsForDescricao.length > 0) {
-                    setDescricaoHighlightIdx(prev => (prev + 1) % filteredMaterialsForDescricao.length);
-                  }
-                } else if (e.key === 'ArrowUp') {
-                  e.preventDefault();
-                  setIsDescricaoOpen(true);
-                  if (filteredMaterialsForDescricao.length > 0) {
-                    setDescricaoHighlightIdx(prev => (prev - 1 + filteredMaterialsForDescricao.length) % filteredMaterialsForDescricao.length);
-                  }
-                } else if (e.key === 'Enter' || e.key === 'Tab') {
-                  if (isDescricaoOpen && filteredMaterialsForDescricao.length > 0) {
-                    e.preventDefault();
-                    const picked = filteredMaterialsForDescricao[descricaoHighlightIdx] || filteredMaterialsForDescricao[0];
-                    handleMaterialSelect(String(picked.idx), 'descricao');
-                    return;
-                  }
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    setIsDescricaoOpen(false);
-                    focusNextField(qtdRef);
-                  } else if (e.key === 'Tab') {
-                    setIsDescricaoOpen(false);
-                  }
-                } else if (e.key === 'Escape') {
-                  setIsDescricaoOpen(false);
+                  focusNextField(qtdRef);
                 }
               }}
-              placeholder="Digite ex: oxi, 1045, aço, chapa..." 
+              placeholder="Preenchido pelo material ou digite manualmente..." 
               className="w-full bg-[#131f37] border border-gray-700 rounded-lg p-2.5 text-white focus:outline-hidden focus:border-blue-500 font-bold"
             />
-
-            {isDescricaoOpen && (
-              <div className="absolute top-full left-0 w-full z-50 bg-slate-900 border border-slate-700 rounded-md shadow-2xl max-h-60 overflow-y-auto mt-1 p-1.5 space-y-1">
-                {filteredMaterialsForDescricao.length > 0 ? (
-                  filteredMaterialsForDescricao.map(({ mat, idx }, listIdx) => {
-                    const isHighlighted = listIdx === descricaoHighlightIdx;
-                    return (
-                      <button
-                        key={`${mat.nome}-desc-${idx}`}
-                        type="button"
-                        onMouseDown={(e) => {
-                          e.preventDefault();
-                          handleMaterialSelect(String(idx), 'descricao');
-                        }}
-                        onMouseEnter={() => setDescricaoHighlightIdx(listIdx)}
-                        className={`w-full text-left px-3 py-2 rounded-lg text-xs flex items-center justify-between transition cursor-pointer ${
-                          isHighlighted
-                            ? 'bg-blue-600 text-white font-bold'
-                            : 'text-gray-200 hover:bg-[#1a2946]'
-                        }`}
-                      >
-                        <span>{mat.nome}</span>
-                        <span className={`font-mono text-[11px] ${isHighlighted ? 'text-blue-100' : 'text-emerald-400'}`}>
-                          k: {mat.k} | R$ {Math.ceil(mat.precoKg)}/kg
-                        </span>
-                      </button>
-                    );
-                  })
-                ) : (
-                  <div className="px-3 py-2 text-xs text-gray-400">
-                    Texto livre mantido: <strong className="text-white">"{descricao}"</strong> (preservando k={kConst} | R$ {precoKg}/kg)
-                  </div>
-                )}
-              </div>
-            )}
           </div>
 
           {/* OBSERVAÇÃO (TABINDEX 7) */}
