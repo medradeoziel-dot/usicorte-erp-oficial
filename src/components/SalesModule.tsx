@@ -23,6 +23,7 @@ import {
   calculateItemSubtotal, 
   calculateItemWeightKg,
   calculateItemUnitPrice,
+  isRetalhoOrMaoDeObra,
   detectGeometryTypeFromText,
   parseDimensionStrings,
   parseDiameterOrThicknessMm,
@@ -407,6 +408,7 @@ export default function SalesModule({
   const [itemLengthMm, setItemLengthMm] = useState<string>('');
   const [itemUnitPrice, setItemUnitPrice] = useState<string>('');
   const [itemQuantity, setItemQuantity] = useState<string>('1');
+  const [itemManualUnitWeightKg, setItemManualUnitWeightKg] = useState<string>('1');
   const [itemNotes, setItemNotes] = useState<string>('');
   const [itemDrawingImage, setItemDrawingImage] = useState<string | null>(null);
   const [isManualUnitPrice, setIsManualUnitPrice] = useState<boolean>(false);
@@ -536,22 +538,43 @@ export default function SalesModule({
               grandTotal: Number(q.valor_total) || 0,
               createdAt: safeCreatedAt,
               updatedAt: safeUpdatedAt,
-              items: (q.cotacao_itens || []).map((it, idx) => ({
-                id: String(it.id || idx),
-                date: safeDateIso,
-                companyName: q.cliente_nome || 'Cliente Balcão',
-                description: it.descricao || it.produto || 'Item',
-                constant: '0.00785',
-                constantName: it.produto || 'Material',
-                measure: it.medida || '',
-                diameter: '',
-                widthLength: '',
-                unitPrice: Number(it.valor_unitario) || 0,
-                quantity: Number(it.quantidade) || 1,
-                subtotal: Number(it.valor_total) || ((Number(it.valor_unitario) || 0) * (Number(it.quantidade) || 1)),
-                notes: it.observacao || '',
-                drawingImage: it.desenho_url || undefined
-              }))
+              items: (q.cotacao_itens || []).map((it: any, idx: number) => {
+                const qty = Number(it.quantidade) || 1;
+                const medidaStr = String(it.medida || '').trim();
+                const isSpec = isRetalhoOrMaoDeObra(it.produto || it.material, it.descricao || it.produto);
+                const kgMatch = medidaStr.match(/^([\d.,]+)\s*kg$/i);
+                const parsedKg = !isSpec && kgMatch ? parseFloat(kgMatch[1].replace(/\./g, '').replace(',', '.')) : 0;
+                const unitW = isSpec
+                  ? 0
+                  : (it.peso_unitario !== undefined && it.peso_unitario !== null
+                      ? Number(it.peso_unitario)
+                      : (parsedKg > 0 ? parsedKg : undefined));
+                const totalW = isSpec
+                  ? 0
+                  : (it.peso_total !== undefined && it.peso_total !== null
+                      ? Number(it.peso_total)
+                      : (unitW !== undefined ? Number((unitW * qty).toFixed(3)) : undefined));
+
+                return {
+                  id: String(it.id || idx),
+                  date: safeDateIso,
+                  companyName: q.cliente_nome || 'Cliente Balcão',
+                  description: it.descricao || it.produto || 'Item',
+                  constant: isSpec ? '0' : '0.00785',
+                  constantName: it.produto || 'Material',
+                  measure: isSpec || kgMatch ? '—' : medidaStr,
+                  diameter: '',
+                  widthLength: isSpec ? '—' : '',
+                  unitWeightKg: unitW,
+                  totalWeightKg: totalW,
+                  pesoTotal: totalW,
+                  unitPrice: Number(it.valor_unitario) || 0,
+                  quantity: qty,
+                  subtotal: Number(it.valor_total) || ((Number(it.valor_unitario) || 0) * qty),
+                  notes: it.observacao || '',
+                  drawingImage: it.desenho_url || undefined
+                };
+              })
             };
           });
 
@@ -754,38 +777,53 @@ export default function SalesModule({
   };
 
   // Real-time calculation of item dimensions, weight and cascading price
+  const isSpecialItem = isRetalhoOrMaoDeObra(itemConstantName, itemDescription);
   const currentFormPriceKg = parseNumberBR(itemPricePerKg);
-  const currentFormConstant = normalizeConstant(itemConstant);
+  const currentFormConstant = isSpecialItem ? 0 : normalizeConstant(itemConstant);
   const currentFormQty = parseFloat(itemQuantity) || 0;
+  const effectiveQtyForCalc = currentFormQty > 0 ? currentFormQty : 1;
 
   // Derive dimensions for real-time live weight
   const parsedDims = parseDimensionStrings(itemWidthLength, itemDiameter, itemThickness);
-  const effectiveDiameterMm = parseDiameterOrThicknessMm(itemDiameter, itemThickness);
-  const effectiveThicknessMm = parseDiameterOrThicknessMm(itemThickness, itemDiameter);
-  const effectiveWidthMm = parseDimensionToMm(itemWidthMm) || parsedDims.parsedWidthMm || 0;
-  const effectiveLengthMm = parseDimensionToMm(itemLengthMm) || parsedDims.parsedLengthMm || 0;
+  const effectiveDiameterMm = isSpecialItem ? 0 : parseDiameterOrThicknessMm(itemDiameter, itemThickness);
+  const effectiveThicknessMm = isSpecialItem ? 0 : parseDiameterOrThicknessMm(itemThickness, itemDiameter);
+  const effectiveWidthMm = isSpecialItem ? 0 : (parseDimensionToMm(itemWidthMm) || parsedDims.parsedWidthMm || 0);
+  const effectiveLengthMm = isSpecialItem ? 0 : (parseDimensionToMm(itemLengthMm) || parsedDims.parsedLengthMm || 0);
 
-  const { unitWeightKg: currentFormUnitWeightKg, totalWeightKg: currentFormTotalWeightKg } = calculateItemWeightKg({
+  const { unitWeightKg: geoFormUnitWeightKg, totalWeightKg: geoFormTotalWeightKg } = calculateItemWeightKg({
     geometryType: itemGeometryType,
     constant: currentFormConstant,
     diameterMm: effectiveDiameterMm,
     thicknessMm: effectiveThicknessMm,
     widthMm: effectiveWidthMm,
     lengthMm: effectiveLengthMm,
-    quantity: currentFormQty > 0 ? currentFormQty : 1,
+    quantity: effectiveQtyForCalc,
     diameterStr: itemDiameter,
     thicknessStr: itemThickness
   });
 
-  // Theoretical unit price calculated in cascade: Peso Unitário (Kg) * Preço/Kg (R$) arredondando para cima inteiro (Math.ceil)
-  const calculatedUnitPrice = currentFormUnitWeightKg > 0 && currentFormPriceKg > 0
-    ? Math.ceil(currentFormUnitWeightKg * currentFormPriceKg)
-    : 0;
+  const currentFormUnitWeightKg = isSpecialItem ? 0 : geoFormUnitWeightKg;
+  const currentFormTotalWeightKg = isSpecialItem ? 0 : geoFormTotalWeightKg;
 
-  // Live unit price for form calculations (prioritizes active input or cascading result, arredondando para cima inteiro)
-  const rawFormUnitPrice = parseNumberBR(itemUnitPrice) || calculatedUnitPrice;
-  const currentFormUnitPrice = Math.ceil(rawFormUnitPrice);
-  const currentFormSubtotal = calculateItemSubtotal(currentFormUnitPrice, currentFormQty > 0 ? currentFormQty : 1);
+  // Theoretical unit price calculated in cascade:
+  // For RETALHO / MÃO DE OBRA / SERVIÇOS (cálculo direto):
+  // • Peso Unitário = 0.000 Kg e Peso Total = 0.000 Kg
+  // • Valor Unitário (R$) = Preço Unitário digitado
+  // • Subtotal (R$) = Quantidade × Valor Unitário (R$)
+  const calculatedUnitPrice = isSpecialItem
+    ? (currentFormPriceKg > 0 ? currentFormPriceKg : 0)
+    : (currentFormUnitWeightKg > 0 && currentFormPriceKg > 0
+        ? Math.ceil(currentFormUnitWeightKg * currentFormPriceKg)
+        : 0);
+
+  // Live unit price for form calculations (prioritizes direct price for special items)
+  const rawFormUnitPrice = isSpecialItem
+    ? (currentFormPriceKg > 0 ? currentFormPriceKg : parseNumberBR(itemUnitPrice))
+    : (parseNumberBR(itemUnitPrice) || calculatedUnitPrice);
+  const currentFormUnitPrice = isSpecialItem ? rawFormUnitPrice : Math.ceil(rawFormUnitPrice);
+  const currentFormSubtotal = isSpecialItem
+    ? Number((effectiveQtyForCalc * currentFormUnitPrice).toFixed(2))
+    : calculateItemSubtotal(currentFormUnitPrice, effectiveQtyForCalc);
 
   // Helper to recompute and update the Unit Price (R$) field whenever dimensions, constant or price/kg changes
   const updateCascadingUnitPrice = (
@@ -798,6 +836,10 @@ export default function SalesModule({
     thicknessStr: string = ''
   ) => {
     const pKg = parseNumberBR(priceKgStr);
+    if (isRetalhoOrMaoDeObra(itemConstantName, itemDescription)) {
+      setItemUnitPrice(pKg > 0 ? pKg.toFixed(2).replace('.', ',') : '');
+      return;
+    }
     const k = normalizeConstant(constantStr);
     const parsedThick = parseDiameterOrThicknessMm(thicknessStr, diameterStr);
     const parsedDia = parseDiameterOrThicknessMm(diameterStr, thicknessStr);
@@ -1000,6 +1042,22 @@ export default function SalesModule({
     setItemDescription(descricaoPreenchida);
     setIsManualUnitPrice(false);
 
+    const isSpec = isRetalhoOrMaoDeObra(nameVal, descricaoPreenchida);
+    if (isSpec) {
+      setItemDiameter('');
+      setItemThickness('');
+      setItemWidthMm('');
+      setItemLengthMm('');
+      setItemWidthLength('');
+      setItemManualUnitWeightKg('0');
+      setItemUnitPrice(precoVal > 0 ? precoVal.toFixed(2).replace('.', ',') : '');
+      setIsConstantOpen(false);
+      setConstantSearchQuery('');
+      setConstantHighlightIndex(0);
+      focusNextField('qtd');
+      return;
+    }
+
     // Execute o cálculo automático do valor do item utilizando a constante 'k' e o 'preco_kg' oficiais do cadastro
     updateCascadingUnitPrice(
       precoKgStr,
@@ -1155,7 +1213,11 @@ export default function SalesModule({
   };
 
   // Helper para focar no próximo campo lógico após selecionar material na Descrição (Quantidade ou Espessura)
-  const focusNextAfterDescriptionSelect = (geomType?: GeometryType) => {
+  const focusNextAfterDescriptionSelect = (geomType?: GeometryType, matText?: string, descText?: string) => {
+    if (isRetalhoOrMaoDeObra(matText ?? itemConstantName, descText ?? itemDescription)) {
+      focusNextField('qtd');
+      return;
+    }
     const targetGeom = geomType || itemGeometryType;
     const hasDimensions = Boolean(
       (targetGeom === 'chapa' || targetGeom === 'CHAPA_RETANGULO')
@@ -1207,6 +1269,18 @@ export default function SalesModule({
     setDescriptionHighlightIndex(0);
     setIsDescriptionOpen(false);
 
+    if (isRetalhoOrMaoDeObra(nameVal, descVal)) {
+      setItemDiameter('');
+      setItemThickness('');
+      setItemWidthMm('');
+      setItemLengthMm('');
+      setItemWidthLength('');
+      setItemManualUnitWeightKg('0');
+      setItemUnitPrice(precoVal > 0 ? precoVal.toFixed(2).replace('.', ',') : '');
+      focusNextField('qtd');
+      return;
+    }
+
     updateCascadingUnitPrice(
       precoKgStr,
       kStr,
@@ -1217,7 +1291,7 @@ export default function SalesModule({
       itemThickness
     );
 
-    focusNextAfterDescriptionSelect(tipoVal);
+    focusNextAfterDescriptionSelect(tipoVal, nameVal, descVal);
   };
 
   // Combina todos os materiais cadastrados no Supabase (prioridade máxima) com presets para busca unificada
@@ -1289,8 +1363,10 @@ export default function SalesModule({
       return;
     }
 
-    const rawUnitPriceNum = parseNumberBR(itemUnitPrice) || calculatedUnitPrice;
-    const unitPriceNum = Math.ceil(rawUnitPriceNum);
+    const rawUnitPriceNum = isSpecialItem
+      ? (currentFormPriceKg > 0 ? currentFormPriceKg : (parseNumberBR(itemUnitPrice) || 0))
+      : (parseNumberBR(itemUnitPrice) || calculatedUnitPrice);
+    const unitPriceNum = isSpecialItem ? rawUnitPriceNum : Math.ceil(rawUnitPriceNum);
     if (unitPriceNum <= 0) {
       setErrorMessage('O valor unitário deve ser maior que zero (R$). Verifique as medidas ou o Preço/Kg.');
       setTimeout(() => setErrorMessage(null), 3500);
@@ -1304,44 +1380,57 @@ export default function SalesModule({
       return;
     }
 
-    const subtotal = calculateItemSubtotal(unitPriceNum, qtyNum);
+    const subtotal = isSpecialItem
+      ? Number((qtyNum * unitPriceNum).toFixed(2))
+      : calculateItemSubtotal(unitPriceNum, qtyNum);
 
     // Exact weight calculation according to user rules
-    const { unitWeightKg, totalWeightKg } = calculateItemWeightKg({
+    const { unitWeightKg: geoUnitWeightKg, totalWeightKg: geoTotalWeightKg } = calculateItemWeightKg({
       geometryType: itemGeometryType,
       constant: currentFormConstant,
       diameterMm: effectiveDiameterMm,
       thicknessMm: effectiveThicknessMm,
-      widthMm: effectiveWidthMm,
+      widthMm: effectiveThicknessMm > 0 || effectiveDiameterMm > 0 ? effectiveWidthMm : effectiveWidthMm,
       lengthMm: effectiveLengthMm,
       quantity: qtyNum,
       diameterStr: itemDiameter,
       thicknessStr: itemThickness
     });
 
-    const priceKgNum = parseNumberBR(itemPricePerKg) || (unitWeightKg > 0 ? unitPriceNum / unitWeightKg : undefined);
+    const unitWeightKg = isSpecialItem ? 0 : geoUnitWeightKg;
+    const totalWeightKg = isSpecialItem ? 0 : geoTotalWeightKg;
 
-    const formattedWidthLength = itemGeometryType === 'CHAPA_RETANGULO' || itemGeometryType === 'chapa'
-      ? (effectiveWidthMm > 0 && effectiveLengthMm > 0 ? `${effectiveWidthMm} x ${effectiveLengthMm} mm` : itemWidthLength.trim() || '-')
-      : (effectiveLengthMm > 0 ? `${effectiveLengthMm} mm` : itemWidthLength.trim() || '-');
+    const priceKgNum = isSpecialItem
+      ? unitPriceNum
+      : (parseNumberBR(itemPricePerKg) || (unitWeightKg > 0 ? unitPriceNum / unitWeightKg : undefined));
 
-    const itemMatName = itemConstantName.trim() || 'CHAPA';
+    const formattedWidthLength = isSpecialItem
+      ? '—'
+      : (itemGeometryType === 'CHAPA_RETANGULO' || itemGeometryType === 'chapa'
+          ? (effectiveWidthMm > 0 && effectiveLengthMm > 0 ? `${effectiveWidthMm} x ${effectiveLengthMm} mm` : itemWidthLength.trim() || '-')
+          : (effectiveLengthMm > 0 ? `${effectiveLengthMm} mm` : itemWidthLength.trim() || '-'));
+
+    const itemMatName = itemConstantName.trim() || (isSpecialItem ? itemDescription.trim() : 'CHAPA');
     const tempItemData = {
       geometryType: itemGeometryType,
-      diameter: itemDiameter.trim(),
-      thickness: itemThickness.trim(),
-      measure: itemThickness.trim() || itemDiameter.trim(),
+      diameter: isSpecialItem ? '' : itemDiameter.trim(),
+      thickness: isSpecialItem ? '' : itemThickness.trim(),
+      measure: isSpecialItem ? '—' : (itemThickness.trim() || itemDiameter.trim()),
       widthMm: effectiveWidthMm > 0 ? effectiveWidthMm : undefined,
       lengthMm: effectiveLengthMm > 0 ? effectiveLengthMm : undefined,
       widthLength: formattedWidthLength,
       diameterMm: effectiveDiameterMm > 0 ? effectiveDiameterMm : undefined,
       thicknessMm: effectiveThicknessMm > 0 ? effectiveThicknessMm : undefined
     };
-    const medidasFormatadas = formatarMedidasLimpa(tempItemData);
+    const medidasFormatadas = isSpecialItem
+      ? '—'
+      : formatarMedidasLimpa(tempItemData);
+
+    let updatedItemsList: QuoteItem[];
 
     if (editingItemId) {
       // Update existing item
-      setItems(items.map(item => item.id === editingItemId ? {
+      updatedItemsList = items.map(item => item.id === editingItemId ? {
         ...item,
         companyName: clientName || 'UsiCorte Cliente',
         description: itemDescription.trim() || itemMatName,
@@ -1351,23 +1440,23 @@ export default function SalesModule({
         material: itemMatName,
         produto: itemMatName,
         geometryType: itemGeometryType,
-        constant: itemConstant.trim() || '0.00785',
+        constant: isSpecialItem ? '0' : (itemConstant.trim() || '0.00785'),
         pricePerKg: priceKgNum,
-        measure: itemThickness.trim() || itemDiameter.trim(),
-        thickness: itemThickness.trim(),
-        espessura: itemThickness.trim(),
+        measure: isSpecialItem ? '—' : (itemThickness.trim() || itemDiameter.trim()),
+        thickness: isSpecialItem ? '' : itemThickness.trim(),
+        espessura: isSpecialItem ? '' : itemThickness.trim(),
         thicknessMm: effectiveThicknessMm > 0 ? effectiveThicknessMm : undefined,
         espessuraMm: effectiveThicknessMm > 0 ? effectiveThicknessMm : undefined,
-        diameter: itemDiameter.trim(),
-        diametro: itemDiameter.trim(),
+        diameter: isSpecialItem ? '' : itemDiameter.trim(),
+        diametro: isSpecialItem ? '' : itemDiameter.trim(),
         diameterMm: effectiveDiameterMm > 0 ? effectiveDiameterMm : undefined,
         diametroMm: effectiveDiameterMm > 0 ? effectiveDiameterMm : undefined,
         widthLength: formattedWidthLength,
         widthMm: effectiveWidthMm > 0 ? effectiveWidthMm : undefined,
-        largura: itemWidthMm.trim(),
+        largura: isSpecialItem ? '' : itemWidthMm.trim(),
         larguraMm: effectiveWidthMm > 0 ? effectiveWidthMm : undefined,
         lengthMm: effectiveLengthMm > 0 ? effectiveLengthMm : undefined,
-        comprimento: itemLengthMm.trim(),
+        comprimento: isSpecialItem ? '' : itemLengthMm.trim(),
         comprimentoMm: effectiveLengthMm > 0 ? effectiveLengthMm : undefined,
         unitWeightKg: unitWeightKg,
         totalWeightKg: totalWeightKg,
@@ -1384,8 +1473,9 @@ export default function SalesModule({
         medidaFormatada: medidasFormatadas,
         drawingImage: itemDrawingImage || undefined,
         fotoDesenho: itemDrawingImage || undefined
-      } : item));
+      } : item);
 
+      setItems(updatedItemsList);
       setSuccessMessage('Item atualizado com sucesso!');
       setEditingItemId(null);
     } else {
@@ -1400,23 +1490,23 @@ export default function SalesModule({
         constanteNome: itemMatName,
         material: itemMatName,
         geometryType: itemGeometryType,
-        constant: itemConstant.trim() || '0.00785',
+        constant: isSpecialItem ? '0' : (itemConstant.trim() || '0.00785'),
         pricePerKg: priceKgNum,
-        measure: itemThickness.trim() || itemDiameter.trim(),
-        thickness: itemThickness.trim(),
-        espessura: itemThickness.trim(),
+        measure: isSpecialItem ? '—' : (itemThickness.trim() || itemDiameter.trim()),
+        thickness: isSpecialItem ? '' : itemThickness.trim(),
+        espessura: isSpecialItem ? '' : itemThickness.trim(),
         thicknessMm: effectiveThicknessMm > 0 ? effectiveThicknessMm : undefined,
         espessuraMm: effectiveThicknessMm > 0 ? effectiveThicknessMm : undefined,
-        diameter: itemDiameter.trim(),
-        diametro: itemDiameter.trim(),
+        diameter: isSpecialItem ? '' : itemDiameter.trim(),
+        diametro: isSpecialItem ? '' : itemDiameter.trim(),
         diameterMm: effectiveDiameterMm > 0 ? effectiveDiameterMm : undefined,
         diametroMm: effectiveDiameterMm > 0 ? effectiveDiameterMm : undefined,
         widthLength: formattedWidthLength,
         widthMm: effectiveWidthMm > 0 ? effectiveWidthMm : undefined,
-        largura: itemWidthMm.trim(),
+        largura: isSpecialItem ? '' : itemWidthMm.trim(),
         larguraMm: effectiveWidthMm > 0 ? effectiveWidthMm : undefined,
         lengthMm: effectiveLengthMm > 0 ? effectiveLengthMm : undefined,
-        comprimento: itemLengthMm.trim(),
+        comprimento: isSpecialItem ? '' : itemLengthMm.trim(),
         comprimentoMm: effectiveLengthMm > 0 ? effectiveLengthMm : undefined,
         unitWeightKg: unitWeightKg,
         totalWeightKg: totalWeightKg,
@@ -1435,8 +1525,75 @@ export default function SalesModule({
         fotoDesenho: itemDrawingImage || undefined
       };
 
-      setItems([...items, newItem]);
+      updatedItemsList = [...items, newItem];
+      setItems(updatedItemsList);
       setSuccessMessage('Item adicionado à cotação com sucesso!');
+    }
+
+    // 3. Atualização no Banco de Dados / Estado:
+    // Salva automaticamente o Peso (Kg), Valor Unitário (R$) e Subtotal (R$) na lista do orçamento/pedido no Supabase
+    const cleanNum = numeroCotacao.trim();
+    if (cleanNum && updatedItemsList.length > 0) {
+      const targetId = editingQuoteId || cleanNum;
+      const newSubtotalTotal = Number(updatedItemsList.reduce((sum, it) => sum + it.subtotal, 0).toFixed(2));
+      const newGrandTotal = Number(Math.max(0, newSubtotalTotal - discountAmount + shippingAmount).toFixed(2));
+      const newTotalWeightKg = Number(updatedItemsList.reduce((sum, it) => sum + (Number(it.totalWeightKg) || 0), 0).toFixed(3));
+
+      const quoteToSync: Quote = {
+        id: targetId,
+        quoteNumber: cleanNum,
+        clientId: selectedClientId || undefined,
+        clientName: clientName.trim() || 'Cliente Balcão (UsiCorte)',
+        clientDocument: clientDocument.trim(),
+        contactPerson: contactPerson.trim(),
+        clientPhone: clientPhone.trim(),
+        clientEmail: clientEmail.trim(),
+        clientCity: clientCity.trim(),
+        clientState: clientState.trim(),
+        date: quoteDate,
+        validityDays: validityDays,
+        paymentTerms: paymentTerms,
+        status: quoteStatus,
+        items: updatedItemsList,
+        discount: discountAmount,
+        discountPercent: 0,
+        shipping: shippingAmount,
+        subtotalTotal: newSubtotalTotal,
+        grandTotal: newGrandTotal,
+        totalWeightKg: newTotalWeightKg,
+        observations: observations,
+        createdAt: editingQuoteCreatedAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+
+      const existsIdx = savedQuotes.findIndex(
+        q => (editingQuoteId && (q.id === editingQuoteId || String(q.id).toLowerCase() === String(editingQuoteId).toLowerCase())) ||
+             (editingOriginalQuoteNumber && (
+               (q.quoteNumber && q.quoteNumber.trim().toLowerCase() === editingOriginalQuoteNumber.trim().toLowerCase()) ||
+               (q.id && String(q.id).trim().toLowerCase() === editingOriginalQuoteNumber.trim().toLowerCase())
+             )) ||
+             (q.quoteNumber && q.quoteNumber.trim().toLowerCase() === cleanNum.toLowerCase()) ||
+             (q.id && q.id === cleanNum)
+      );
+
+      if (existsIdx >= 0) {
+        const nextSaved = [...savedQuotes];
+        nextSaved[existsIdx] = { ...savedQuotes[existsIdx], ...quoteToSync, id: savedQuotes[existsIdx].id || targetId };
+        setSavedQuotes(nextSaved);
+      } else {
+        setSavedQuotes([quoteToSync, ...savedQuotes]);
+      }
+      setEditingOriginalQuoteNumber(cleanNum);
+      editingQuoteNumberRef.current = cleanNum;
+
+      saveCotacaoDb(quoteToSync).then(res => {
+        if (res.data?.id) {
+          setEditingQuoteId(res.data.id);
+          editingQuoteIdRef.current = res.data.id;
+        }
+      }).catch(err => {
+        console.warn('Aviso ao sincronizar item no Supabase:', err);
+      });
     }
 
     // Reset item form fields
@@ -1458,6 +1615,7 @@ export default function SalesModule({
     setItemLengthMm('');
     setItemUnitPrice('');
     setItemQuantity('1');
+    setItemManualUnitWeightKg('1');
     setItemNotes('');
     setItemDrawingImage(null);
     setIsManualUnitPrice(false);
@@ -1713,6 +1871,21 @@ export default function SalesModule({
 
     const qtyVal = item.quantity !== undefined ? item.quantity : (item.qtd !== undefined ? item.qtd : 1);
     setItemQuantity(qtyVal.toString());
+
+    const isSpecEdit = isRetalhoOrMaoDeObra(resolvedConstantName, item.description || item.descricao || '');
+    if (isSpecEdit) {
+      setItemManualUnitWeightKg('0');
+      setItemDiameter('');
+      setItemThickness('');
+      setItemWidthMm('');
+      setItemLengthMm('');
+      setItemWidthLength('');
+      if (unitPriceVal > 0) {
+        setItemPricePerKg(Number(unitPriceVal).toFixed(2).replace('.', ','));
+      }
+    } else {
+      setItemManualUnitWeightKg('0');
+    }
 
     setItemNotes(item.notes || item.observacao || (item as any).info || '');
     setItemDrawingImage(item.drawingImage || item.fotoDesenho || (item as any).desenhoUrl || (item as any).desenho_url || null);
@@ -2794,17 +2967,38 @@ export default function SalesModule({
                     m => m.nome.trim().toLowerCase() === txt.trim().toLowerCase() ||
                          m.id.trim().toLowerCase() === txt.trim().toLowerCase()
                   );
+                  let nextDesc = itemDescription;
                   if (material) {
                     // b) Preenche automaticamente "Descrição do Produto / Serviço" com material.descricao
                     // c) Se material.descricao estiver vazio ou não definido, utiliza material.nome
                     const descAuto = material.descricao && material.descricao.trim() !== ''
                       ? material.descricao.trim()
                       : material.nome;
+                    nextDesc = descAuto;
                     setItemDescription(descAuto);
                     setItemConstantSelect(material.id);
                     setItemGeometryType(material.tipo);
                     setItemConstant(String(material.k));
                     setItemPricePerKg(material.precoKg.toFixed(2).replace('.', ','));
+                  }
+                  const normTxt = txt.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+                  if (isRetalhoOrMaoDeObra(txt, nextDesc)) {
+                    setItemDiameter('');
+                    setItemThickness('');
+                    setItemWidthMm('');
+                    setItemLengthMm('');
+                    setItemWidthLength('');
+                    if (normTxt === 'retalho' || normTxt === 'mao de obra') {
+                      if (!material && normTxt === 'retalho') {
+                        setItemDescription(nextDesc || 'RETALHO');
+                        setItemConstant('0');
+                        setItemPricePerKg('15,00');
+                      } else if (!material && normTxt === 'mao de obra') {
+                        setItemDescription(nextDesc || 'MÃO DE OBRA');
+                        setItemConstant('0');
+                      }
+                      focusNextField('qtd');
+                    }
                   }
                 }}
                 onSelectOption={(opt) => {
@@ -2824,7 +3018,9 @@ export default function SalesModule({
                   });
                 }}
                 onAdvanceFocus={() => {
-                  if (itemGeometryType === 'chapa' || itemGeometryType === 'CHAPA_RETANGULO') {
+                  if (isRetalhoOrMaoDeObra(itemConstantName, itemDescription)) {
+                    focusNextField('qtd');
+                  } else if (itemGeometryType === 'chapa' || itemGeometryType === 'CHAPA_RETANGULO') {
                     focusNextField('espessura');
                   } else {
                     focusNextField('diametro');
@@ -2850,9 +3046,9 @@ export default function SalesModule({
               <input
                 type="text"
                 id="diametro"
-                placeholder={itemGeometryType === 'bucha' || itemGeometryType === 'TUBO_BUCHA' ? 'Ø Ext' : 'Ø mm'}
+                placeholder={isSpecialItem ? '—' : (itemGeometryType === 'bucha' || itemGeometryType === 'TUBO_BUCHA' ? 'Ø Ext' : 'Ø mm')}
                 value={itemDiameter}
-                disabled={itemGeometryType === 'chapa' || itemGeometryType === 'CHAPA_RETANGULO'}
+                disabled={isSpecialItem || itemGeometryType === 'chapa' || itemGeometryType === 'CHAPA_RETANGULO'}
                 onFocus={(e) => e.target.select()}
                 onChange={(e) => {
                   const val = e.target.value;
@@ -2870,7 +3066,9 @@ export default function SalesModule({
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     e.preventDefault();
-                    if (itemGeometryType === 'bucha' || itemGeometryType === 'TUBO_BUCHA') {
+                    if (isSpecialItem) {
+                      focusNextField('qtd');
+                    } else if (itemGeometryType === 'bucha' || itemGeometryType === 'TUBO_BUCHA') {
                       focusNextField('espessura');
                     } else {
                       focusNextField('comprimento');
@@ -2878,7 +3076,7 @@ export default function SalesModule({
                   }
                 }}
                 className={`w-full px-2 py-2 border rounded-xl text-xs font-mono font-bold text-center outline-hidden transition-all ${
-                  itemGeometryType === 'chapa' || itemGeometryType === 'CHAPA_RETANGULO'
+                  isSpecialItem || itemGeometryType === 'chapa' || itemGeometryType === 'CHAPA_RETANGULO'
                     ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
                     : 'bg-white text-slate-800 border-slate-300 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500'
                 }`}
@@ -2901,9 +3099,9 @@ export default function SalesModule({
               <input
                 type="text"
                 id="espessura"
-                placeholder={itemGeometryType === 'bucha' || itemGeometryType === 'TUBO_BUCHA' ? 'Ø Int' : 'Esp mm'}
+                placeholder={isSpecialItem ? '—' : (itemGeometryType === 'bucha' || itemGeometryType === 'TUBO_BUCHA' ? 'Ø Int' : 'Esp mm')}
                 value={itemThickness}
-                disabled={itemGeometryType === 'macico' || itemGeometryType === 'REDONDO_QUADRADO'}
+                disabled={isSpecialItem || itemGeometryType === 'macico' || itemGeometryType === 'REDONDO_QUADRADO'}
                 onFocus={(e) => e.target.select()}
                 onChange={(e) => {
                   const val = e.target.value;
@@ -2921,7 +3119,9 @@ export default function SalesModule({
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     e.preventDefault();
-                    if (itemGeometryType === 'chapa') {
+                    if (isSpecialItem) {
+                      focusNextField('qtd');
+                    } else if (itemGeometryType === 'chapa') {
                       focusNextField('largura');
                     } else {
                       focusNextField('comprimento');
@@ -2929,7 +3129,7 @@ export default function SalesModule({
                   }
                 }}
                 className={`w-full px-2 py-2 border rounded-xl text-xs font-mono font-bold text-center outline-hidden transition-all ${
-                  itemGeometryType === 'macico' || itemGeometryType === 'REDONDO_QUADRADO'
+                  isSpecialItem || itemGeometryType === 'macico' || itemGeometryType === 'REDONDO_QUADRADO'
                     ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
                     : 'bg-white text-slate-800 border-slate-300 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500'
                 }`}
@@ -2944,9 +3144,9 @@ export default function SalesModule({
               <input
                 type="text"
                 id="largura"
-                placeholder="0"
+                placeholder={isSpecialItem ? '—' : '0'}
                 value={itemWidthMm}
-                disabled={itemGeometryType === 'macico' || itemGeometryType === 'REDONDO_QUADRADO' || itemGeometryType === 'bucha' || itemGeometryType === 'TUBO_BUCHA'}
+                disabled={isSpecialItem || itemGeometryType === 'macico' || itemGeometryType === 'REDONDO_QUADRADO' || itemGeometryType === 'bucha' || itemGeometryType === 'TUBO_BUCHA'}
                 onFocus={(e) => e.target.select()}
                 onChange={(e) => {
                   const val = e.target.value;
@@ -2964,11 +3164,11 @@ export default function SalesModule({
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     e.preventDefault();
-                    focusNextField('comprimento');
+                    focusNextField(isSpecialItem ? 'qtd' : 'comprimento');
                   }
                 }}
                 className={`w-full px-2 py-2 border rounded-xl text-xs font-mono font-bold text-center outline-hidden transition-all ${
-                  itemGeometryType === 'macico' || itemGeometryType === 'REDONDO_QUADRADO' || itemGeometryType === 'bucha' || itemGeometryType === 'TUBO_BUCHA'
+                  isSpecialItem || itemGeometryType === 'macico' || itemGeometryType === 'REDONDO_QUADRADO' || itemGeometryType === 'bucha' || itemGeometryType === 'TUBO_BUCHA'
                     ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
                     : 'bg-white text-slate-800 border-slate-300 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500'
                 }`}
@@ -2983,8 +3183,9 @@ export default function SalesModule({
               <input
                 type="text"
                 id="comprimento"
-                placeholder="0"
+                placeholder={isSpecialItem ? '—' : '0'}
                 value={itemLengthMm}
+                disabled={isSpecialItem}
                 onFocus={(e) => e.target.select()}
                 onChange={(e) => {
                   const val = e.target.value;
@@ -3002,10 +3203,14 @@ export default function SalesModule({
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     e.preventDefault();
-                    focusNextField('descricao');
+                    focusNextField(isSpecialItem ? 'qtd' : 'descricao');
                   }
                 }}
-                className="w-full px-2 py-2 bg-white border border-slate-300 rounded-xl text-xs font-mono font-bold text-slate-800 text-center focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-hidden transition-all"
+                className={`w-full px-2 py-2 border rounded-xl text-xs font-mono font-bold text-center outline-hidden transition-all ${
+                  isSpecialItem
+                    ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed'
+                    : 'bg-white text-slate-800 border-slate-300 focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500'
+                }`}
               />
             </div>
 
@@ -3030,6 +3235,25 @@ export default function SalesModule({
                 onChangeText={(txt) => {
                   setItemDescription(txt);
                   setDescriptionSearchQuery(txt);
+                  const normTxt = txt.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+                  if (isRetalhoOrMaoDeObra(itemConstantName, txt)) {
+                    setItemDiameter('');
+                    setItemThickness('');
+                    setItemWidthMm('');
+                    setItemLengthMm('');
+                    setItemWidthLength('');
+                    if (normTxt === 'retalho' || normTxt === 'mao de obra') {
+                      if (normTxt === 'retalho') {
+                        setItemConstantName('RETALHO');
+                        setItemConstant('0');
+                        setItemPricePerKg('15,00');
+                      } else if (normTxt === 'mao de obra') {
+                        setItemConstantName('MÃO DE OBRA');
+                        setItemConstant('0');
+                      }
+                      focusNextField('qtd');
+                    }
+                  }
                 }}
                 onSelectOption={(opt) => {
                   const material = materials.find(
@@ -3220,6 +3444,7 @@ export default function SalesModule({
               <input
                 type="text"
                 id="valorUnitario"
+                tabIndex={-1}
                 readOnly
                 value={currentFormUnitPrice > 0 ? `R$ ${formatNumberBR(currentFormUnitPrice, 2)}` : 'R$ 0,00'}
                 className="w-full px-3 py-2 bg-indigo-50/70 border border-indigo-300 rounded-xl text-xs font-mono font-bold text-indigo-950 cursor-not-allowed outline-none"
@@ -3235,6 +3460,7 @@ export default function SalesModule({
               <input
                 type="text"
                 id="valorTotal"
+                tabIndex={-1}
                 readOnly
                 value={currentFormSubtotal > 0 ? `R$ ${formatNumberBR(currentFormSubtotal, 2)}` : 'R$ 0,00'}
                 className="w-full px-3 py-2 bg-rose-50/70 border border-rose-300 rounded-xl text-xs font-mono font-black text-rose-700 cursor-not-allowed outline-none"
@@ -3245,11 +3471,14 @@ export default function SalesModule({
             <div className="field field-resultado lg:col-span-2 space-y-1">
               <label htmlFor="pesoEstimado" className="block text-xs font-bold text-emerald-800 flex items-center justify-between">
                 <span>Peso Estimado (KG)</span>
-                <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1 rounded">3 casas</span>
+                <span className="text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1 rounded">
+                  3 casas
+                </span>
               </label>
               <input
                 type="text"
                 id="pesoEstimado"
+                tabIndex={-1}
                 readOnly
                 value={currentFormTotalWeightKg > 0 ? `${formatNumberBR(currentFormTotalWeightKg, 3)} KG` : '0,000 KG'}
                 className="w-full px-3 py-2 bg-emerald-50/70 border border-emerald-300 rounded-xl text-xs font-mono font-black text-emerald-950 text-center cursor-not-allowed outline-none"
@@ -3314,7 +3543,9 @@ export default function SalesModule({
                 <span className="text-indigo-950 uppercase tracking-wide text-[11px]">Fórmula UsiCorte em Tempo Real:</span>
               </div>
               <div className="text-[10px] font-mono font-bold text-indigo-700 bg-white px-2 py-0.5 rounded border border-indigo-200">
-                {itemGeometryType === 'bucha' || itemGeometryType === 'TUBO_BUCHA'
+                {isSpecialItem
+                  ? 'Cálculo Direto: Peso = 0,000 Kg | Valor Unitário (R$) = Preço Unitário Digitado | Subtotal (R$) = Qtd × Valor Unitário (R$)'
+                  : itemGeometryType === 'bucha' || itemGeometryType === 'TUBO_BUCHA'
                   ? 'Peso = ((ØExt² - ØInt²) × Comp × k / 1000).toFixed(3) | Unitário = Math.ceil(Peso × R$/Kg) | Total = Math.ceil(Unitário × Qtd)'
                   : itemGeometryType === 'macico' || itemGeometryType === 'REDONDO_QUADRADO'
                   ? 'Peso = (d² × Comp × k / 1000).toFixed(3) | Unitário = Math.ceil(Peso × R$/Kg) | Total = Math.ceil(Unitário × Qtd)'
@@ -3489,11 +3720,16 @@ export default function SalesModule({
                 </tr>
               ) : (
                 items.map((item, idx) => {
-                  const effectiveItemPriceKg = item.pricePerKg !== undefined 
-                    ? item.pricePerKg 
-                    : (item.unitWeightKg && item.unitWeightKg > 0 ? item.unitPrice / item.unitWeightKg : 0);
                   const produtoMaterial = item.constanteNome || item.constantName || item.material || 'MATERIAL';
-                  const medidasFormatadas = formatarMedidasLimpa(item);
+                  const isRowSpecial = isRetalhoOrMaoDeObra(produtoMaterial, item.description || item.descricao || '');
+                  const effectiveItemPriceKg = isRowSpecial
+                    ? (item.unitPrice || item.valorUnitario || 0)
+                    : (item.pricePerKg !== undefined 
+                        ? item.pricePerKg 
+                        : (item.unitWeightKg && item.unitWeightKg > 0 ? item.unitPrice / item.unitWeightKg : 0));
+                  const medidasFormatadas = isRowSpecial ? '—' : formatarMedidasLimpa(item);
+                  const rowTotalWeight = isRowSpecial ? 0 : (item.totalWeightKg || item.pesoTotal || 0);
+                  const rowUnitWeight = isRowSpecial ? 0 : (item.unitWeightKg || 0);
 
                   return (
                     <tr 
@@ -3543,8 +3779,8 @@ export default function SalesModule({
                         {item.quantity || item.qtd || 1}
                       </td>
                       <td className="py-3 px-3 text-right font-mono font-bold text-emerald-800 bg-emerald-50/40 whitespace-nowrap">
-                        <div>{formatWeightKg(item.totalWeightKg || item.pesoTotal || 0, 3)}</div>
-                        <div className="text-[10px] text-slate-400 font-normal">{formatNumberBR(item.unitWeightKg || 0, 3)} kg/un</div>
+                        <div>{formatWeightKg(rowTotalWeight, 3)}</div>
+                        <div className="text-[10px] text-slate-400 font-normal">{formatNumberBR(rowUnitWeight, 3)} kg/un</div>
                       </td>
                       <td className="py-3 px-3 text-right font-mono font-black text-indigo-700 whitespace-nowrap">
                         {formatCurrency(item.subtotal)}

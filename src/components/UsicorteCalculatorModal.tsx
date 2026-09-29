@@ -17,6 +17,7 @@ import {
   calculateItemWeightKg, 
   parseNumberBR, 
   parseDimensionToMm,
+  isRetalhoOrMaoDeObra,
   TabelaConstanteItem 
 } from '../utils/calculator';
 import { useMaterialsCatalog } from '../services/materialsService';
@@ -72,6 +73,7 @@ export default function UsicorteCalculatorModal({
   const [largura, setLargura] = useState<string>('');
   const [comprimento, setComprimento] = useState<string>('');
   const [quantidade, setQuantidade] = useState<string>('1');
+  const [pesoManualKg, setPesoManualKg] = useState<string>('1');
   const [descricao, setDescricao] = useState<string>('LASER A36');
   const [isDescricaoOpen, setIsDescricaoOpen] = useState<boolean>(false);
   const [descricaoHighlightIdx, setDescricaoHighlightIdx] = useState<number>(0);
@@ -92,6 +94,7 @@ export default function UsicorteCalculatorModal({
   const comprimentoRef = useRef<HTMLInputElement>(null);
   const descricaoRef = useRef<HTMLInputElement>(null);
   const qtdRef = useRef<HTMLInputElement>(null);
+  const pesoManualRef = useRef<HTMLInputElement>(null);
   const precoKgRef = useRef<HTMLInputElement>(null);
   const btnAdicionarRef = useRef<HTMLButtonElement>(null);
 
@@ -161,6 +164,16 @@ export default function UsicorteCalculatorModal({
       setIsMaterialOpen(false);
       setIsDescricaoOpen(false);
 
+      if (isRetalhoOrMaoDeObra(mat.nome, descFinal)) {
+        setDiametro('');
+        setEspessura('');
+        setLargura('');
+        setComprimento('');
+        setPesoManualKg('0');
+        focusNextField(qtdRef);
+        return;
+      }
+
       if (mat.tipo === 'chapa') {
         setDiametro('0');
       } else if (mat.tipo === 'macico') {
@@ -192,21 +205,24 @@ export default function UsicorteCalculatorModal({
   };
 
   // Calculations strictly per UsiCorte official formulas & Math.ceil rounding
+  const isSpecialCalcItem = isRetalhoOrMaoDeObra(materialQuery, descricao);
   const selectedMat: TabelaConstanteItem | undefined = materialIndex !== "" ? activeConstantes[parseInt(materialIndex, 10)] : undefined;
-  const kConst = selectedMat ? selectedMat.k : kCustom;
+  const kConst = isSpecialCalcItem ? 0 : (selectedMat ? selectedMat.k : kCustom);
   const tipoMat = selectedMat ? selectedMat.tipo : tipo;
 
-  const diaNum = parseDimensionToMm(diametro);
-  const espNum = parseDimensionToMm(espessura);
-  const largNum = parseDimensionToMm(largura);
-  const compNum = parseDimensionToMm(comprimento);
+  const diaNum = isSpecialCalcItem ? 0 : parseDimensionToMm(diametro);
+  const espNum = isSpecialCalcItem ? 0 : parseDimensionToMm(espessura);
+  const largNum = isSpecialCalcItem ? 0 : parseDimensionToMm(largura);
+  const compNum = isSpecialCalcItem ? 0 : parseDimensionToMm(comprimento);
   const priceKgNum = parseNumberBR(precoKg);
   const qtdNum = Math.max(1, parseNumberBR(quantidade) || 1);
 
   // Calculate Unit Weight
   let pesoUnitario = 0;
 
-  if (kConst >= 0) {
+  if (isSpecialCalcItem) {
+    pesoUnitario = 0;
+  } else if (kConst >= 0) {
     if (tipoMat === 'chapa') {
       pesoUnitario = (espNum * largNum * compNum * kConst) / 1000;
     } else if (tipoMat === 'macico') {
@@ -226,13 +242,17 @@ export default function UsicorteCalculatorModal({
   }
 
   // Exact UsiCorte Rounding to upper integer & formatting with ,00
-  const valorUnitarioCalculado = pesoUnitario * priceKgNum;
-  const valorUnitarioArredondado = Math.ceil(valorUnitarioCalculado);
+  // For RETALHO / MÃO DE OBRA / SERVIÇOS (cálculo direto):
+  // • Peso Unitário = 0.000 Kg e Peso Total = 0.000 Kg
+  // • Valor Unitário (R$) = Preço Unitário digitado
+  // • Subtotal (R$) = Quantidade × Valor Unitário (R$)
+  const valorUnitarioCalculado = isSpecialCalcItem ? priceKgNum : (pesoUnitario * priceKgNum);
+  const valorUnitarioArredondado = isSpecialCalcItem ? valorUnitarioCalculado : Math.ceil(valorUnitarioCalculado);
 
-  const valorTotalCalculado = valorUnitarioArredondado * qtdNum;
-  const valorTotalArredondado = Math.ceil(valorTotalCalculado);
+  const valorTotalCalculado = qtdNum * valorUnitarioArredondado;
+  const valorTotalArredondado = isSpecialCalcItem ? Number(valorTotalCalculado.toFixed(2)) : Math.ceil(valorTotalCalculado);
 
-  const pesoTotal = pesoUnitario * qtdNum;
+  const pesoTotal = isSpecialCalcItem ? 0 : (qtdNum * pesoUnitario);
 
   // Formatted Strings for Banner
   const pesoFormatted = pesoTotal > 0 ? pesoTotal.toFixed(3).replace('.', ',') + ' KG' : '0,000 KG';
@@ -256,41 +276,51 @@ export default function UsicorteCalculatorModal({
   };
 
   const zerarFormulario = () => {
-    setDiametro(tipoMat === 'chapa' ? '0' : '');
+    setDiametro(isSpecialCalcItem ? '' : (tipoMat === 'chapa' ? '0' : ''));
     setEspessura('');
     setLargura('');
     setComprimento('');
     setQuantidade('1');
+    setPesoManualKg('1');
     setObservacao('');
     focusNextField(constanteRef);
   };
 
   const adicionarAoPdv = () => {
-    if (materialIndex === "") {
-      alert('Selecione um material antes de adicionar!');
+    if (materialIndex === "" && !materialQuery.trim() && !descricao.trim()) {
       focusNextField(constanteRef);
       return;
     }
 
-    const descFinal = descricao.trim() || (selectedMat ? selectedMat.nome : 'Material');
+    const descFinal = descricao.trim() || materialQuery.trim() || (selectedMat ? selectedMat.nome : 'Material');
 
     const newItem = {
       id: `item-${Date.now()}`,
       description: descFinal,
-      material: selectedMat ? selectedMat.nome : descFinal,
+      descricao: descFinal,
+      material: selectedMat ? selectedMat.nome : (materialQuery.trim() || descFinal),
+      constantName: selectedMat ? selectedMat.nome : (materialQuery.trim() || descFinal),
+      constanteNome: selectedMat ? selectedMat.nome : (materialQuery.trim() || descFinal),
       geometryType: tipoMat,
-      constant: kConst,
+      constant: isSpecialCalcItem ? '0' : String(kConst),
       pricePerKg: priceKgNum,
-      diameter: diametro,
-      thickness: espessura,
-      widthMm: largNum,
-      lengthMm: compNum,
+      diameter: isSpecialCalcItem ? '' : diametro,
+      thickness: isSpecialCalcItem ? '' : espessura,
+      measure: isSpecialCalcItem ? '—' : (espessura || diametro),
+      medidasFormatadas: isSpecialCalcItem ? '—' : undefined,
+      medidaFormatada: isSpecialCalcItem ? '—' : undefined,
+      widthMm: isSpecialCalcItem ? undefined : largNum,
+      lengthMm: isSpecialCalcItem ? undefined : compNum,
       quantity: qtdNum,
-      unitWeightKg: pesoUnitario,
-      totalWeightKg: pesoTotal,
+      qtd: qtdNum,
+      unitWeightKg: isSpecialCalcItem ? 0 : Number(pesoUnitario.toFixed(3)),
+      totalWeightKg: isSpecialCalcItem ? 0 : Number(pesoTotal.toFixed(3)),
+      pesoTotal: isSpecialCalcItem ? 0 : Number(pesoTotal.toFixed(3)),
       unitPrice: valorUnitarioArredondado,
+      valorUnitario: valorUnitarioArredondado,
       subtotal: valorTotalArredondado,
-      notes: observacao
+      notes: observacao,
+      observacao: observacao
     };
 
     if (onAddItemToQuote) {
@@ -435,15 +465,35 @@ export default function UsicorteCalculatorModal({
                 const material = materials.find(
                   m => m.nome.trim().toLowerCase() === val.trim().toLowerCase()
                 );
+                let nextDesc = descricao;
                 if (material) {
-                  setDescricao(
+                  nextDesc =
                     material.descricao && material.descricao.trim() !== ''
                       ? material.descricao.trim()
-                      : material.nome
-                  );
+                      : material.nome;
+                  setDescricao(nextDesc);
                   setTipo(material.tipo);
                   setKCustom(material.k);
                   setPrecoKg(String(Math.ceil(material.precoKg)));
+                }
+                const normVal = val.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+                if (isRetalhoOrMaoDeObra(val, nextDesc)) {
+                  setDiametro('');
+                  setEspessura('');
+                  setLargura('');
+                  setComprimento('');
+                  if (normVal === 'retalho' || normVal === 'mao de obra') {
+                    setIsMaterialOpen(false);
+                    if (!material && normVal === 'retalho') {
+                      setDescricao('RETALHO');
+                      setKCustom(0);
+                      setPrecoKg('15');
+                    } else if (!material && normVal === 'mao de obra') {
+                      setDescricao('MÃO DE OBRA');
+                      setKCustom(0);
+                    }
+                    focusNextField(qtdRef);
+                  }
                 }
               }}
               onInput={(e) => {
@@ -481,10 +531,15 @@ export default function UsicorteCalculatorModal({
                   if (e.key === 'Enter') {
                     e.preventDefault();
                     setIsMaterialOpen(false);
-                    if (tipoMat === 'chapa') focusNextField(espessuraRef);
+                    if (isSpecialCalcItem) focusNextField(qtdRef);
+                    else if (tipoMat === 'chapa') focusNextField(espessuraRef);
                     else focusNextField(diametroRef);
                   } else if (e.key === 'Tab') {
                     setIsMaterialOpen(false);
+                    if (isSpecialCalcItem) {
+                      e.preventDefault();
+                      focusNextField(qtdRef);
+                    }
                   }
                 } else if (e.key === 'Escape') {
                   setIsMaterialOpen(false);
@@ -586,18 +641,19 @@ export default function UsicorteCalculatorModal({
                 ref={diametroRef}
                 type="text" 
                 tabIndex={2} 
-                disabled={tipoMat === 'chapa'}
+                disabled={isSpecialCalcItem || tipoMat === 'chapa'}
                 value={diametro}
                 onChange={(e) => setDiametro(e.target.value)}
                 onFocus={(e) => e.target.select()}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     e.preventDefault();
-                    if (tipoMat === 'bucha') focusNextField(espessuraRef);
+                    if (isSpecialCalcItem) focusNextField(qtdRef);
+                    else if (tipoMat === 'bucha') focusNextField(espessuraRef);
                     else focusNextField(comprimentoRef);
                   }
                 }}
-                placeholder="Ex: 32 ou 1.1/2" 
+                placeholder={isSpecialCalcItem ? '—' : 'Ex: 32 ou 1.1/2'} 
                 className="w-full bg-[#131f37] border border-gray-700 rounded-lg p-2.5 text-white focus:outline-hidden focus:border-blue-500 font-bold disabled:opacity-30 disabled:cursor-not-allowed"
               />
             </div>
@@ -627,18 +683,19 @@ export default function UsicorteCalculatorModal({
                 ref={espessuraRef}
                 type="text" 
                 tabIndex={3} 
-                disabled={tipoMat === 'macico'}
+                disabled={isSpecialCalcItem || tipoMat === 'macico'}
                 value={espessura}
                 onChange={(e) => setEspessura(e.target.value)}
                 onFocus={(e) => e.target.select()}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     e.preventDefault();
-                    if (tipoMat === 'chapa') focusNextField(larguraRef);
+                    if (isSpecialCalcItem) focusNextField(qtdRef);
+                    else if (tipoMat === 'chapa') focusNextField(larguraRef);
                     else focusNextField(comprimentoRef);
                   }
                 }}
-                placeholder="Ex: 12.7 ou 1/2" 
+                placeholder={isSpecialCalcItem ? '—' : 'Ex: 12.7 ou 1/2'} 
                 className="w-full bg-[#131f37] border border-gray-700 rounded-lg p-2.5 text-white focus:outline-hidden focus:border-blue-500 font-bold disabled:opacity-30 disabled:cursor-not-allowed"
               />
 
@@ -676,17 +733,17 @@ export default function UsicorteCalculatorModal({
                 ref={larguraRef}
                 type="text" 
                 tabIndex={4} 
-                disabled={tipoMat !== 'chapa'}
+                disabled={isSpecialCalcItem || tipoMat !== 'chapa'}
                 value={largura}
                 onChange={(e) => setLargura(e.target.value)}
                 onFocus={(e) => e.target.select()}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     e.preventDefault();
-                    focusNextField(comprimentoRef);
+                    focusNextField(isSpecialCalcItem ? qtdRef : comprimentoRef);
                   }
                 }}
-                placeholder="0" 
+                placeholder={isSpecialCalcItem ? '—' : '0'} 
                 className="w-full bg-[#131f37] border border-gray-700 rounded-lg p-2.5 text-white focus:outline-hidden focus:border-blue-500 font-bold disabled:opacity-30 disabled:cursor-not-allowed"
               />
             </div>
@@ -705,6 +762,7 @@ export default function UsicorteCalculatorModal({
                 ref={comprimentoRef}
                 type="text" 
                 tabIndex={5} 
+                disabled={isSpecialCalcItem}
                 value={comprimento}
                 onChange={(e) => setComprimento(e.target.value)}
                 onFocus={(e) => e.target.select()}
@@ -714,8 +772,8 @@ export default function UsicorteCalculatorModal({
                     focusNextField(qtdRef);
                   }
                 }}
-                placeholder="0" 
-                className="w-full bg-[#131f37] border border-gray-700 rounded-lg p-2.5 text-white focus:outline-hidden focus:border-blue-500 font-bold"
+                placeholder={isSpecialCalcItem ? '—' : '0'} 
+                className="w-full bg-[#131f37] border border-gray-700 rounded-lg p-2.5 text-white focus:outline-hidden focus:border-blue-500 font-bold disabled:opacity-30 disabled:cursor-not-allowed"
               />
             </div>
 
@@ -740,6 +798,25 @@ export default function UsicorteCalculatorModal({
                 setDescricao(val);
                 setDescricaoHighlightIdx(0);
                 setIsDescricaoOpen(true);
+                const normVal = val.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+                if (isRetalhoOrMaoDeObra(materialQuery, val)) {
+                  setDiametro('');
+                  setEspessura('');
+                  setLargura('');
+                  setComprimento('');
+                  if (normVal === 'retalho' || normVal === 'mao de obra') {
+                    setIsDescricaoOpen(false);
+                    if (normVal === 'retalho') {
+                      setMaterialQuery('RETALHO');
+                      setKCustom(0);
+                      setPrecoKg('15');
+                    } else if (normVal === 'mao de obra') {
+                      setMaterialQuery('MÃO DE OBRA');
+                      setKCustom(0);
+                    }
+                    focusNextField(qtdRef);
+                  }
+                }
               }}
               onInput={(e) => {
                 const val = (e.target as HTMLInputElement).value;

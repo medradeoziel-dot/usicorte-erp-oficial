@@ -1001,7 +1001,7 @@ export async function saveCotacaoDb(quote: Quote): Promise<{ data: any; error: a
         const medidaCalculada = formatarMedidasLimpa(it);
         const medidaFinal = (medidaCalculada && medidaCalculada !== '-')
           ? medidaCalculada
-          : (it.measure || (it.widthLength ? `${it.diameter || ''} x ${it.widthLength}` : it.diameter || '') || '');
+          : '—';
 
         return {
           cotacao_id: cotacaoId,
@@ -1011,15 +1011,25 @@ export async function saveCotacaoDb(quote: Quote): Promise<{ data: any; error: a
           medida: medidaFinal,
           descricao: it.description || it.descricao || 'Item industrial',
           observacao: it.notes || it.observacao || it.info || '',
-          quantidade: it.quantity || it.qtd || 1,
-          valor_unitario: it.unitPrice || it.valorUnitario || 0,
-          valor_total: it.subtotal || ((it.unitPrice || 0) * (it.quantity || 1)),
+          quantidade: Number(it.quantity || it.qtd || 1),
+          valor_unitario: Number(it.unitPrice || it.valorUnitario || 0),
+          valor_total: Number(it.subtotal || ((it.unitPrice || 0) * (it.quantity || 1))),
           desenho_url: it.drawingImage || it.fotoDesenho || '',
           cortado: false
         };
       });
 
-      const { error: itensErr } = await db.from('cotacao_itens').insert(itensPayload);
+      const itensPayloadWithWeight = quote.items.map((it, idx) => ({
+        ...itensPayload[idx],
+        peso_unitario: Number(it.unitWeightKg || (it as any).pesoUnitario || 0),
+        peso_total: Number(it.totalWeightKg || it.pesoTotal || 0)
+      }));
+
+      let { error: itensErr } = await db.from('cotacao_itens').insert(itensPayloadWithWeight);
+      if (itensErr) {
+        const fallbackRes = await db.from('cotacao_itens').insert(itensPayload);
+        itensErr = fallbackRes.error;
+      }
       if (itensErr) {
         console.warn("Erro ao inserir itens da cotação no Supabase:", itensErr);
       }

@@ -211,6 +211,23 @@ export function calculateItemSubtotal(unitPrice: number, quantity: number): numb
   return Math.ceil(price * qty);
 }
 
+/**
+ * Detecta se o item selecionado ou digitado é do tipo "RETALHO", "MÃO DE OBRA" ou "SERVIÇO" (cálculo direto sem peso geométrico)
+ */
+export function isRetalhoOrMaoDeObra(materialText?: string | null, descriptionText?: string | null): boolean {
+  const combined = `${materialText || ''} ${descriptionText || ''}`
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim();
+  return (
+    combined.includes('retalho') ||
+    combined.includes('mao de obra') ||
+    combined.includes('mao-de-obra') ||
+    combined.includes('servico')
+  );
+}
+
 export type GeometryType = 'REDONDO_QUADRADO' | 'CHAPA_RETANGULO' | 'TUBO_BUCHA' | 'chapa' | 'macico' | 'bucha';
 
 export interface MaterialProfile {
@@ -487,6 +504,14 @@ export function normalizarMedida(valor: string | undefined | null): string {
 }
 
 export function formatarMedidasLimpa(item: Record<string, any>): string {
+  if (!item) return "—";
+
+  const matText = item.constanteNome || item.constantName || item.material || item.produto || "";
+  const descText = item.description || item.descricao || "";
+  if (isRetalhoOrMaoDeObra(matText, descText)) {
+    return "—";
+  }
+
   const {
     geometry,
     diameter,
@@ -497,21 +522,36 @@ export function formatarMedidasLimpa(item: Record<string, any>): string {
     unit = "mm",
   } = item || {};
 
+  const cleanPart = (val: any): string => {
+    if (val === undefined || val === null) return "";
+    const s = String(val).trim();
+    if (!s || s === "-" || s === "—" || /kg/i.test(s) || /calculo direto|cálculo direto/i.test(s)) {
+      return "";
+    }
+    return s;
+  };
+
+  const cDiameter = cleanPart(diameter);
+  const cMeasure = cleanPart(measure);
+  const cWidthLength = cleanPart(widthLength);
+  const cWidth = cleanPart(width);
+  const cLength = cleanPart(length);
+
   let resultado = "";
 
   // BUCHA / TUBO: medida composta por diâmetro externo x diâmetro interno x comprimento
   if (geometry === "bucha" || geometry === "tubo") {
-    const externo = diameter || measure;
-    const interno = widthLength || width;
-    const comp = length;
+    const externo = cDiameter || cMeasure;
+    const interno = cWidthLength || cWidth;
+    const comp = cLength;
     resultado = normalizarMedida(
       [externo, interno, comp].filter(Boolean).join(" x ")
     );
   }
   // MACIÇO / REDONDO: medida composta por diâmetro x comprimento
   else if (geometry === "macico" || geometry === "redondo") {
-    const diam = diameter || measure;
-    const comp = widthLength || length;
+    const diam = cDiameter || cMeasure;
+    const comp = cWidthLength || cLength;
     resultado = normalizarMedida([diam, comp].filter(Boolean).join(" x "));
   }
   // CHAPA / PLACA / RETANGULAR: medida composta por espessura x largura x comprimento
@@ -520,8 +560,8 @@ export function formatarMedidasLimpa(item: Record<string, any>): string {
     geometry === "placa" ||
     geometry === "retangular"
   ) {
-    const espessura = diameter || measure;
-    const dimensoes = widthLength || [width, length].filter(Boolean).join(" x ");
+    const espessura = cDiameter || cMeasure;
+    const dimensoes = cWidthLength || [cWidth, cLength].filter(Boolean).join(" x ");
     resultado = normalizarMedida(
       [espessura, dimensoes].filter(Boolean).join(" x ")
     );
@@ -529,13 +569,13 @@ export function formatarMedidasLimpa(item: Record<string, any>): string {
   // Fallback genérico
   else {
     resultado = normalizarMedida(
-      [diameter || measure, widthLength || [width, length].filter(Boolean).join(" x ")]
+      [cDiameter || cMeasure, cWidthLength || [cWidth, cLength].filter(Boolean).join(" x ")]
         .filter(Boolean)
         .join(" x ")
     );
   }
 
-  if (!resultado) return "";
+  if (!resultado) return "—";
 
   // Adiciona o prefixo Ø quando o resultado começa com diâmetro (geometria redonda)
   if (
@@ -1417,6 +1457,28 @@ export const PRODUCT_DESCRIPTION_PRESETS: ProductDescriptionPreset[] = [
     badge: 'Piso Xadrez',
     description: 'Chapa estampada antiderrapante piso xadrez (k=0.00785)',
     keywords: ['xadrez', 'antiderrapante', 'piso', 'chapa xadrez']
+  },
+  {
+    name: 'RETALHO',
+    category: 'Chapas & Desenhos',
+    geometryType: 'chapa',
+    constant: 0,
+    constantSelect: 'retalho',
+    defaultPriceKg: 15.00,
+    badge: 'Retalho / Peso',
+    description: 'RETALHO',
+    keywords: ['retalho', 'sobra', 'avulso']
+  },
+  {
+    name: 'MÃO DE OBRA',
+    category: 'Chapas & Desenhos',
+    geometryType: 'chapa',
+    constant: 0,
+    constantSelect: 'mao_de_obra',
+    defaultPriceKg: 0.00,
+    badge: 'Serviço / M.O.',
+    description: 'MÃO DE OBRA',
+    keywords: ['mao de obra', 'mão de obra', 'servico', 'usinagem']
   },
 
   // 3. Inox (Aços Inoxidáveis)
