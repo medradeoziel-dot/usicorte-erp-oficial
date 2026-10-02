@@ -59,7 +59,10 @@ import {
   CreditCard,
   TrendingUp,
   Bell,
-  Clock
+  Clock,
+  RotateCw,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import BoletosGestaoModal from './BoletosGestaoModal';
 import { 
@@ -226,6 +229,12 @@ export default function ReportsModule({
   // Cotação ativa específica (carregada do banco por ID/URL ou cotação atual)
   const [activeQuote, setActiveQuote] = useState<Quote>(currentQuote);
   const [savedDbQuotes, setSavedDbQuotes] = useState<{ id: string; numero: string; cliente: string; data: string; total: number; createdAt?: string }[]>([]);
+
+  // Estados de Paginação e Carregamento Otimizado da Consulta
+  const [isLoadingConsulta, setIsLoadingConsulta] = useState<boolean>(false);
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(50);
+  const isLoadingConsultaRef = useRef<boolean>(false);
 
   // Active document preview / print mode
   const [activeModel, setActiveModel] = useState<PrintModelType>('A4-inteiro');
@@ -940,152 +949,161 @@ export default function ReportsModule({
   };
 
   // Carrega cotações e itens do Supabase e LocalStorage com deduplicação rigorosa e exibindo apenas a versão mais recente
-  const loadAllConsultaData = async () => {
+  const loadAllConsultaData = async (forceRefresh = false) => {
+    if (isLoadingConsultaRef.current) return;
+    isLoadingConsultaRef.current = true;
+    setIsLoadingConsulta(true);
+
     const itemsList: ConsultaItem[] = [];
     const seenQuoteNumbers = new Set<string>();
     const distinctQuotesList: { id: string; numero: string; cliente: string; data: string; total: number; createdAt?: string }[] = [];
 
-    // 1. Do Supabase (Prioridade Máxima)
     try {
-      const dbData = await fetchCotacoesDb();
-      if (dbData && dbData.length > 0) {
-        // Ordena por data e criação decrescente (mais recentes primeiro)
-        const sortedDbData = [...dbData].sort((a, b) => {
-          const dateA = new Date(a.created_at || a.data || 0).getTime();
-          const dateB = new Date(b.created_at || b.data || 0).getTime();
-          return dateB - dateA;
-        });
-
-        sortedDbData.forEach((q, qIdx) => {
-          const rawNum = q.numero || q.id || '';
-          const key = String(rawNum).trim().toLowerCase();
-
-          // Se já processamos o registro mais recente deste orçamento, IGNORA versões antigas duplicadas
-          if (!key || seenQuoteNumbers.has(key)) {
-            return;
-          }
-          seenQuoteNumbers.add(key);
-          if (q.id) seenQuoteNumbers.add(String(q.id).trim().toLowerCase());
-
-          distinctQuotesList.push({
-            id: q.id || '',
-            numero: q.numero || 'COT-SEM-NUMERO',
-            cliente: q.cliente_nome || 'Cliente Balcão',
-            data: q.data || q.created_at || '',
-            total: Number(q.valor_total) || 0,
-            createdAt: q.created_at || q.data || ''
-          });
-
-          // Adiciona SOMENTE os itens da versão mais recente desta cotação
-          (q.cotacao_itens || []).forEach((it, itIdx) => {
-              const isFaturadoQuote = String(q.situacao || '').toUpperCase() === 'FATURADO' || String(q.status || '').toLowerCase() === 'faturado';
-              const computedQuoteStatus = isFaturadoQuote ? 'faturado' : (q.status as StatusProposta);
-
-              itemsList.push({
-                idVer: 30000 + qIdx * 100 + itIdx,
-                data: formatSafeDate(q.data || q.created_at),
-                empresa: q.cliente_nome || 'Cliente Balcão',
-                contato: q.contato || '-',
-                produto: it.produto || 'Peça',
-                medida: it.medida || '',
-                descricao: it.descricao || 'Item UsiCorte',
-                valor: formatCurrency(it.valor_unitario || 0),
-                qtd: it.quantidade || 1,
-                unitario: it.valor_unitario || 0,
-                valorGeral: it.valor_total || ((it.valor_unitario || 0) * (it.quantidade || 1)),
-                cotacao: q.numero,
-                cotacaoId: q.id,
-                itemId: it.id,
-                observacao: it.observacao || (it as any).notes || (it as any).obs || '',
-                obs: it.observacao || (it as any).notes || (it as any).obs || '',
-                status: computedQuoteStatus,
-                desenhoUrl: it.desenho_url || undefined
-              });
-          });
-        });
-      }
-    } catch (err) {
-      console.warn('Supabase offline ou sem cotações:', err);
-    }
-
-    // 2. Do LocalStorage (apenas as cotações que NÃO existem no Supabase)
-    const saved = localStorage.getItem('s_orcamentos');
-    if (saved) {
+      // 1. Do Supabase (Prioridade Máxima com limite e caching em memória)
       try {
-        const quotes: Quote[] = JSON.parse(saved);
-        if (Array.isArray(quotes)) {
-          // Ordena por data de atualização mais recente
-          const sortedLocal = [...quotes].sort((a, b) => {
-            const dateA = new Date(a.updatedAt || a.createdAt || a.date || 0).getTime();
-            const dateB = new Date(b.updatedAt || b.createdAt || b.date || 0).getTime();
+        const dbData = await fetchCotacoesDb(undefined, undefined, { forceRefresh, limit: 300 });
+        if (dbData && dbData.length > 0) {
+          // Ordena por data e criação decrescente (mais recentes primeiro)
+          const sortedDbData = [...dbData].sort((a, b) => {
+            const dateA = new Date(a.created_at || a.data || 0).getTime();
+            const dateB = new Date(b.created_at || b.data || 0).getTime();
             return dateB - dateA;
           });
 
-          sortedLocal.forEach((q, qIdx) => {
-            const key = String(q.quoteNumber || q.id || '').trim().toLowerCase();
-            if (key && !seenQuoteNumbers.has(key)) {
-              seenQuoteNumbers.add(key);
+          sortedDbData.forEach((q, qIdx) => {
+            const rawNum = q.numero || q.id || '';
+            const key = String(rawNum).trim().toLowerCase();
 
-              distinctQuotesList.push({
-                id: q.id || '',
-                numero: q.quoteNumber || `COT-LOCAL-${qIdx + 1}`,
-                cliente: q.clientName || 'Cliente Balcão',
-                data: q.date || q.createdAt || '',
-                total: q.grandTotal || q.subtotalTotal || (q.items || []).reduce((acc, i) => acc + ((i.unitPrice || 0) * (i.quantity || 1)), 0),
-                createdAt: q.createdAt || q.updatedAt || q.date || ''
-              });
-
-              (q.items || []).forEach((it, itIdx) => {
-                const obsText = it.notes || it.observacao || (it as any).obs || '';
-                  const isFaturadoLocal = (q.status || '').toLowerCase().includes('faturad') || ((q as any).situacao || '').toUpperCase() === 'FATURADO' || q.paymentStatus === 'Pago';
-                  const computedLocalStatus = isFaturadoLocal ? 'faturado' :
-                    (q.status?.toLowerCase().includes('aprov') ? 'aprovado' :
-                     q.status?.toLowerCase().includes('canc') ? 'cancelado' :
-                     q.status?.toLowerCase().includes('rej') ? 'rejeitado' :
-                     q.status?.toLowerCase().includes('env') ? 'pendente' : 'rascunho');
-
-                  itemsList.push({
-                    idVer: 20000 + qIdx * 100 + itIdx,
-                    data: formatSafeDate(q.date || q.createdAt),
-                    empresa: q.clientName || 'Cliente Balcão',
-                    contato: q.contactPerson || '-',
-                    produto: it.constantName || it.description || 'Material',
-                    medida: formatarMedidasLimpa(it),
-                    descricao: it.description || 'Peça UsiCorte',
-                    valor: formatCurrency(it.unitPrice || 0),
-                    qtd: it.quantity || 1,
-                    unitario: it.unitPrice || 0,
-                    valorGeral: (it.unitPrice || 0) * (it.quantity || 1),
-                    cotacao: q.quoteNumber || `COT-${qIdx + 1}`,
-                    cotacaoId: q.id,
-                    itemId: it.id,
-                    observacao: obsText,
-                    obs: obsText,
-                    status: computedLocalStatus as StatusProposta,
-                    desenhoUrl: it.drawingImage || (it as any).fotoDesenho || (it as any).desenho_url || undefined
-                  });
-              });
+            // Se já processamos o registro mais recente deste orçamento, IGNORA versões antigas duplicadas
+            if (!key || seenQuoteNumbers.has(key)) {
+              return;
             }
+            seenQuoteNumbers.add(key);
+            if (q.id) seenQuoteNumbers.add(String(q.id).trim().toLowerCase());
+
+            distinctQuotesList.push({
+              id: q.id || '',
+              numero: q.numero || 'COT-SEM-NUMERO',
+              cliente: q.cliente_nome || 'Cliente Balcão',
+              data: q.data || q.created_at || '',
+              total: Number(q.valor_total) || 0,
+              createdAt: q.created_at || q.data || ''
+            });
+
+            // Adiciona SOMENTE os itens da versão mais recente desta cotação
+            (q.cotacao_itens || []).forEach((it, itIdx) => {
+                const isFaturadoQuote = String(q.situacao || '').toUpperCase() === 'FATURADO' || String(q.status || '').toLowerCase() === 'faturado';
+                const computedQuoteStatus = isFaturadoQuote ? 'faturado' : (q.status as StatusProposta);
+
+                itemsList.push({
+                  idVer: 30000 + qIdx * 100 + itIdx,
+                  data: formatSafeDate(q.data || q.created_at),
+                  empresa: q.cliente_nome || 'Cliente Balcão',
+                  contato: q.contato || '-',
+                  produto: it.produto || 'Peça',
+                  medida: it.medida || '',
+                  descricao: it.descricao || 'Item UsiCorte',
+                  valor: formatCurrency(it.valor_unitario || 0),
+                  qtd: it.quantidade || 1,
+                  unitario: it.valor_unitario || 0,
+                  valorGeral: it.valor_total || ((it.valor_unitario || 0) * (it.quantidade || 1)),
+                  cotacao: q.numero,
+                  cotacaoId: q.id,
+                  itemId: it.id,
+                  observacao: it.observacao || (it as any).notes || (it as any).obs || '',
+                  obs: it.observacao || (it as any).notes || (it as any).obs || '',
+                  status: computedQuoteStatus,
+                  desenhoUrl: it.desenho_url || undefined
+                });
+            });
           });
         }
-      } catch (e) {
-        console.warn('Erro ao ler s_orcamentos:', e);
+      } catch (err) {
+        console.warn('Supabase offline ou sem cotações:', err);
       }
 
-      // Rotina segura de sincronização: envia orçamentos locais pendentes ao Supabase
-      // e só limpa a chave 's_orcamentos' após confirmação de gravação no banco
-      executarMigracaoEmergenciaOrcamentos().then(res => {
-        if (res.migratedCount > 0) {
-          // Se novos orçamentos foram salvos no Supabase, atualiza os dados da consulta
-          loadAllConsultaData();
-        }
-      }).catch(err => {
-        console.warn('Aviso ao sincronizar emergência em ReportsModule:', err);
-      });
-    }
+      // 2. Do LocalStorage (apenas as cotações que NÃO existem no Supabase)
+      const saved = localStorage.getItem('s_orcamentos');
+      if (saved) {
+        try {
+          const quotes: Quote[] = JSON.parse(saved);
+          if (Array.isArray(quotes)) {
+            // Ordena por data de atualização mais recente
+            const sortedLocal = [...quotes].sort((a, b) => {
+              const dateA = new Date(a.updatedAt || a.createdAt || a.date || 0).getTime();
+              const dateB = new Date(b.updatedAt || b.createdAt || b.date || 0).getTime();
+              return dateB - dateA;
+            });
 
-    setSavedDbQuotes(distinctQuotesList);
-    setDbQuotesItems(itemsList);
+            sortedLocal.forEach((q, qIdx) => {
+              const key = String(q.quoteNumber || q.id || '').trim().toLowerCase();
+              if (key && !seenQuoteNumbers.has(key)) {
+                seenQuoteNumbers.add(key);
+
+                distinctQuotesList.push({
+                  id: q.id || '',
+                  numero: q.quoteNumber || `COT-LOCAL-${qIdx + 1}`,
+                  cliente: q.clientName || 'Cliente Balcão',
+                  data: q.date || q.createdAt || '',
+                  total: q.grandTotal || q.subtotalTotal || (q.items || []).reduce((acc, i) => acc + ((i.unitPrice || 0) * (i.quantity || 1)), 0),
+                  createdAt: q.createdAt || q.updatedAt || q.date || ''
+                });
+
+                (q.items || []).forEach((it, itIdx) => {
+                  const obsText = it.notes || it.observacao || (it as any).obs || '';
+                    const isFaturadoLocal = (q.status || '').toLowerCase().includes('faturad') || ((q as any).situacao || '').toUpperCase() === 'FATURADO' || q.paymentStatus === 'Pago';
+                    const computedLocalStatus = isFaturadoLocal ? 'faturado' :
+                      (q.status?.toLowerCase().includes('aprov') ? 'aprovado' :
+                       q.status?.toLowerCase().includes('canc') ? 'cancelado' :
+                       q.status?.toLowerCase().includes('rej') ? 'rejeitado' :
+                       q.status?.toLowerCase().includes('env') ? 'pendente' : 'rascunho');
+
+                    itemsList.push({
+                      idVer: 20000 + qIdx * 100 + itIdx,
+                      data: formatSafeDate(q.date || q.createdAt),
+                      empresa: q.clientName || 'Cliente Balcão',
+                      contato: q.contactPerson || '-',
+                      produto: it.constantName || it.description || 'Material',
+                      medida: formatarMedidasLimpa(it),
+                      descricao: it.description || 'Peça UsiCorte',
+                      valor: formatCurrency(it.unitPrice || 0),
+                      qtd: it.quantity || 1,
+                      unitario: it.unitPrice || 0,
+                      valorGeral: (it.unitPrice || 0) * (it.quantity || 1),
+                      cotacao: q.quoteNumber || `COT-${qIdx + 1}`,
+                      cotacaoId: q.id,
+                      itemId: it.id,
+                      observacao: obsText,
+                      obs: obsText,
+                      status: computedLocalStatus as StatusProposta,
+                      desenhoUrl: it.drawingImage || (it as any).fotoDesenho || (it as any).desenho_url || undefined
+                    });
+                });
+              }
+            });
+          }
+        } catch (e) {
+          console.warn('Erro ao ler s_orcamentos:', e);
+        }
+
+        // Rotina segura de sincronização: envia orçamentos locais pendentes ao Supabase
+        // e só limpa a chave 's_orcamentos' após confirmação de gravação no banco
+        executarMigracaoEmergenciaOrcamentos().then(res => {
+          if (res.migratedCount > 0) {
+            // Se novos orçamentos foram salvos no Supabase, atualiza os dados da consulta
+            loadAllConsultaData();
+          }
+        }).catch(err => {
+          console.warn('Aviso ao sincronizar emergência em ReportsModule:', err);
+        });
+      }
+
+      setSavedDbQuotes(distinctQuotesList);
+      setDbQuotesItems(itemsList);
+    } finally {
+      isLoadingConsultaRef.current = false;
+      setIsLoadingConsulta(false);
+    }
   };
 
   useEffect(() => {
@@ -1525,6 +1543,32 @@ export default function ReportsModule({
     );
   };
 
+  // Reseta para a primeira página sempre que o usuário alterar os filtros de busca
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [inputBusca, clienteBusca, tipoFiltro, statusFiltro, pageSize]);
+
+  // Itens paginados para renderização leve e de alta performance
+  const paginatedConsultaItems = useMemo(() => {
+    if (pageSize <= 0) return filteredConsultaItems;
+    const start = (currentPage - 1) * pageSize;
+    return filteredConsultaItems.slice(start, start + pageSize);
+  }, [filteredConsultaItems, currentPage, pageSize]);
+
+  const totalPages = useMemo(() => {
+    if (pageSize <= 0 || filteredConsultaItems.length === 0) return 1;
+    return Math.ceil(filteredConsultaItems.length / pageSize);
+  }, [filteredConsultaItems.length, pageSize]);
+
+  const handleSelectCurrentPage = (checked: boolean) => {
+    const pageIds = paginatedConsultaItems.map(item => item.idVer);
+    if (checked) {
+      setSelectedIds(prev => Array.from(new Set([...prev, ...pageIds])));
+    } else {
+      setSelectedIds(prev => prev.filter(id => !pageIds.includes(id)));
+    }
+  };
+
   // ✅ Padronização de todos os botões de impressão da CONSULTA (GERAL, EMPRESA, PEDIDO, ETIQUETAS, CORTE)
   // Utiliza EXCLUSIVAMENTE a cotação/itens selecionados na tabela da Consulta,
   // 100% isolado do estado ou cache da primeira aba.
@@ -1560,6 +1604,12 @@ export default function ReportsModule({
     }
 
     // Aciona a caixa de impressão após breve delay para atualização da renderização
+    const onAfterPrint = () => {
+      document.body.classList.remove('print-pedido', 'print-etiqueta', 'print-proposta', 'print-corte', 'print-geral', 'print-empresa');
+      window.removeEventListener('afterprint', onAfterPrint);
+    };
+    window.addEventListener('afterprint', onAfterPrint);
+
     setTimeout(() => {
       window.print();
     }, 250);
@@ -1872,6 +1922,12 @@ export default function ReportsModule({
     }
 
     // Pequeno setTimeout antes do window.print() para dar tempo do React atualizar a tela antes de abrir a janela da impressora
+    const onAfterPrint = () => {
+      document.body.classList.remove('print-pedido', 'print-etiqueta', 'print-proposta', 'print-corte', 'print-geral', 'print-empresa');
+      window.removeEventListener('afterprint', onAfterPrint);
+    };
+    window.addEventListener('afterprint', onAfterPrint);
+
     setTimeout(() => {
       window.print();
     }, 150);
@@ -3020,7 +3076,19 @@ export default function ReportsModule({
           <div className="filtros-bar btn-no-print">
             
             {/* Botões de Impressão e Ações */}
-            <div className="botoes-impressao grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-2.5 w-full">
+            <div className="botoes-impressao grid grid-cols-2 sm:grid-cols-4 md:grid-cols-8 gap-2.5 w-full">
+              <button 
+                type="button" 
+                className="btn-print w-full min-w-0 cursor-pointer bg-slate-800 hover:bg-slate-700 text-cyan-400 border border-slate-700 transition-all flex flex-col items-center justify-center disabled:opacity-60" 
+                onClick={() => loadAllConsultaData(true)}
+                disabled={isLoadingConsulta}
+                title="Recarregar dados do Supabase"
+              >
+                <span className="flex items-center justify-center">
+                  <RotateCw className={`w-4 h-4 mb-0.5 ${isLoadingConsulta ? 'animate-spin text-cyan-400' : 'text-cyan-400'}`} />
+                </span>
+                {isLoadingConsulta ? 'ATUALIZANDO' : 'ATUALIZAR'}
+              </button>
               <button 
                 type="button" 
                 className="btn-print w-full min-w-0 cursor-pointer" 
@@ -3341,8 +3409,9 @@ export default function ReportsModule({
                     <input 
                       type="checkbox" 
                       id="checkTodos" 
-                      checked={filteredConsultaItems.length > 0 && selectedIds.length === filteredConsultaItems.length}
-                      onChange={(e) => handleSelectAll(e.target.checked)} 
+                      checked={paginatedConsultaItems.length > 0 && paginatedConsultaItems.every(i => selectedIds.includes(i.idVer))}
+                      onChange={(e) => handleSelectCurrentPage(e.target.checked)} 
+                      title="Selecionar todos os itens da página atual"
                     />
                   </th>
                   <th style={{ minWidth: '190px', textAlign: 'center' }}>Ações</th>
@@ -3361,14 +3430,24 @@ export default function ReportsModule({
                 </tr>
               </thead>
               <tbody id="tbodyConsulta">
-                {filteredConsultaItems.length === 0 ? (
+                {isLoadingConsulta ? (
+                  <tr>
+                    <td colSpan={14} className="text-center py-12 text-slate-400 font-medium bg-slate-900/40">
+                      <div className="flex flex-col items-center justify-center gap-2.5">
+                        <Loader2 className="w-8 h-8 animate-spin text-cyan-400" />
+                        <span className="text-sm font-semibold text-slate-200">Carregando cotações e itens do Supabase...</span>
+                        <span className="text-xs text-slate-400">Otimizando dados da consulta</span>
+                      </div>
+                    </td>
+                  </tr>
+                ) : filteredConsultaItems.length === 0 ? (
                   <tr>
                     <td colSpan={14} className="text-center py-6 text-slate-500 font-medium">
                       Nenhum registro encontrado para os filtros selecionados.
                     </td>
                   </tr>
                 ) : (
-                  filteredConsultaItems.map((item, idx) => {
+                  paginatedConsultaItems.map((item, idx) => {
                     const isSelected = selectedIds.includes(item.idVer);
                     return (
                       <tr 
@@ -3578,9 +3657,66 @@ export default function ReportsModule({
             </table>
           </div>
 
-          <div className="btn-no-print text-xs text-slate-400 flex items-center justify-between pt-2">
-            <span>Mostrando {filteredConsultaItems.length} de {allConsultaItems.length} itens</span>
-            <span>{selectedIds.length} item(ns) selecionado(s)</span>
+          {/* BARRA DE PAGINAÇÃO E CONTROLE DE EXIBIÇÃO */}
+          <div className="btn-no-print flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 text-xs text-slate-400 bg-slate-900/60 border border-slate-800 rounded-xl p-3 shadow-xs">
+            <div className="flex items-center gap-4 flex-wrap">
+              <span>
+                Exibindo <strong className="text-slate-200">{filteredConsultaItems.length === 0 ? 0 : (currentPage - 1) * (pageSize || 1) + 1}</strong> a <strong className="text-slate-200">{pageSize <= 0 ? filteredConsultaItems.length : Math.min(currentPage * pageSize, filteredConsultaItems.length)}</strong> de <strong className="text-slate-200">{filteredConsultaItems.length}</strong> itens filtrados ({allConsultaItems.length} no total)
+              </span>
+              <span className="text-cyan-400 font-semibold">
+                {selectedIds.length} item(ns) selecionado(s)
+              </span>
+            </div>
+
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="flex items-center gap-1.5">
+                <span className="text-slate-400">Por página:</span>
+                <select
+                  value={pageSize}
+                  onChange={(e) => {
+                    setPageSize(Number(e.target.value));
+                    setCurrentPage(1);
+                  }}
+                  className="bg-slate-950 border border-slate-700 text-slate-200 rounded-md px-2 py-1 text-xs outline-none focus:border-cyan-500 cursor-pointer"
+                >
+                  <option value={25}>25</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                  <option value={200}>200</option>
+                  <option value={0}>Todos</option>
+                </select>
+              </div>
+
+              {pageSize > 0 && totalPages > 1 && (
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                    disabled={currentPage <= 1}
+                    className="p-1.5 rounded-lg border border-slate-700 bg-slate-950 text-slate-300 hover:text-white hover:border-slate-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    title="Página anterior"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+
+                  <div className="flex items-center gap-1 px-1.5 text-xs">
+                    <span className="text-slate-200 font-bold">{currentPage}</span>
+                    <span className="text-slate-500">/</span>
+                    <span className="text-slate-400">{totalPages}</span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                    disabled={currentPage >= totalPages}
+                    className="p-1.5 rounded-lg border border-slate-700 bg-slate-950 text-slate-300 hover:text-white hover:border-slate-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    title="Próxima página"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* ===================================================

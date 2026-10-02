@@ -1035,25 +1035,90 @@ export async function saveCotacaoDb(quote: Quote): Promise<{ data: any; error: a
       }
     }
 
+    invalidateCotacoesCache();
     return { data: { id: cotacaoId, ...cotacaoPayload }, error: null };
   } catch (err) {
     return { data: null, error: err };
   }
 }
 
-export async function fetchCotacoesDb(filtroCliente?: string, filtroStatus?: string): Promise<SupabaseCotacao[]> {
+export interface FetchCotacoesOptions {
+  limit?: number;
+  offset?: number;
+  page?: number;
+  dataInicio?: string;
+  dataFim?: string;
+  situacao?: string;
+  forceRefresh?: boolean;
+}
+
+// Cache em memória de curta duração para aceleração da navegação e troca de abas
+let cotacoesMemoryCache: Map<string, { data: SupabaseCotacao[]; timestamp: number }> = new Map();
+const COTACOES_CACHE_TTL_MS = 10000; // 10 segundos de reaproveitamento ultrarrápido
+
+export function invalidateCotacoesCache() {
+  cotacoesMemoryCache.clear();
+}
+
+export async function fetchCotacoesDb(
+  filtroCliente?: string, 
+  filtroStatus?: string,
+  options?: FetchCotacoesOptions
+): Promise<SupabaseCotacao[]> {
   try {
+    const cacheKey = JSON.stringify({ filtroCliente, filtroStatus, options });
+    const cached = cotacoesMemoryCache.get(cacheKey);
+    const now = Date.now();
+
+    if (!options?.forceRefresh && cached && (now - cached.timestamp < COTACOES_CACHE_TTL_MS)) {
+      return cached.data;
+    }
+
+    // Consulta otimizada com projeção e ordenação indexada
     let q = db
       .from('cotacoes')
       .select('*, cotacao_itens(*)')
       .order('data', { ascending: false });
 
+    // 1. Filtro server-side por cliente
     if (filtroCliente && filtroCliente.trim()) {
       q = q.ilike('cliente_nome', `%${filtroCliente.trim()}%`);
     }
 
+    // 2. Filtro server-side por status
     if (filtroStatus && filtroStatus !== 'todas' && filtroStatus !== 'todos') {
-      q = q.eq('status', filtroStatus);
+      if (filtroStatus === 'ativas') {
+        q = q.in('status', ['pendente', 'aprovado', 'rascunho']);
+      } else {
+        q = q.eq('status', filtroStatus);
+      }
+    }
+
+    // 3. Filtro server-side por situação (ex: FATURADO)
+    if (options?.situacao) {
+      q = q.eq('situacao', options.situacao);
+    }
+
+    // 4. Filtros server-side por intervalo de datas
+    if (options?.dataInicio) {
+      q = q.gte('data', options.dataInicio);
+    }
+    if (options?.dataFim) {
+      q = q.lte('data', options.dataFim);
+    }
+
+    // 5. Paginação e Limites inteligentes (evita carregar gigabytes de JSON de uma só vez)
+    const effectiveLimit = options?.limit ?? 300;
+    if (options?.page && options.page > 0) {
+      const from = (options.page - 1) * effectiveLimit;
+      const to = from + effectiveLimit - 1;
+      q = q.range(from, to);
+    } else if (options?.offset !== undefined) {
+      const from = options.offset;
+      const to = from + effectiveLimit - 1;
+      q = q.range(from, to);
+    } else if (effectiveLimit > 0 && effectiveLimit < 10000) {
+      q = q.limit(effectiveLimit);
     }
 
     const { data, error, status } = await q;
@@ -1064,28 +1129,18 @@ export async function fetchCotacoesDb(filtroCliente?: string, filtroStatus?: str
       return [];
     }
 
+    let result: SupabaseCotacao[] = [];
     if (data && Array.isArray(data)) {
-      // Deleta do Supabase se existirem registros legados
-      const invalid = data.filter((c: any) => {
-        const num = String(c.numero || c.id || '');
-        return num.includes('021935') || num.includes('21935');
-      });
-      if (invalid.length > 0) {
-        invalid.forEach(async (inv: any) => {
-          if (inv.id) {
-            await db.from('cotacao_itens').delete().eq('cotacao_id', inv.id);
-            await db.from('cotacoes').delete().eq('id', inv.id);
-          }
-        });
-      }
-
-      return (data as SupabaseCotacao[]).filter((c: any) => {
+      result = (data as SupabaseCotacao[]).filter((c: any) => {
         const num = String(c.numero || c.id || '');
         return !num.includes('021935') && !num.includes('21935');
       });
     }
 
-    return (data as SupabaseCotacao[]) || [];
+    // Armazena no cache local em memória
+    cotacoesMemoryCache.set(cacheKey, { data: result, timestamp: now });
+
+    return result;
   } catch (err) {
     console.error("Erro na busca de cotações:", err);
     return [];
@@ -1171,6 +1226,7 @@ export async function updateCotacaoStatusDb(
     }
   }
 
+  invalidateCotacoesCache();
   return { data, error };
 }
 
@@ -1307,6 +1363,7 @@ export async function atualizarStatusPagamentoCotacaoDb(
     // Silencioso em caso de localStorage indisponível
   }
 
+  invalidateCotacoesCache();
   return { data, error };
 }
 
@@ -1446,6 +1503,7 @@ export async function deleteCotacaoDb(idOrNumero: string): Promise<{ error: any 
       .delete()
       .eq('id', cotacaoId);
 
+    invalidateCotacoesCache();
     if (errId && !isUuid(idOrNumero)) {
       const { error: errNum } = await db
         .from('cotacoes')

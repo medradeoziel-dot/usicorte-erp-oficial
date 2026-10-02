@@ -110,7 +110,7 @@ export default function ExtratoCobrancaPrint({
   const hasPaymentInfo = hasPix || hasBank || hasInstructions;
 
   return (
-    <div className="secao-extrato bg-white text-black p-6 sm:p-8 max-w-[850px] mx-auto font-sans leading-relaxed text-xs">
+    <div className="secao-extrato bg-white text-black p-6 sm:p-8 max-w-[850px] mx-auto font-sans leading-relaxed text-xs print:p-0 print:m-0 print:max-w-none print:w-full">
       {/* 1. CABEÇALHO OFICIAL COM LOGO E DADOS DA EMPRESA */}
       <CompanyHeader 
         compact={false}
@@ -122,9 +122,9 @@ export default function ExtratoCobrancaPrint({
       />
 
       {/* 2. DADOS DO CLIENTE & METADADOS DO EXTRATO */}
-      <div className="border border-slate-400 rounded-lg p-3.5 mb-4 bg-slate-50/70">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div>
+      <div className="extrato-header-box border border-slate-400 rounded-lg p-3.5 mb-4 bg-slate-50/70 print:bg-slate-50 print:border-slate-400 print:p-3 print:mb-3">
+        <div className="flex flex-col sm:flex-row print:flex-row justify-between gap-4 print:gap-4">
+          <div className="flex-1 min-w-0 pr-2">
             <div className="text-[10px] font-bold uppercase tracking-wider text-slate-600 mb-0.5">
               Dados do Cliente / Sacado
             </div>
@@ -154,7 +154,7 @@ export default function ExtratoCobrancaPrint({
             )}
           </div>
 
-          <div className="md:text-right border-t md:border-t-0 pt-2 md:pt-0 border-slate-200 flex flex-col justify-between">
+          <div className="w-full sm:w-[280px] print:w-[260px] shrink-0 sm:text-right print:text-right border-t sm:border-t-0 print:border-t-0 pt-2 sm:pt-0 print:pt-0 border-slate-200 flex flex-col justify-between">
             <div>
               <div className="text-[10px] font-bold uppercase tracking-wider text-slate-600 mb-0.5">
                 Resumo do Faturamento
@@ -170,7 +170,7 @@ export default function ExtratoCobrancaPrint({
               </div>
             </div>
 
-            <div className="mt-2 inline-block md:self-end bg-blue-50 border border-blue-200 rounded px-3 py-1.5 text-left">
+            <div className="mt-2 inline-block sm:self-end print:self-end bg-blue-50 border border-blue-200 rounded px-3 py-1.5 text-left">
               <span className="text-[10px] uppercase font-bold text-blue-800 block">Total a Cobrar</span>
               <span className="text-base font-black text-blue-950 font-mono">
                 {formatCurrency(totalValor)}
@@ -181,7 +181,7 @@ export default function ExtratoCobrancaPrint({
       </div>
 
       {/* 3. TABELA ORGANIZADA DE COTAÇÕES / PEDIDOS SELECIONADOS */}
-      <div className="mb-4">
+      <div className="mb-4 print:mb-3">
         <div className="text-[11px] font-bold uppercase tracking-wide text-slate-900 mb-1.5 flex items-center justify-between">
           <span>Demonstrativo Detalhado de Cotações / Pedidos</span>
           <span className="text-[10px] text-slate-600 font-normal">
@@ -218,8 +218,8 @@ export default function ExtratoCobrancaPrint({
                     {formatSafeDate(c.data)}
                   </td>
                   <td className="border border-slate-300 px-3 py-2 text-slate-800">
-                    <div className="font-semibold text-[11.5px] leading-snug uppercase tracking-wide">
-                      SERVIÇOS DE CORTE DIVERSOS
+                    <div className="font-semibold text-[11px] leading-snug uppercase tracking-wide">
+                      {c.itensResumo || (c as any).observacoes || (c as any).notes || 'SERVIÇOS DE CORTE DIVERSOS'}
                     </div>
                   </td>
                   <td className="border border-slate-300 px-2 py-2 text-center">
@@ -260,17 +260,17 @@ export default function ExtratoCobrancaPrint({
       </div>
 
       {/* 4. QUADRO DE DESTAQUE: TOTAL GERAL A PAGAR */}
-      <div className="border-2 border-slate-900 rounded-lg p-3.5 mb-4 bg-slate-900 text-white flex items-center justify-between shadow-sm">
+      <div className="extrato-total-box border-2 border-slate-900 rounded-lg p-3.5 mb-4 bg-slate-900 text-white flex items-center justify-between shadow-sm print:bg-slate-50 print:border-slate-900 print:text-slate-900 print:shadow-none print:p-2.5 print:mb-3">
         <div>
-          <span className="text-xs uppercase font-bold tracking-widest text-slate-300 block">
+          <span className="text-xs uppercase font-bold tracking-widest text-slate-300 print:text-slate-700 block">
             Valor Total Geral a Pagar
           </span>
-          <span className="text-[11px] text-slate-400">
+          <span className="text-[11px] text-slate-400 print:text-slate-500">
             Referente a todas as cotações listadas acima
           </span>
         </div>
         <div className="text-right">
-          <span className="text-2xl sm:text-3xl font-black font-mono tracking-tight text-white">
+          <span className="text-2xl sm:text-3xl font-black font-mono tracking-tight text-white print:text-slate-950">
             {formatCurrency(totalValor)}
           </span>
         </div>
@@ -278,15 +278,15 @@ export default function ExtratoCobrancaPrint({
 
       {/* 5. DADOS PARA PAGAMENTO (CHAVE PIX E DADOS BANCÁRIOS DINÂMICOS) */}
       {hasPaymentInfo && (
-        <div className="border border-slate-300 rounded-lg p-3.5 mb-4 bg-slate-50">
+        <div className="extrato-pagamento-box border border-slate-300 rounded-lg p-3.5 mb-4 bg-slate-50">
           <div className="text-[11px] font-bold uppercase tracking-wider text-slate-900 border-b border-slate-300 pb-1 mb-2 flex items-center gap-1.5">
             <span>💳 Informações para Pagamento & Chave PIX</span>
           </div>
 
-          <div className={`grid grid-cols-1 ${hasPix && hasBank ? 'md:grid-cols-2' : ''} gap-3 text-xs`}>
+          <div className="flex flex-col sm:flex-row gap-3 text-xs">
             {/* Bloco PIX */}
             {hasPix && (
-              <div className="bg-white border border-slate-200 rounded p-2.5">
+              <div className="flex-1 bg-white border border-slate-200 rounded p-2.5">
                 <div className="text-[10px] font-bold uppercase text-slate-600 mb-0.5">Chave PIX Oficial</div>
                 {chavePix && (
                   <div className="text-sm font-mono font-black text-slate-900 select-all">
@@ -308,7 +308,7 @@ export default function ExtratoCobrancaPrint({
 
             {/* Bloco Dados Bancários */}
             {hasBank && (
-              <div className="bg-white border border-slate-200 rounded p-2.5">
+              <div className="flex-1 bg-white border border-slate-200 rounded p-2.5">
                 <div className="text-[10px] font-bold uppercase text-slate-600 mb-0.5">Dados Bancários / Transferência</div>
                 {dadosBancariosCustom ? (
                   <div className="text-xs text-slate-900 font-semibold leading-relaxed">
@@ -355,14 +355,14 @@ export default function ExtratoCobrancaPrint({
       )}
 
       {/* 7. ASSINATURAS / TERMO DE CONFERÊNCIA */}
-      <div className="grid grid-cols-2 gap-8 pt-6 mt-4 border-t border-slate-300 text-center text-xs">
-        <div>
+      <div className="extrato-assinaturas flex flex-row justify-between gap-8 pt-6 mt-4 border-t border-slate-300 text-center text-xs">
+        <div className="flex-1">
           <div className="border-b border-slate-400 w-4/5 mx-auto mb-1"></div>
           <div className="font-bold text-slate-900">{companyData.tradeName || 'USICORTE METAIS'}</div>
           <div className="text-[10px] text-slate-600">Departamento Financeiro / Vendas</div>
         </div>
 
-        <div>
+        <div className="flex-1">
           <div className="border-b border-slate-400 w-4/5 mx-auto mb-1"></div>
           <div className="font-bold text-slate-900 uppercase">{nomeClientePrincipal}</div>
           <div className="text-[10px] text-slate-600">Conferência & De Acordo</div>

@@ -10,7 +10,7 @@
     margin: 8mm;
   }
 
-  /* 1. Oculta apenas as partes desnecessárias (menus, sidebars, cabeçalhos, botões, etc.) */
+  /* 1. Oculta todos os elementos de navegação, barras laterais, cabeçalhos, filtros e botões da aplicação */
   .no-print, 
   .btn-no-print, 
   nav, 
@@ -26,12 +26,42 @@
   .filtros-bar, 
   .login-overlay,
   #sidebarOverlay,
-  footer {
+  footer,
+  .footerbar,
+  #migration-alert-banner,
+  .offline-indicator,
+  .opcoes-pesquisa,
+  .botoes-impressao,
+  .tabela-container,
+  .tabela-consulta,
+  #screen-consulta,
+  .fechamento-interface-screen,
+  .fechamento-header,
+  .fechamento-filtros,
+  .fechamento-acoes,
+  .fechamento-cards,
+  .fechamento-tabela-tela,
+  .fechamento-feedback,
+  .extrato-modal-header,
+  .extrato-modal-footer,
+  .extrato-modal-backdrop,
+  #screen-clientes,
+  #screen-produtos,
+  #screen-orcamento,
+  #screen-vendas,
+  #screen-calculadora,
+  #screen-ordem-servico,
+  #screen-movimentacoes,
+  #screen-estoque,
+  #screen-financeiro,
+  #screen-empresa,
+  #screen-php,
+  #screen-dashboard {
     display: none !important;
   }
 
-  /* 2. Garante que o documento raiz e containers principais fiquem visíveis (NÃO escondem o documento) */
-  html, body, #root, #app-root, #app-root > div, .app-body, main, .content-area, #container-impressao, #container-impressao > div, #screen-relatorios, #screen-consulta {
+  /* 2. Garante que o documento raiz e containers principais fiquem limpos na folha impressa */
+  html, body, #root, #app-root, #app-root > div, .app-body, main, .content-area, .fechamento-root-container {
     background: #ffffff !important;
     color: #000000 !important;
     margin: 0 !important;
@@ -50,6 +80,64 @@
     border-top-color: transparent !important;
     outline: none !important;
     position: static !important;
+  }
+
+  /* Desativa restrições de overflow e altura fixa que causam corte em impressão */
+  div.overflow-hidden,
+  div.overflow-y-auto,
+  div.overflow-auto,
+  div.relative.overflow-hidden,
+  main.overflow-y-auto {
+    overflow: visible !important;
+    height: auto !important;
+    max-height: none !important;
+  }
+
+  /* Desembrulha a modal do extrato para impressão direta em folha cheia */
+  .extrato-modal-overlay {
+    position: static !important;
+    background: transparent !important;
+    backdrop-filter: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    display: block !important;
+    z-index: auto !important;
+  }
+
+  .extrato-modal-content {
+    position: static !important;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: none !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border-radius: 0 !important;
+  }
+
+  .extrato-modal-scroll {
+    overflow: visible !important;
+    background: transparent !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    max-height: none !important;
+  }
+
+  .extrato-modal-card-wrapper {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    overflow: visible !important;
   }
 
   /* Remoção global de qualquer linha divisória ou cabeçalho superior no topo absoluto das folhas impressas */
@@ -100,6 +188,8 @@
   body.print-pedido .secao-proposta { display: none !important; }
   body.print-pedido .secao-proposta-resumida { display: none !important; }
   body.print-pedido .secao-corte { display: none !important; }
+  body.print-pedido .secao-extrato { display: none !important; }
+  body.print-pedido .secao-fechamento-print { display: none !important; }
   body.print-pedido .secao-pedido { display: flex !important; }
 
   /* Modo Etiqueta: oculta pedido, corte e proposta, exibe etiqueta 80x80 */
@@ -107,6 +197,8 @@
   body.print-etiqueta .secao-proposta { display: none !important; }
   body.print-etiqueta .secao-proposta-resumida { display: none !important; }
   body.print-etiqueta .secao-corte { display: none !important; }
+  body.print-etiqueta .secao-extrato { display: none !important; }
+  body.print-etiqueta .secao-fechamento-print { display: none !important; }
   body.print-etiqueta .secao-etiqueta { display: flex !important; }
 
   /* Modo Proposta / Geral: */
@@ -118,6 +210,10 @@
   body.print-geral .secao-corte { display: none !important; }
   body.print-proposta .secao-proposta-resumida,
   body.print-geral .secao-proposta-resumida { display: none !important; }
+  body.print-proposta .secao-extrato,
+  body.print-geral .secao-extrato { display: none !important; }
+  body.print-proposta .secao-fechamento-print,
+  body.print-geral .secao-fechamento-print { display: none !important; }
   body.print-proposta .secao-proposta,
   body.print-geral .secao-proposta { display: block !important; }
 
@@ -126,6 +222,8 @@
   body.print-empresa .secao-pedido { display: none !important; }
   body.print-empresa .secao-corte { display: none !important; }
   body.print-empresa .secao-proposta { display: none !important; }
+  body.print-empresa .secao-extrato { display: none !important; }
+  body.print-empresa .secao-fechamento-print { display: none !important; }
   body.print-empresa .secao-proposta-resumida { display: block !important; }
 
   /* Modo Corte: */
@@ -133,18 +231,47 @@
   body.print-corte .secao-pedido { display: none !important; }
   body.print-corte .secao-proposta { display: none !important; }
   body.print-corte .secao-proposta-resumida { display: none !important; }
+  body.print-corte .secao-extrato { display: none !important; }
+  body.print-corte .secao-fechamento-print { display: none !important; }
   body.print-corte .secao-corte { display: block !important; }
 
-  /* Modo Extrato de Cobrança: */
-  body.print-extrato .secao-etiqueta { display: none !important; }
-  body.print-extrato .secao-pedido { display: none !important; }
-  body.print-extrato .secao-proposta { display: none !important; }
-  body.print-extrato .secao-proposta-resumida { display: none !important; }
-  body.print-extrato .secao-corte { display: none !important; }
-  body.print-extrato .secao-extrato { display: block !important; }
+  /* Modo Extrato de Cobrança (Faturamento Consolidado): */
+  body.print-extrato .secao-etiqueta,
+  body.modal-extrato-open .secao-etiqueta { display: none !important; }
+  body.print-extrato .secao-pedido,
+  body.modal-extrato-open .secao-pedido { display: none !important; }
+  body.print-extrato .secao-proposta,
+  body.modal-extrato-open .secao-proposta { display: none !important; }
+  body.print-extrato .secao-proposta-resumida,
+  body.modal-extrato-open .secao-proposta-resumida { display: none !important; }
+  body.print-extrato .secao-corte,
+  body.modal-extrato-open .secao-corte { display: none !important; }
+  body.print-extrato .secao-fechamento-print,
+  body.modal-extrato-open .secao-fechamento-print { display: none !important; }
+  body.print-extrato .secao-fechamento-relatorio-print,
+  body.modal-extrato-open .secao-fechamento-relatorio-print { display: none !important; }
+  body.print-extrato .fechamento-interface-screen,
+  body.modal-extrato-open .fechamento-interface-screen { display: none !important; }
+  body.print-extrato #screen-consulta,
+  body.modal-extrato-open #screen-consulta { display: none !important; }
+  body.print-extrato .secao-extrato,
+  body.modal-extrato-open .secao-extrato { display: block !important; visibility: visible !important; }
 
-  /* Se não estiver em modo extrato, esconde secao-extrato na impressão de outros modos */
-  body:not(.print-extrato) .secao-extrato { display: none !important; }
+  /* Modo Relatório de Fechamento Geral (Listagem de Cotações Filtradas em A4): */
+  body.print-fechamento-relatorio .secao-etiqueta { display: none !important; }
+  body.print-fechamento-relatorio .secao-pedido { display: none !important; }
+  body.print-fechamento-relatorio .secao-proposta { display: none !important; }
+  body.print-fechamento-relatorio .secao-proposta-resumida { display: none !important; }
+  body.print-fechamento-relatorio .secao-corte { display: none !important; }
+  body.print-fechamento-relatorio .secao-fechamento-print { display: none !important; }
+  body.print-fechamento-relatorio .secao-extrato { display: none !important; }
+  body.print-fechamento-relatorio .fechamento-interface-screen { display: none !important; }
+  body.print-fechamento-relatorio #screen-consulta { display: none !important; }
+  body.print-fechamento-relatorio .secao-fechamento-relatorio-print { display: block !important; visibility: visible !important; }
+
+  /* Se não estiver em modo extrato nem modal aberto, esconde secao-extrato na impressão */
+  body:not(.print-extrato):not(.modal-extrato-open) .secao-extrato { display: none !important; }
+  body:not(.print-fechamento-relatorio) .secao-fechamento-relatorio-print { display: none !important; }
 
   /* Modo Fechamento Mensal: */
   body.print-fechamento .secao-etiqueta,
@@ -153,27 +280,273 @@
   body.print-fechamento .secao-proposta-resumida,
   body.print-fechamento .secao-corte,
   body.print-fechamento .secao-extrato,
+  body.print-fechamento .secao-fechamento-relatorio-print,
+  body.print-fechamento .fechamento-interface-screen,
+  body.print-fechamento #screen-consulta,
   body.print-fechamento .sidebar,
   body.print-fechamento aside,
   body.print-fechamento nav,
   body.print-fechamento .no-print,
   body.print-fechamento .btn-no-print { display: none !important; }
-  body.print-fechamento .secao-fechamento-print { display: block !important; }
+  body.print-fechamento .secao-fechamento-print { display: block !important; visibility: visible !important; }
 
   body:not(.print-fechamento) .secao-fechamento-print { display: none !important; }
 
   /* ---------------------------------------------------
-     MODELO EXTRATO DE COBRANÇA A4
+     MODELO EXTRATO DE COBRANÇA A4 (IMPRESSÃO LIMPA E ESTRUTURADA)
      --------------------------------------------------- */
   .secao-extrato {
     width: 100% !important;
     max-width: 100% !important;
-    color: #000 !important;
-    background: #fff !important;
+    color: #000000 !important;
+    background: #ffffff !important;
     padding: 0 !important;
     margin: 0 auto !important;
     box-shadow: none !important;
     border: none !important;
+    font-size: 9pt !important;
+    line-height: 1.35 !important;
+    page-break-inside: auto !important;
+  }
+
+  .secao-extrato .extrato-header-box {
+    border: 1px solid #94a3b8 !important;
+    background-color: #f8fafc !important;
+    padding: 8px 12px !important;
+    margin-bottom: 10px !important;
+    border-radius: 6px !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  .secao-extrato .extrato-header-box > div {
+    display: flex !important;
+    flex-direction: row !important;
+    justify-content: space-between !important;
+    align-items: flex-start !important;
+    gap: 16px !important;
+  }
+
+  .secao-extrato .extrato-header-box > div > div:first-child {
+    flex: 1 !important;
+  }
+
+  .secao-extrato .extrato-header-box > div > div:last-child {
+    width: 260px !important;
+    flex-shrink: 0 !important;
+    text-align: right !important;
+    border-top: none !important;
+    padding-top: 0 !important;
+  }
+
+  .secao-extrato table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    table-layout: auto !important;
+    margin: 8px 0 !important;
+    page-break-inside: auto !important;
+  }
+
+  .secao-extrato thead {
+    display: table-header-group !important;
+  }
+
+  .secao-extrato tfoot {
+    display: table-footer-group !important;
+  }
+
+  .secao-extrato tr {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  .secao-extrato th, 
+  .secao-extrato td {
+    border: 1px solid #94a3b8 !important;
+    padding: 5px 8px !important;
+    color: #000000 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    vertical-align: middle !important;
+  }
+
+  .secao-extrato th {
+    background-color: #f1f5f9 !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    font-size: 8pt !important;
+    letter-spacing: 0.3px !important;
+  }
+
+  .secao-extrato td {
+    font-size: 8.5pt !important;
+  }
+
+  .secao-extrato .extrato-total-box {
+    border: 2px solid #0f172a !important;
+    background-color: #f8fafc !important;
+    color: #0f172a !important;
+    padding: 8px 14px !important;
+    margin: 10px 0 !important;
+    border-radius: 6px !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    display: flex !important;
+    flex-direction: row !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+  }
+
+  .secao-extrato .extrato-total-box * {
+    color: #0f172a !important;
+  }
+
+  .secao-extrato .extrato-pagamento-box {
+    border: 1px solid #cbd5e1 !important;
+    background-color: #f8fafc !important;
+    padding: 8px 12px !important;
+    margin-bottom: 10px !important;
+    border-radius: 6px !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  .secao-extrato .extrato-pagamento-box > div:nth-child(2) {
+    display: flex !important;
+    flex-direction: row !important;
+    gap: 12px !important;
+  }
+
+  .secao-extrato .extrato-pagamento-box > div:nth-child(2) > div {
+    flex: 1 !important;
+  }
+
+  .secao-extrato .extrato-assinaturas {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    display: flex !important;
+    flex-direction: row !important;
+    justify-content: space-between !important;
+    gap: 32px !important;
+    padding-top: 18px !important;
+    margin-top: 14px !important;
+    border-top: 1px solid #cbd5e1 !important;
+  }
+
+  /* ---------------------------------------------------
+     MODELO RELATÓRIO DE FECHAMENTO GERAL (LISTAGEM DE COTAÇÕES EM TABELA A4)
+     --------------------------------------------------- */
+  .secao-fechamento-relatorio-print {
+    width: 100% !important;
+    max-width: 100% !important;
+    color: #000000 !important;
+    background: #ffffff !important;
+    padding: 0 !important;
+    margin: 0 auto !important;
+    box-shadow: none !important;
+    border: none !important;
+    font-size: 8.5pt !important;
+    line-height: 1.3 !important;
+    page-break-inside: auto !important;
+  }
+
+  .secao-fechamento-relatorio-print .relatorio-meta-box {
+    border: 1px solid #94a3b8 !important;
+    background-color: #f8fafc !important;
+    padding: 8px 12px !important;
+    margin-bottom: 10px !important;
+    border-radius: 6px !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    display: flex !important;
+    flex-direction: row !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    gap: 12px !important;
+  }
+
+  .secao-fechamento-relatorio-print .relatorio-cards-box {
+    display: flex !important;
+    flex-direction: row !important;
+    justify-content: space-between !important;
+    gap: 8px !important;
+    margin-bottom: 10px !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  .secao-fechamento-relatorio-print .relatorio-card-item {
+    flex: 1 !important;
+    border: 1px solid #94a3b8 !important;
+    background-color: #f8fafc !important;
+    padding: 6px 8px !important;
+    border-radius: 6px !important;
+    text-align: center !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .secao-fechamento-relatorio-print table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    table-layout: auto !important;
+    margin: 6px 0 !important;
+    page-break-inside: auto !important;
+  }
+
+  .secao-fechamento-relatorio-print thead {
+    display: table-header-group !important;
+  }
+
+  .secao-fechamento-relatorio-print tfoot {
+    display: table-footer-group !important;
+  }
+
+  .secao-fechamento-relatorio-print tr {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  .secao-fechamento-relatorio-print th,
+  .secao-fechamento-relatorio-print td {
+    border: 1px solid #94a3b8 !important;
+    padding: 4px 6px !important;
+    color: #000000 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    vertical-align: middle !important;
+  }
+
+  .secao-fechamento-relatorio-print th {
+    background-color: #e2e8f0 !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    font-size: 7.5pt !important;
+    letter-spacing: 0.2px !important;
+  }
+
+  .secao-fechamento-relatorio-print td {
+    font-size: 8pt !important;
+  }
+
+  .secao-fechamento-relatorio-print .relatorio-assinaturas {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    display: flex !important;
+    flex-direction: row !important;
+    justify-content: space-between !important;
+    gap: 32px !important;
+    padding-top: 16px !important;
+    margin-top: 14px !important;
+    border-top: 1px solid #cbd5e1 !important;
   }
 
   /* ---------------------------------------------------

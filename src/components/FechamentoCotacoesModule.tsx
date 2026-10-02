@@ -15,6 +15,7 @@ import {
   RegistroPagamentoCotacao
 } from '../services/inventoryFinanceService';
 import ExtratoCobrancaPrint, { ExtratoCotacaoItem } from './ExtratoCobrancaPrint';
+import CompanyHeader from './CompanyHeader';
 import {
   FileText,
   Search,
@@ -24,6 +25,7 @@ import {
   MinusSquare,
   DollarSign,
   Printer,
+  FileSpreadsheet,
   CheckCircle2,
   Clock,
   Filter,
@@ -435,6 +437,38 @@ export default function FechamentoCotacoesModule({
     return undefined;
   }, [filtroCliente, selectedQuotes, clients]);
 
+  // Sincroniza estado de modal aberto no body para controle fino de regras de impressão
+  useEffect(() => {
+    if (isExtratoModalOpen) {
+      document.body.classList.add('modal-extrato-open');
+    } else {
+      document.body.classList.remove('modal-extrato-open');
+    }
+    return () => {
+      document.body.classList.remove('modal-extrato-open');
+    };
+  }, [isExtratoModalOpen]);
+
+  // Listener para capturar Ctrl+P direto no navegador e aplicar a classe correta
+  useEffect(() => {
+    const handleBeforePrint = () => {
+      if (isExtratoModalOpen) {
+        document.body.classList.add('print-extrato');
+      } else {
+        document.body.classList.add('print-fechamento-relatorio');
+      }
+    };
+    const handleAfterPrint = () => {
+      document.body.classList.remove('print-extrato', 'print-fechamento-relatorio');
+    };
+    window.addEventListener('beforeprint', handleBeforePrint);
+    window.addEventListener('afterprint', handleAfterPrint);
+    return () => {
+      window.removeEventListener('beforeprint', handleBeforePrint);
+      window.removeEventListener('afterprint', handleAfterPrint);
+    };
+  }, [isExtratoModalOpen]);
+
   // Ação: Abrir Extrato de Cobrança
   const handleAbrirExtrato = () => {
     if (selectedQuotes.length === 0) {
@@ -444,10 +478,59 @@ export default function FechamentoCotacoesModule({
     setIsExtratoModalOpen(true);
   };
 
-  // Ação: Imprimir Extrato A4
+  // Ação: Imprimir Extrato A4 Limpo e Estruturado
   const handleImprimirExtrato = () => {
+    document.body.classList.remove(
+      'print-pedido',
+      'print-etiqueta',
+      'print-proposta',
+      'print-corte',
+      'print-geral',
+      'print-empresa',
+      'print-fechamento',
+      'print-fechamento-relatorio'
+    );
     document.body.classList.add('print-extrato');
-    window.print();
+
+    const onAfterPrint = () => {
+      document.body.classList.remove('print-extrato');
+      window.removeEventListener('afterprint', onAfterPrint);
+    };
+    window.addEventListener('afterprint', onAfterPrint);
+
+    setTimeout(() => {
+      window.print();
+    }, 150);
+  };
+
+  // Ação: Imprimir Relatório Geral de Fechamento (Listagem completa das cotações filtradas em tabela A4)
+  const handleImprimirRelatorioFechamento = () => {
+    if (filteredQuotes.length === 0) {
+      alert('Não há cotações filtradas para imprimir no relatório.');
+      return;
+    }
+
+    document.body.classList.remove(
+      'print-pedido',
+      'print-etiqueta',
+      'print-proposta',
+      'print-corte',
+      'print-geral',
+      'print-empresa',
+      'print-fechamento',
+      'print-extrato'
+    );
+    document.body.classList.add('print-fechamento-relatorio');
+
+    const onAfterPrint = () => {
+      document.body.classList.remove('print-fechamento-relatorio');
+      window.removeEventListener('afterprint', onAfterPrint);
+    };
+    window.addEventListener('afterprint', onAfterPrint);
+
+    setTimeout(() => {
+      window.print();
+    }, 150);
   };
 
   // Ação: Abrir Modal de Baixa de Pagamento
@@ -585,73 +668,75 @@ export default function FechamentoCotacoesModule({
   };
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-slate-950 text-slate-100 overflow-hidden">
-      {/* 1. TOPO DO MÓDULO: TÍTULO & CARDS DE RESUMO */}
-      <div className="border-b border-slate-800 bg-slate-900/90 px-4 py-3 shrink-0">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-2">
-              <div className="p-2 bg-blue-600/20 text-blue-400 rounded-xl border border-blue-500/30">
-                <Receipt className="w-5 h-5" />
+    <div className="fechamento-root-container flex-1 flex flex-col h-full bg-slate-950 text-slate-100 overflow-hidden">
+      {/* INTERFACE EM TELA (OCULTADA TOTALMENTE EM @MEDIA PRINT) */}
+      <div className="fechamento-interface-screen flex-1 flex flex-col h-full overflow-hidden no-print">
+        {/* 1. TOPO DO MÓDULO: TÍTULO & CARDS DE RESUMO */}
+        <div className="fechamento-header border-b border-slate-800 bg-slate-900/90 px-4 py-3 shrink-0">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-blue-600/20 text-blue-400 rounded-xl border border-blue-500/30">
+                  <Receipt className="w-5 h-5" />
+                </div>
+                <div>
+                  <h1 className="text-lg font-bold text-white tracking-wide flex items-center gap-2">
+                    Fechamento & Extrato de Cotações
+                    <span className="text-[10px] bg-blue-500/20 text-blue-400 border border-blue-500/30 px-2 py-0.5 rounded-full font-semibold">
+                      Cobrança & Financeiro
+                    </span>
+                  </h1>
+                  <p className="text-xs text-slate-400">
+                    Controle de faturamento consolidado por cliente, geração de extratos em PDF e baixa com integração no Caixa.
+                  </p>
+                </div>
               </div>
-              <div>
-                <h1 className="text-lg font-bold text-white tracking-wide flex items-center gap-2">
-                  Fechamento & Extrato de Cotações
-                  <span className="text-[10px] bg-blue-500/20 text-blue-400 border border-blue-500/30 px-2 py-0.5 rounded-full font-semibold">
-                    Cobrança & Financeiro
-                  </span>
-                </h1>
-                <p className="text-xs text-slate-400">
-                  Controle de faturamento consolidado por cliente, geração de extratos em PDF e baixa com integração no Caixa.
-                </p>
+            </div>
+
+            {/* Cards Rápidos de Indicadores */}
+            <div className="fechamento-cards flex items-center gap-2 sm:gap-3 flex-wrap">
+              <div className="bg-slate-800/80 border border-slate-700/80 rounded-xl px-3 py-1.5 min-w-[130px]">
+                <span className="text-[10px] text-slate-400 uppercase font-semibold block">Total Filtrado</span>
+                <span className="text-sm font-black font-mono text-white">
+                  {formatCurrency(totalValorFiltrado)}
+                </span>
+                <span className="text-[10px] text-slate-400 block">{filteredQuotes.length} cotações</span>
               </div>
-            </div>
-          </div>
 
-          {/* Cards Rápidos de Indicadores */}
-          <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
-            <div className="bg-slate-800/80 border border-slate-700/80 rounded-xl px-3 py-1.5 min-w-[130px]">
-              <span className="text-[10px] text-slate-400 uppercase font-semibold block">Total Filtrado</span>
-              <span className="text-sm font-black font-mono text-white">
-                {formatCurrency(totalValorFiltrado)}
-              </span>
-              <span className="text-[10px] text-slate-400 block">{filteredQuotes.length} cotações</span>
-            </div>
+              <div className="bg-amber-950/40 border border-amber-500/30 rounded-xl px-3 py-1.5 min-w-[130px]">
+                <span className="text-[10px] text-amber-400 uppercase font-semibold block flex items-center gap-1">
+                  <Clock className="w-3 h-3" /> Pendente de Baixa
+                </span>
+                <span className="text-sm font-black font-mono text-amber-300">
+                  {formatCurrency(totalPendentesValor)}
+                </span>
+              </div>
 
-            <div className="bg-amber-950/40 border border-amber-500/30 rounded-xl px-3 py-1.5 min-w-[130px]">
-              <span className="text-[10px] text-amber-400 uppercase font-semibold block flex items-center gap-1">
-                <Clock className="w-3 h-3" /> Pendente de Baixa
-              </span>
-              <span className="text-sm font-black font-mono text-amber-300">
-                {formatCurrency(totalPendentesValor)}
-              </span>
-            </div>
+              <div className="bg-emerald-950/40 border border-emerald-500/30 rounded-xl px-3 py-1.5 min-w-[130px]">
+                <span className="text-[10px] text-emerald-400 uppercase font-semibold block flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3" /> Já Pago / Baixado
+                </span>
+                <span className="text-sm font-black font-mono text-emerald-300">
+                  {formatCurrency(totalPagasValor)}
+                </span>
+              </div>
 
-            <div className="bg-emerald-950/40 border border-emerald-500/30 rounded-xl px-3 py-1.5 min-w-[130px]">
-              <span className="text-[10px] text-emerald-400 uppercase font-semibold block flex items-center gap-1">
-                <CheckCircle2 className="w-3 h-3" /> Já Pago / Baixado
-              </span>
-              <span className="text-sm font-black font-mono text-emerald-300">
-                {formatCurrency(totalPagasValor)}
-              </span>
+              {onOpenHistoricoFechamento && (
+                <button
+                  onClick={onOpenHistoricoFechamento}
+                  className="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-bold px-3.5 py-2 rounded-xl shadow-lg shadow-purple-600/30 flex items-center gap-2 transition-all cursor-pointer border border-purple-400/30 shrink-0"
+                  title="Histórico de Fechamentos Mensais Salvos no Supabase"
+                >
+                  <Calendar className="w-4 h-4 text-purple-200" />
+                  <span>📊 Histórico no Supabase</span>
+                </button>
+              )}
             </div>
-
-            {onOpenHistoricoFechamento && (
-              <button
-                onClick={onOpenHistoricoFechamento}
-                className="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-bold px-3.5 py-2 rounded-xl shadow-lg shadow-purple-600/30 flex items-center gap-2 transition-all cursor-pointer border border-purple-400/30 shrink-0"
-                title="Histórico de Fechamentos Mensais Salvos no Supabase"
-              >
-                <Calendar className="w-4 h-4 text-purple-200" />
-                <span>📊 Histórico no Supabase</span>
-              </button>
-            )}
           </div>
         </div>
-      </div>
 
-      {/* 2. BARRA DE FILTROS AVANÇADOS */}
-      <div className="bg-slate-900/60 border-b border-slate-800 p-3 sm:p-4 space-y-3 shrink-0">
+        {/* 2. BARRA DE FILTROS AVANÇADOS */}
+        <div className="fechamento-filtros bg-slate-900/60 border-b border-slate-800 p-3 sm:p-4 space-y-3 shrink-0">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 items-end">
           {/* Filtro por Cliente / Empresa */}
           <div className="lg:col-span-4">
@@ -794,7 +879,7 @@ export default function FechamentoCotacoesModule({
       </div>
 
       {/* 3. PAINEL FIXO DE TOTAIS EM TEMPO REAL E AÇÕES DE FECHAMENTO */}
-      <div className="bg-slate-900 border-b border-slate-800 px-4 py-2.5 shrink-0 flex items-center justify-between gap-3 flex-wrap">
+      <div className="fechamento-acoes bg-slate-900 border-b border-slate-800 px-4 py-2.5 shrink-0 flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3 sm:gap-6 flex-wrap">
           <div className="flex items-center gap-2">
             <button
@@ -830,7 +915,21 @@ export default function FechamentoCotacoesModule({
         </div>
 
         {/* Botões de Ação Principais */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={handleImprimirRelatorioFechamento}
+            disabled={filteredQuotes.length === 0}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all ${
+              filteredQuotes.length > 0
+                ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 cursor-pointer hover:border-slate-500'
+                : 'bg-slate-900 text-slate-600 border border-slate-800 cursor-not-allowed'
+            }`}
+            title="Imprimir relatório completo com a listagem de todas as cotações filtradas em formato A4"
+          >
+            <FileSpreadsheet className="w-4 h-4 text-purple-400" />
+            <span>🖨️ Imprimir Relatório Geral</span>
+          </button>
+
           <button
             onClick={handleAbrirExtrato}
             disabled={selectedQuotes.length === 0}
@@ -841,7 +940,7 @@ export default function FechamentoCotacoesModule({
             }`}
           >
             <Printer className="w-4 h-4" />
-            <span>🖨️ Gerar Extrato para Cliente</span>
+            <span>Gerar Extrato para Cliente</span>
           </button>
 
           <button
@@ -861,7 +960,7 @@ export default function FechamentoCotacoesModule({
 
       {/* FEEDBACK DE SUCESSO OU ALERTA */}
       {feedbackMensagem && (
-        <div className="bg-emerald-950/90 border-b border-emerald-500/50 px-4 py-2.5 text-xs text-emerald-200 flex items-center justify-between shrink-0">
+        <div className="fechamento-feedback bg-emerald-950/90 border-b border-emerald-500/50 px-4 py-2.5 text-xs text-emerald-200 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
             <span>{feedbackMensagem.texto}</span>
@@ -887,7 +986,7 @@ export default function FechamentoCotacoesModule({
       )}
 
       {/* 4. TABELA DE RESULTADOS COM SELEÇÃO INDIVIDUAL */}
-      <div className="flex-1 overflow-auto p-3 sm:p-4">
+      <div className="fechamento-tabela-tela flex-1 overflow-auto p-3 sm:p-4">
         {isLoading ? (
           <div className="flex flex-col items-center justify-center h-64 text-slate-400">
             <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-3"></div>
@@ -1075,13 +1174,166 @@ export default function FechamentoCotacoesModule({
           </div>
         )}
       </div>
+      {/* FIM DA INTERFACE EM TELA (fechamento-interface-screen) */}
+      </div>
 
-      {/* 5. MODAL DE PRÉVIA E IMPRESSÃO DO EXTRATO DE COBRANÇA (A4) */}
+      {/* 5. VIEW DE IMPRESSÃO A4: RELATÓRIO GERAL DE COTAÇÕES FILTRADAS */}
+      <div className="secao-fechamento-relatorio-print hidden print:block bg-white text-black p-6 sm:p-8 max-w-[850px] mx-auto font-sans leading-relaxed text-xs">
+        <CompanyHeader 
+          documentType="RELATÓRIO DE COTAÇÕES & FECHAMENTO"
+          documentDate={new Date().toLocaleDateString('pt-BR')}
+          tag="FATURAMENTO"
+          tagColor="blue"
+        />
+
+        {/* Metadados e Parâmetros da Consulta */}
+        <div className="relatorio-meta-box border border-slate-400 rounded-lg p-3 my-3 bg-slate-50 flex justify-between items-center text-xs">
+          <div>
+            <div className="text-[10px] uppercase font-bold text-slate-600">Parâmetros da Consulta</div>
+            <div className="text-sm font-black text-slate-900 uppercase">
+              {filtroCliente.trim() ? filtroCliente.trim() : 'Todos os Clientes / Consolidado'}
+            </div>
+            <div className="text-xs text-slate-700 mt-0.5">
+              <span>Período: </span>
+              <strong>
+                {filtroDataInicio && filtroDataFim 
+                  ? `${formatSafeDate(filtroDataInicio)} até ${formatSafeDate(filtroDataFim)}`
+                  : filtroDataInicio 
+                  ? `A partir de ${formatSafeDate(filtroDataInicio)}`
+                  : filtroDataFim 
+                  ? `Até ${formatSafeDate(filtroDataFim)}`
+                  : 'Consolidado Geral'}
+              </strong>
+              {filtroStatusPagamento !== 'todas' && (
+                <span className="ml-2">
+                  | Situação: <strong>{filtroStatusPagamento === 'pagos' ? 'Somente Pagos' : 'Somente Pendentes'}</strong>
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="text-right">
+            <span className="text-[10px] uppercase font-bold text-slate-600 block">Total de Registros</span>
+            <span className="text-base font-black font-mono text-slate-950">
+              {filteredQuotes.length} {filteredQuotes.length === 1 ? 'Cotação' : 'Cotações'}
+            </span>
+            <span className="text-[10px] text-slate-500 block">
+              Emissão: {new Date().toLocaleDateString('pt-BR')} {new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+            </span>
+          </div>
+        </div>
+
+        {/* Cards Rápidos de Indicadores no Relatório Impresso */}
+        <div className="relatorio-cards-box flex gap-3 mb-3">
+          <div className="relatorio-card-item flex-1 border border-slate-400 rounded-lg p-2 text-center bg-slate-50">
+            <span className="text-[10px] font-bold text-slate-600 uppercase block">Total Geral Faturado</span>
+            <span className="text-sm font-black font-mono text-slate-900 block">
+              {formatCurrency(totalValorFiltrado)}
+            </span>
+            <span className="text-[9px] text-slate-500">{filteredQuotes.length} pedidos</span>
+          </div>
+
+          <div className="relatorio-card-item flex-1 border border-amber-300 rounded-lg p-2 text-center bg-amber-50">
+            <span className="text-[10px] font-bold text-amber-800 uppercase block">Pendente de Baixa</span>
+            <span className="text-sm font-black font-mono text-amber-950 block">
+              {formatCurrency(totalPendentesValor)}
+            </span>
+          </div>
+
+          <div className="relatorio-card-item flex-1 border border-emerald-300 rounded-lg p-2 text-center bg-emerald-50">
+            <span className="text-[10px] font-bold text-emerald-800 uppercase block">Total Baixado / Pago</span>
+            <span className="text-sm font-black font-mono text-emerald-950 block">
+              {formatCurrency(totalPagasValor)}
+            </span>
+          </div>
+        </div>
+
+        {/* Tabela Estruturada de Cotações */}
+        <table className="w-full border-collapse border border-slate-400 text-xs mb-4">
+          <thead>
+            <tr className="bg-slate-200 text-slate-900 border-b border-slate-400 font-bold uppercase text-[9.5px]">
+              <th className="border border-slate-400 px-2 py-1.5 text-center w-10">Item</th>
+              <th className="border border-slate-400 px-2 py-1.5 text-center w-20">Nº Cotação</th>
+              <th className="border border-slate-400 px-2 py-1.5 text-center w-20">Data</th>
+              <th className="border border-slate-400 px-2.5 py-1.5 text-left">Cliente / Empresa</th>
+              <th className="border border-slate-400 px-2.5 py-1.5 text-left">Resumo Itens / Serviços</th>
+              <th className="border border-slate-400 px-2 py-1.5 text-center w-20">Situação</th>
+              <th className="border border-slate-400 px-2 py-1.5 text-center w-20">Baixa</th>
+              <th className="border border-slate-400 px-2.5 py-1.5 text-right w-24">Valor (R$)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredQuotes.map((q, idx) => {
+              const isPago = q.pagamento?.status === 'Pago';
+              return (
+                <tr key={q.numero || q.id || idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}>
+                  <td className="border border-slate-300 px-2 py-1.5 text-center font-mono text-slate-600 text-[10px]">
+                    {String(idx + 1).padStart(2, '0')}
+                  </td>
+                  <td className="border border-slate-300 px-2 py-1.5 text-center font-mono font-bold text-slate-900 text-[10.5px]">
+                    {q.numero}
+                  </td>
+                  <td className="border border-slate-300 px-2 py-1.5 text-center text-slate-700 whitespace-nowrap text-[10px]">
+                    {formatSafeDate(q.data)}
+                  </td>
+                  <td className="border border-slate-300 px-2.5 py-1.5 text-slate-900 font-semibold text-[10.5px] uppercase">
+                    {q.cliente}
+                  </td>
+                  <td className="border border-slate-300 px-2.5 py-1.5 text-slate-800 text-[10px]">
+                    {q.itensResumo || 'Serviços de corte'}
+                  </td>
+                  <td className="border border-slate-300 px-2 py-1.5 text-center text-[10px]">
+                    <span className="font-semibold text-slate-700 uppercase">
+                      {q.statusCotacao || 'Aprovado'}
+                    </span>
+                  </td>
+                  <td className="border border-slate-300 px-2 py-1.5 text-center text-[9.5px]">
+                    <span className={`inline-block px-1.5 py-0.5 rounded font-bold uppercase ${
+                      isPago ? 'bg-emerald-100 text-emerald-900' : 'bg-amber-100 text-amber-900'
+                    }`}>
+                      {isPago ? 'Pago' : 'Pendente'}
+                    </span>
+                  </td>
+                  <td className="border border-slate-300 px-2.5 py-1.5 text-right font-mono font-bold text-slate-950 whitespace-nowrap text-[10.5px]">
+                    {formatCurrency(q.valor)}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+          <tfoot>
+            <tr className="bg-slate-100 font-bold border-t-2 border-slate-400">
+              <td colSpan={7} className="border border-slate-400 px-3 py-2 text-right uppercase text-slate-700 text-[10.5px]">
+                Total ({filteredQuotes.length} cotações listadas):
+              </td>
+              <td className="border border-slate-400 px-2.5 py-2 text-right font-mono font-black text-xs text-slate-950 whitespace-nowrap">
+                {formatCurrency(totalValorFiltrado)}
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+
+        {/* Assinaturas / Conferência no Rodapé do Relatório */}
+        <div className="relatorio-assinaturas flex justify-between gap-8 pt-4 mt-3 border-t border-slate-300 text-center text-xs">
+          <div className="flex-1">
+            <div className="border-b border-slate-400 w-4/5 mx-auto mb-1"></div>
+            <div className="font-bold text-slate-900">Usi Corte Metais</div>
+            <div className="text-[10px] text-slate-600">Departamento Financeiro & Faturamento</div>
+          </div>
+          <div className="flex-1">
+            <div className="border-b border-slate-400 w-4/5 mx-auto mb-1"></div>
+            <div className="font-bold text-slate-900">Conferência & Visto da Gerência</div>
+            <div className="text-[10px] text-slate-600">Visto do Administrador</div>
+          </div>
+        </div>
+      </div>
+
+      {/* 6. MODAL DE PRÉVIA E IMPRESSÃO DO EXTRATO DE COBRANÇA (A4) */}
       {isExtratoModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 overflow-y-auto print:static print:p-0 print:m-0 print:bg-transparent">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[95vh] flex flex-col overflow-hidden shadow-2xl print:bg-transparent print:border-none print:border-t-0 print:shadow-none print:max-h-none print:w-full print:rounded-none">
+        <div className="extrato-modal-overlay fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 overflow-y-auto print:static print:p-0 print:m-0 print:bg-transparent">
+          <div className="extrato-modal-content bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[95vh] flex flex-col overflow-hidden shadow-2xl print:bg-transparent print:border-none print:border-t-0 print:shadow-none print:max-h-none print:w-full print:rounded-none">
             {/* Topo Modal */}
-            <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950 shrink-0 no-print btn-no-print">
+            <div className="extrato-modal-header p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950 shrink-0 no-print btn-no-print">
               <div className="flex items-center gap-2">
                 <div className="p-2 bg-blue-600/20 text-blue-400 rounded-xl border border-blue-500/30">
                   <Printer className="w-5 h-5" />
@@ -1113,8 +1365,8 @@ export default function FechamentoCotacoesModule({
             </div>
 
             {/* Conteúdo do Extrato Formatado para A4 */}
-            <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-800/40 print:p-0 print:m-0 print:bg-transparent">
-              <div className="bg-white rounded-xl shadow-2xl border border-slate-300 overflow-hidden print:border-none print:border-t-0 print:shadow-none print:rounded-none print:p-0 print:m-0">
+            <div className="extrato-modal-scroll flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-800/40 print:p-0 print:m-0 print:bg-transparent">
+              <div className="extrato-modal-card-wrapper bg-white rounded-xl shadow-2xl border border-slate-300 overflow-hidden print:border-none print:border-t-0 print:shadow-none print:rounded-none print:p-0 print:m-0">
                 <ExtratoCobrancaPrint 
                   cotacoes={selectedQuotes}
                   clienteInfo={selectedClientInfo}
@@ -1125,7 +1377,7 @@ export default function FechamentoCotacoesModule({
             </div>
 
             {/* Rodapé Modal */}
-            <div className="p-3 border-t border-slate-800 bg-slate-950 flex items-center justify-between text-xs text-slate-400 shrink-0 no-print btn-no-print">
+            <div className="extrato-modal-footer p-3 border-t border-slate-800 bg-slate-950 flex items-center justify-between text-xs text-slate-400 shrink-0 no-print btn-no-print">
               <span>Layout certificado para impressão em folha A4 e envio de cobrança via WhatsApp / PDF.</span>
               <button
                 onClick={() => setIsExtratoModalOpen(false)}
