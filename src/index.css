@@ -128,15 +128,41 @@
   body.print-corte .secao-proposta-resumida { display: none !important; }
   body.print-corte .secao-corte { display: block !important; }
 
-  /* Modo Fechamento Mensal: */
+  /* Modo Fechamento & Extrato de Cotações (Isolado) */
   body.print-fechamento .secao-etiqueta,
   body.print-fechamento .secao-pedido,
   body.print-fechamento .secao-proposta,
   body.print-fechamento .secao-proposta-resumida,
   body.print-fechamento .secao-corte,
   body.print-fechamento .no-print,
-  body.print-fechamento .btn-no-print { display: none !important; }
-  body.print-fechamento .secao-fechamento-print { display: block !important; visibility: visible !important; }
+  body.print-fechamento .btn-no-print,
+  body.print-fechamento nav,
+  body.print-fechamento aside,
+  body.print-fechamento sidebar,
+  body.print-fechamento .sidebar,
+  body.print-fechamento header.topbar,
+  body.print-fechamento .topbar,
+  body.print-fechamento .footerbar,
+  body.print-fechamento footer,
+  body.print-fechamento #sidebarOverlay,
+  body.print-fechamento .fechamento-interface-screen,
+  body.print-fechamento .fechamento-header,
+  body.print-fechamento .fechamento-cards,
+  body.print-fechamento .fechamento-filtros,
+  body.print-fechamento .fechamento-acoes,
+  body.print-fechamento .fechamento-feedback,
+  body.print-fechamento .fechamento-tabela-tela,
+  body.print-fechamento .extrato-modal-header,
+  body.print-fechamento .extrato-modal-footer,
+  body.print-fechamento button {
+    display: none !important;
+  }
+  body.print-fechamento .secao-fechamento-print,
+  body.print-fechamento .secao-extrato,
+  body.print-fechamento .secao-fechamento-print-documento {
+    display: block !important;
+    visibility: visible !important;
+  }
 
   body:not(.print-fechamento) .secao-fechamento-print { display: none !important; }
 
@@ -147,14 +173,28 @@
   body.print-extrato aside,
   body.print-extrato .sidebar,
   body.print-extrato .topbar,
+  body.print-extrato .footerbar,
+  body.print-extrato footer,
   body.print-extrato .fechamento-interface-screen,
+  body.print-extrato .fechamento-header,
+  body.print-extrato .fechamento-cards,
+  body.print-extrato .fechamento-filtros,
+  body.print-extrato .fechamento-acoes,
+  body.print-extrato .fechamento-feedback,
+  body.print-extrato .fechamento-tabela-tela,
   body.print-extrato .extrato-modal-header,
-  body.print-extrato .extrato-modal-footer {
+  body.print-extrato .extrato-modal-footer,
+  body.print-extrato button {
     display: none !important;
   }
+  body.print-fechamento .extrato-modal-overlay,
+  body.print-fechamento .extrato-modal-content,
+  body.print-fechamento .extrato-modal-scroll,
+  body.print-fechamento .extrato-modal-card-wrapper,
   body.print-extrato .extrato-modal-overlay,
   body.print-extrato .extrato-modal-content,
-  body.print-extrato .extrato-modal-scroll {
+  body.print-extrato .extrato-modal-scroll,
+  body.print-extrato .extrato-modal-card-wrapper {
     position: static !important;
     background: #ffffff !important;
     border: none !important;
@@ -164,6 +204,15 @@
     max-height: none !important;
     width: 100% !important;
     overflow: visible !important;
+  }
+
+  /* Relatório Geral de Fechamento (somente visível se ativado especificamente) */
+  body:not(.print-fechamento-relatorio) .secao-fechamento-relatorio-print {
+    display: none !important;
+  }
+  body.print-fechamento-relatorio .secao-fechamento-relatorio-print {
+    display: block !important;
+    visibility: visible !important;
   }
 
   /* ---------------------------------------------------

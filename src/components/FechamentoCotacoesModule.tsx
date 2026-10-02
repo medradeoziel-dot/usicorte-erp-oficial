@@ -437,6 +437,53 @@ export default function FechamentoCotacoesModule({
     return undefined;
   }, [filtroCliente, selectedQuotes, clients]);
 
+  // Cotações consolidadas para o Extrato (selecionadas ou filtradas)
+  const quotesParaExtrato = useMemo(() => {
+    return selectedQuotes.length > 0 ? selectedQuotes : filteredQuotes;
+  }, [selectedQuotes, filteredQuotes]);
+
+  // Informações completas do cliente para o Extrato
+  const clientInfoParaExtrato = useMemo(() => {
+    if (selectedClientInfo) return selectedClientInfo;
+    if (quotesParaExtrato.length > 0) {
+      const first = quotesParaExtrato[0];
+      const found = clients.find(c => {
+        const n = (c.fantasyName || c.name || c.nome_fantasia || c.nome || '').toLowerCase();
+        return n.includes((first.cliente || '').toLowerCase()) || (first.cliente || '').toLowerCase().includes(n);
+      });
+      if (found) return found;
+      return {
+        name: first.cliente,
+        fantasyName: first.cliente,
+        document: first.clienteDoc,
+        phone: first.clienteTelefone,
+        street: first.clienteEndereco,
+        city: first.clienteCidade,
+        contactPerson: first.clienteContato
+      };
+    }
+    return undefined;
+  }, [selectedClientInfo, quotesParaExtrato, clients]);
+
+  // Intercepta eventos de impressão na tela de Fechamento & Extrato para isolamento total
+  useEffect(() => {
+    const handleBeforePrint = () => {
+      document.body.classList.add('print-fechamento', 'print-extrato');
+    };
+    const handleAfterPrint = () => {
+      document.body.classList.remove('print-fechamento', 'print-extrato', 'print-fechamento-relatorio');
+    };
+
+    window.addEventListener('beforeprint', handleBeforePrint);
+    window.addEventListener('afterprint', handleAfterPrint);
+
+    return () => {
+      window.removeEventListener('beforeprint', handleBeforePrint);
+      window.removeEventListener('afterprint', handleAfterPrint);
+      document.body.classList.remove('print-fechamento', 'print-extrato', 'print-fechamento-relatorio');
+    };
+  }, []);
+
   // Ação: Abrir Extrato de Cobrança
   const handleAbrirExtrato = () => {
     if (selectedQuotes.length === 0) {
@@ -448,10 +495,10 @@ export default function FechamentoCotacoesModule({
 
   // Ação: Imprimir Extrato A4 Limpo e Estruturado
   const handleImprimirExtrato = () => {
-    document.body.classList.add('print-extrato');
+    document.body.classList.add('print-fechamento', 'print-extrato');
 
     const onAfterPrint = () => {
-      document.body.classList.remove('print-extrato');
+      document.body.classList.remove('print-fechamento', 'print-extrato');
       window.removeEventListener('afterprint', onAfterPrint);
     };
     window.addEventListener('afterprint', onAfterPrint);
@@ -626,7 +673,114 @@ export default function FechamentoCotacoesModule({
   };
 
   return (
-    <div className="fechamento-root-container flex-1 flex flex-col h-full bg-slate-950 text-slate-100 overflow-hidden">
+    <div className="fechamento-root-container fechamento-cotacoes-module print-fechamento flex-1 flex flex-col h-full bg-slate-950 text-slate-100 overflow-hidden">
+      {/* REGRAS ISOLADAS DE IMPRESSÃO EXCLUSIVAS DO COMPONENTE DE FECHAMENTO */}
+      <style>{`
+        @media print {
+          /* 1. Oculta navegação e barras do sistema quando na tela de Fechamento */
+          body.print-fechamento nav,
+          body.print-fechamento aside,
+          body.print-fechamento sidebar,
+          body.print-fechamento .sidebar,
+          body.print-fechamento header.topbar,
+          body.print-fechamento .topbar,
+          body.print-fechamento .footerbar,
+          body.print-fechamento footer,
+          body.print-fechamento #sidebarOverlay,
+          body.print-fechamento .offline-indicator,
+          body.print-fechamento #migration-alert-banner {
+            display: none !important;
+          }
+
+          /* 2. Oculta todos os elementos de tela do Fechamento (filtros, cabeçalhos, cards, botões de ação e tabela interativa) */
+          .print-fechamento .fechamento-interface-screen,
+          .print-fechamento .fechamento-header,
+          .print-fechamento .fechamento-cards,
+          .print-fechamento .fechamento-filtros,
+          .print-fechamento .fechamento-acoes,
+          .print-fechamento .fechamento-feedback,
+          .print-fechamento .fechamento-tabela-tela,
+          .print-fechamento .extrato-modal-header,
+          .print-fechamento .extrato-modal-footer,
+          .print-fechamento .no-print,
+          .print-fechamento .btn-no-print,
+          .print-fechamento button,
+          body.print-fechamento .fechamento-interface-screen,
+          body.print-fechamento .fechamento-header,
+          body.print-fechamento .fechamento-cards,
+          body.print-fechamento .fechamento-filtros,
+          body.print-fechamento .fechamento-acoes,
+          body.print-fechamento .fechamento-feedback,
+          body.print-fechamento .fechamento-tabela-tela,
+          body.print-fechamento .extrato-modal-header,
+          body.print-fechamento .extrato-modal-footer,
+          body.print-fechamento .no-print,
+          body.print-fechamento .btn-no-print,
+          body.print-fechamento button {
+            display: none !important;
+          }
+
+          /* 3. Limpeza de fundos escuros, margens e overflow para folha A4 limpa */
+          body.print-fechamento,
+          body.print-fechamento #root,
+          body.print-fechamento main,
+          body.print-fechamento .fechamento-root-container,
+          body.print-fechamento .fechamento-cotacoes-module,
+          body.print-fechamento .print-fechamento {
+            background: #ffffff !important;
+            color: #000000 !important;
+            overflow: visible !important;
+            height: auto !important;
+            min-height: 100% !important;
+            max-height: none !important;
+            padding: 0 !important;
+            margin: 0 !important;
+          }
+
+          /* 4. Exibe exclusivamente o Extrato limpo e organizado */
+          .print-fechamento .secao-extrato,
+          .print-fechamento .secao-fechamento-print-documento,
+          body.print-fechamento .secao-extrato,
+          body.print-fechamento .secao-fechamento-print-documento {
+            display: block !important;
+            visibility: visible !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            margin: 0 auto !important;
+            padding: 0 !important;
+            background: #ffffff !important;
+            color: #000000 !important;
+            border: none !important;
+            box-shadow: none !important;
+          }
+
+          /* Se o modal estiver aberto, remove overlay escuro e exibe o extrato limpo */
+          .print-fechamento .extrato-modal-overlay,
+          .print-fechamento .extrato-modal-content,
+          .print-fechamento .extrato-modal-scroll,
+          .print-fechamento .extrato-modal-card-wrapper,
+          body.print-fechamento .extrato-modal-overlay,
+          body.print-fechamento .extrato-modal-content,
+          body.print-fechamento .extrato-modal-scroll,
+          body.print-fechamento .extrato-modal-card-wrapper {
+            position: static !important;
+            background: #ffffff !important;
+            border: none !important;
+            box-shadow: none !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            max-height: none !important;
+            width: 100% !important;
+            overflow: visible !important;
+          }
+
+          /* Relatório Geral de Fechamento (somente visível se ativado especificamente) */
+          body.print-fechamento-relatorio .secao-fechamento-relatorio-print {
+            display: block !important;
+            visibility: visible !important;
+          }
+        }
+      `}</style>
       {/* INTERFACE EM TELA (OCULTADA TOTALMENTE EM @MEDIA PRINT) */}
       <div className="fechamento-interface-screen flex-1 flex flex-col h-full overflow-hidden no-print">
         {/* 1. TOPO DO MÓDULO: TÍTULO & CARDS DE RESUMO */}
@@ -1136,7 +1290,7 @@ export default function FechamentoCotacoesModule({
       </div>
 
       {/* 5. VIEW DE IMPRESSÃO A4: RELATÓRIO GERAL DE COTAÇÕES FILTRADAS */}
-      <div className="secao-fechamento-relatorio-print print-only bg-white text-black p-6 sm:p-8 max-w-[850px] mx-auto font-sans leading-relaxed text-xs">
+      <div className="secao-fechamento-relatorio-print hidden bg-white text-black p-6 sm:p-8 max-w-[850px] mx-auto font-sans leading-relaxed text-xs">
         <CompanyHeader 
           documentType="RELATÓRIO DE COTAÇÕES & FECHAMENTO"
           documentDate={new Date().toLocaleDateString('pt-BR')}
@@ -1348,7 +1502,19 @@ export default function FechamentoCotacoesModule({
         </div>
       )}
 
-      {/* 6. MODAL DE BAIXA DE PAGAMENTO & INTEGRAÇÃO FINANCEIRA */}
+      {/* 6. ÁREA DE IMPRESSÃO EXCLUSIVA DO EXTRATO DIRETO DA TELA (QUANDO O MODAL NÃO ESTÁ ABERTO) */}
+      {!isExtratoModalOpen && (
+        <div className="secao-fechamento-print-documento print:block hidden print-fechamento-only">
+          <ExtratoCobrancaPrint 
+            cotacoes={quotesParaExtrato}
+            clienteInfo={clientInfoParaExtrato}
+            periodoInicio={filtroDataInicio}
+            periodoFim={filtroDataFim}
+          />
+        </div>
+      )}
+
+      {/* 7. MODAL DE BAIXA DE PAGAMENTO & INTEGRAÇÃO FINANCEIRA */}
       {isBaixaModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl animate-in fade-in zoom-in-95 duration-150">
