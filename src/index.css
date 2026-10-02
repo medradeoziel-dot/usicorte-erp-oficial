@@ -32,19 +32,6 @@
   .offline-indicator,
   .opcoes-pesquisa,
   .botoes-impressao,
-  .tabela-container,
-  .tabela-consulta,
-  #screen-consulta,
-  .fechamento-interface-screen,
-  .fechamento-header,
-  .fechamento-filtros,
-  .fechamento-acoes,
-  .fechamento-cards,
-  .fechamento-tabela-tela,
-  .fechamento-feedback,
-  .extrato-modal-header,
-  .extrato-modal-footer,
-  .extrato-modal-backdrop,
   #screen-clientes,
   #screen-produtos,
   #screen-orcamento,
@@ -251,9 +238,19 @@
   body.print-extrato .secao-fechamento-relatorio-print,
   body.modal-extrato-open .secao-fechamento-relatorio-print { display: none !important; }
   body.print-extrato .fechamento-interface-screen,
-  body.modal-extrato-open .fechamento-interface-screen { display: none !important; }
-  body.print-extrato #screen-consulta,
-  body.modal-extrato-open #screen-consulta { display: none !important; }
+  body.modal-extrato-open .fechamento-interface-screen,
+  body.print-extrato .extrato-modal-header,
+  body.modal-extrato-open .extrato-modal-header,
+  body.print-extrato .extrato-modal-footer,
+  body.modal-extrato-open .extrato-modal-footer,
+  body.print-extrato .sidebar,
+  body.print-extrato aside,
+  body.print-extrato nav,
+  body.print-extrato .topbar,
+  body.modal-extrato-open .sidebar,
+  body.modal-extrato-open aside,
+  body.modal-extrato-open nav,
+  body.modal-extrato-open .topbar { display: none !important; }
   body.print-extrato .secao-extrato,
   body.modal-extrato-open .secao-extrato { display: block !important; visibility: visible !important; }
 
@@ -265,8 +262,11 @@
   body.print-fechamento-relatorio .secao-corte { display: none !important; }
   body.print-fechamento-relatorio .secao-fechamento-print { display: none !important; }
   body.print-fechamento-relatorio .secao-extrato { display: none !important; }
-  body.print-fechamento-relatorio .fechamento-interface-screen { display: none !important; }
-  body.print-fechamento-relatorio #screen-consulta { display: none !important; }
+  body.print-fechamento-relatorio .fechamento-interface-screen,
+  body.print-fechamento-relatorio .sidebar,
+  body.print-fechamento-relatorio aside,
+  body.print-fechamento-relatorio nav,
+  body.print-fechamento-relatorio .topbar { display: none !important; }
   body.print-fechamento-relatorio .secao-fechamento-relatorio-print { display: block !important; visibility: visible !important; }
 
   /* Se não estiver em modo extrato nem modal aberto, esconde secao-extrato na impressão */
@@ -282,10 +282,10 @@
   body.print-fechamento .secao-extrato,
   body.print-fechamento .secao-fechamento-relatorio-print,
   body.print-fechamento .fechamento-interface-screen,
-  body.print-fechamento #screen-consulta,
   body.print-fechamento .sidebar,
   body.print-fechamento aside,
   body.print-fechamento nav,
+  body.print-fechamento .topbar,
   body.print-fechamento .no-print,
   body.print-fechamento .btn-no-print { display: none !important; }
   body.print-fechamento .secao-fechamento-print { display: block !important; visibility: visible !important; }
@@ -992,8 +992,26 @@
   }
 
   /* Layout de Impressão Direta da Tabela de Consulta */
-  .tabela-container { max-height: none !important; overflow: visible !important; border: none !important; }
-  .tabela-consulta th, .tabela-consulta td { border: 1px solid #000 !important; }
+  #screen-consulta {
+    display: block !important;
+    visibility: visible !important;
+    width: 100% !important;
+  }
+  .tabela-container {
+    display: block !important;
+    max-height: none !important;
+    overflow: visible !important;
+    border: none !important;
+    width: 100% !important;
+  }
+  .tabela-consulta {
+    display: table !important;
+    width: 100% !important;
+    border-collapse: collapse !important;
+  }
+  .tabela-consulta th, .tabela-consulta td {
+    border: 1px solid #000 !important;
+  }
 
   /* ===================================================
      ESTILIZAÇÃO DE IMPRESSÃO: MEDIDA E OBSERVAÇÃO EMPILHADAS
@@ -1429,6 +1447,22 @@
   box-sizing: border-box;
   padding: 8px;
 }
+
+/* ===================================================
+   CLASSE UTILITÁRIA PRINT-ONLY
+   (Invisível na tela interativa, visível exclusivamente na impressão)
+   =================================================== */
+.print-only {
+  display: none !important;
+}
+
+@media print {
+  .print-only {
+    display: block !important;
+    visibility: visible !important;
+  }
+}
+
 
 
 

@@ -1178,7 +1178,7 @@ export default function FechamentoCotacoesModule({
       </div>
 
       {/* 5. VIEW DE IMPRESSÃO A4: RELATÓRIO GERAL DE COTAÇÕES FILTRADAS */}
-      <div className="secao-fechamento-relatorio-print hidden print:block bg-white text-black p-6 sm:p-8 max-w-[850px] mx-auto font-sans leading-relaxed text-xs">
+      <div className="secao-fechamento-relatorio-print print-only bg-white text-black p-6 sm:p-8 max-w-[850px] mx-auto font-sans leading-relaxed text-xs">
         <CompanyHeader 
           documentType="RELATÓRIO DE COTAÇÕES & FECHAMENTO"
           documentDate={new Date().toLocaleDateString('pt-BR')}
