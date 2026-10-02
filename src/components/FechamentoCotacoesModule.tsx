@@ -437,38 +437,6 @@ export default function FechamentoCotacoesModule({
     return undefined;
   }, [filtroCliente, selectedQuotes, clients]);
 
-  // Sincroniza estado de modal aberto no body para controle fino de regras de impressão
-  useEffect(() => {
-    if (isExtratoModalOpen) {
-      document.body.classList.add('modal-extrato-open');
-    } else {
-      document.body.classList.remove('modal-extrato-open');
-    }
-    return () => {
-      document.body.classList.remove('modal-extrato-open');
-    };
-  }, [isExtratoModalOpen]);
-
-  // Listener para capturar Ctrl+P direto no navegador e aplicar a classe correta
-  useEffect(() => {
-    const handleBeforePrint = () => {
-      if (isExtratoModalOpen) {
-        document.body.classList.add('print-extrato');
-      } else {
-        document.body.classList.add('print-fechamento-relatorio');
-      }
-    };
-    const handleAfterPrint = () => {
-      document.body.classList.remove('print-extrato', 'print-fechamento-relatorio');
-    };
-    window.addEventListener('beforeprint', handleBeforePrint);
-    window.addEventListener('afterprint', handleAfterPrint);
-    return () => {
-      window.removeEventListener('beforeprint', handleBeforePrint);
-      window.removeEventListener('afterprint', handleAfterPrint);
-    };
-  }, [isExtratoModalOpen]);
-
   // Ação: Abrir Extrato de Cobrança
   const handleAbrirExtrato = () => {
     if (selectedQuotes.length === 0) {
@@ -480,16 +448,6 @@ export default function FechamentoCotacoesModule({
 
   // Ação: Imprimir Extrato A4 Limpo e Estruturado
   const handleImprimirExtrato = () => {
-    document.body.classList.remove(
-      'print-pedido',
-      'print-etiqueta',
-      'print-proposta',
-      'print-corte',
-      'print-geral',
-      'print-empresa',
-      'print-fechamento',
-      'print-fechamento-relatorio'
-    );
     document.body.classList.add('print-extrato');
 
     const onAfterPrint = () => {

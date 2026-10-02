@@ -1074,11 +1074,11 @@ export async function fetchCotacoesDb(
       return cached.data;
     }
 
-    // Consulta otimizada com projeção e ordenação indexada
+    // Consulta otimizada com projeção e ordenação indexada (mais recentes primeiro)
     let q = db
       .from('cotacoes')
       .select('*, cotacao_itens(*)')
-      .order('data', { ascending: false });
+      .order('created_at', { ascending: false });
 
     // 1. Filtro server-side por cliente
     if (filtroCliente && filtroCliente.trim()) {
@@ -1107,18 +1107,19 @@ export async function fetchCotacoesDb(
       q = q.lte('data', options.dataFim);
     }
 
-    // 5. Paginação e Limites inteligentes (evita carregar gigabytes de JSON de uma só vez)
-    const effectiveLimit = options?.limit ?? 300;
+    // 5. Paginação e Limites: aplica apenas se explicitamente configurado pelo chamador
     if (options?.page && options.page > 0) {
-      const from = (options.page - 1) * effectiveLimit;
-      const to = from + effectiveLimit - 1;
+      const limit = options?.limit ?? 50;
+      const from = (options.page - 1) * limit;
+      const to = from + limit - 1;
       q = q.range(from, to);
     } else if (options?.offset !== undefined) {
+      const limit = options?.limit ?? 50;
       const from = options.offset;
-      const to = from + effectiveLimit - 1;
+      const to = from + limit - 1;
       q = q.range(from, to);
-    } else if (effectiveLimit > 0 && effectiveLimit < 10000) {
-      q = q.limit(effectiveLimit);
+    } else if (options?.limit && options.limit > 0) {
+      q = q.limit(options.limit);
     }
 
     const { data, error, status } = await q;

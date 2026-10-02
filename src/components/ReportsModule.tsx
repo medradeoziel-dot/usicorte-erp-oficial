@@ -571,8 +571,8 @@ export default function ReportsModule({
   const [inputBusca, setInputBusca] = useState<string>('');
   // Campo dedicado: NOME DO CLIENTE (filtra sempre, combinado com a busca acima)
   const [clienteBusca, setClienteBusca] = useState<string>('');
-  // Filtro padrão por situação da proposta: inicia selecionado em "Em Aberto / Ativas" (exibindo apenas Pendente, Aprovado, Rascunho)
-  const [statusFiltro, setStatusFiltro] = useState<string>('ativas');
+  // Filtro padrão por situação da proposta: inicia selecionado em "Todas as Situações" (garante exibição completa de todo o histórico)
+  const [statusFiltro, setStatusFiltro] = useState<string>('todos');
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [dbQuotesItems, setDbQuotesItems] = useState<ConsultaItem[]>([]);
 
@@ -959,9 +959,9 @@ export default function ReportsModule({
     const distinctQuotesList: { id: string; numero: string; cliente: string; data: string; total: number; createdAt?: string }[] = [];
 
     try {
-      // 1. Do Supabase (Prioridade Máxima com limite e caching em memória)
+      // 1. Do Supabase (Prioridade Máxima com deduplicação e dados completos)
       try {
-        const dbData = await fetchCotacoesDb(undefined, undefined, { forceRefresh, limit: 300 });
+        const dbData = await fetchCotacoesDb(undefined, undefined, { forceRefresh });
         if (dbData && dbData.length > 0) {
           // Ordena por data e criação decrescente (mais recentes primeiro)
           const sortedDbData = [...dbData].sort((a, b) => {
