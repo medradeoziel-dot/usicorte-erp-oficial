@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { Quote, QuoteItem, Client } from '../types';
 import Logo from './Logo';
 import CompanyHeader from './CompanyHeader';
@@ -15,12 +15,14 @@ import {
 import { 
   fetchCotacoesDb, 
   fetchCotacaoById,
+  fetchUltimosItensCotacaoDb,
   uploadDesenhoStorage, 
   updateItemCortadoDb,
   updateCotacaoStatusDb,
   deleteCotacaoDb,
   deleteCotacaoItemDb,
   deleteMultipleCotacoesDb,
+  FetchCotacoesOptions,
   db 
 } from '../lib/db';
 import { executarMigracaoEmergenciaOrcamentos } from '../services/emergencyMigrationService';
@@ -61,6 +63,7 @@ import {
   Bell,
   Clock,
   RotateCw,
+  RotateCcw,
   ChevronLeft,
   ChevronRight
 } from 'lucide-react';
@@ -191,6 +194,8 @@ export default function ReportsModule({
 }: ReportsModuleProps) {
   // Navigation tab: 'propostas' | 'consulta'
   const [activeTab, setActiveTab] = useState<'propostas' | 'consulta'>(initialTab);
+  // Estado para rastrear se está exibindo apenas as últimas 10 cotações no carregamento inicial
+  const [isInitialRecentOnly, setIsInitialRecentOnly] = useState<boolean>(true);
 
   const switchTab = (tab: 'propostas' | 'consulta') => {
     setActiveTab(tab);
@@ -200,7 +205,13 @@ export default function ReportsModule({
       setItemToDelete(null);
       setActiveImagePreviewItem(null);
       setIsBulkDeleteOpen(false);
-      loadAllConsultaData();
+      userRequestedFullHistoryRef.current = false;
+      const hasSearch = Boolean(inputBusca.trim() || clienteBusca.trim() || (statusFiltro && statusFiltro !== 'todos'));
+      if (!hasSearch) {
+        loadAllConsultaData({ limit: 10 });
+      } else {
+        loadAllConsultaData();
+      }
     }
     if (onTabChange) {
       onTabChange(tab);
@@ -215,14 +226,24 @@ export default function ReportsModule({
         setItemToDelete(null);
         setActiveImagePreviewItem(null);
         setIsBulkDeleteOpen(false);
-        loadAllConsultaData();
+        const hasSearch = Boolean(inputBusca.trim() || clienteBusca.trim() || (statusFiltro && statusFiltro !== 'todos'));
+        if (!hasSearch) {
+          loadAllConsultaData({ limit: 10 });
+        } else {
+          loadAllConsultaData();
+        }
       }
     }
   }, [initialTab]);
 
   useEffect(() => {
     if (activeTab === 'consulta') {
-      loadAllConsultaData();
+      const hasSearch = Boolean(inputBusca.trim() || clienteBusca.trim() || (statusFiltro && statusFiltro !== 'todos'));
+      if (!hasSearch) {
+        loadAllConsultaData({ limit: 10 });
+      } else {
+        loadAllConsultaData();
+      }
     }
   }, [activeTab]);
 
@@ -235,6 +256,7 @@ export default function ReportsModule({
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(50);
   const isLoadingConsultaRef = useRef<boolean>(false);
+  const userRequestedFullHistoryRef = useRef<boolean>(false);
 
   // Active document preview / print mode
   const [activeModel, setActiveModel] = useState<PrintModelType>('A4-inteiro');
@@ -949,7 +971,21 @@ export default function ReportsModule({
   };
 
   // Carrega cotações e itens do Supabase e LocalStorage com deduplicação rigorosa e exibindo apenas a versão mais recente
-  const loadAllConsultaData = async (forceRefresh = false) => {
+  const loadAllConsultaData = async (
+    optionsOrForceRefresh?: boolean | { forceRefresh?: boolean; limit?: number },
+    fallbackLimit?: number
+  ) => {
+    let forceRefresh = false;
+    let limit: number | undefined = undefined;
+
+    if (typeof optionsOrForceRefresh === 'boolean') {
+      forceRefresh = optionsOrForceRefresh;
+      limit = fallbackLimit;
+    } else if (typeof optionsOrForceRefresh === 'object' && optionsOrForceRefresh !== null) {
+      forceRefresh = Boolean(optionsOrForceRefresh.forceRefresh);
+      limit = optionsOrForceRefresh.limit;
+    }
+
     if (isLoadingConsultaRef.current) return;
     isLoadingConsultaRef.current = true;
     setIsLoadingConsulta(true);
@@ -961,96 +997,153 @@ export default function ReportsModule({
     try {
       // 1. Do Supabase (Prioridade Máxima com deduplicação e dados completos)
       try {
-        const dbData = await fetchCotacoesDb(undefined, undefined, { forceRefresh });
-        if (dbData && dbData.length > 0) {
-          // Ordena por data e criação decrescente (mais recentes primeiro)
-          const sortedDbData = [...dbData].sort((a, b) => {
-            const dateA = new Date(a.created_at || a.data || 0).getTime();
-            const dateB = new Date(b.created_at || b.data || 0).getTime();
-            return dateB - dateA;
-          });
+        if (limit && limit > 0) {
+          // Otimização Direta: consulta diretamente os últimos N itens na tabela 'cotacao_itens' do Supabase
+          const { itens: dbItens } = await fetchUltimosItensCotacaoDb(limit);
+          if (dbItens && dbItens.length > 0) {
+            dbItens.forEach((it: any, idx: number) => {
+              const q = Array.isArray(it.cotacoes) ? it.cotacoes[0] : it.cotacoes;
+              const rawNum = q?.numero || q?.id || 'COT-TEMP';
+              const quoteKey = String(rawNum).trim().toLowerCase();
 
-          sortedDbData.forEach((q, qIdx) => {
-            const rawNum = q.numero || q.id || '';
-            const key = String(rawNum).trim().toLowerCase();
+              if (quoteKey && !seenQuoteNumbers.has(quoteKey)) {
+                seenQuoteNumbers.add(quoteKey);
+                if (q?.id) seenQuoteNumbers.add(String(q.id).trim().toLowerCase());
 
-            // Se já processamos o registro mais recente deste orçamento, IGNORA versões antigas duplicadas
-            if (!key || seenQuoteNumbers.has(key)) {
-              return;
-            }
-            seenQuoteNumbers.add(key);
-            if (q.id) seenQuoteNumbers.add(String(q.id).trim().toLowerCase());
-
-            distinctQuotesList.push({
-              id: q.id || '',
-              numero: q.numero || 'COT-SEM-NUMERO',
-              cliente: q.cliente_nome || 'Cliente Balcão',
-              data: q.data || q.created_at || '',
-              total: Number(q.valor_total) || 0,
-              createdAt: q.created_at || q.data || ''
-            });
-
-            // Adiciona SOMENTE os itens da versão mais recente desta cotação
-            (q.cotacao_itens || []).forEach((it, itIdx) => {
-                const isFaturadoQuote = String(q.situacao || '').toUpperCase() === 'FATURADO' || String(q.status || '').toLowerCase() === 'faturado';
-                const computedQuoteStatus = isFaturadoQuote ? 'faturado' : (q.status as StatusProposta);
-
-                itemsList.push({
-                  idVer: 30000 + qIdx * 100 + itIdx,
-                  data: formatSafeDate(q.data || q.created_at),
-                  empresa: q.cliente_nome || 'Cliente Balcão',
-                  contato: q.contato || '-',
-                  produto: it.produto || 'Peça',
-                  medida: it.medida || '',
-                  descricao: it.descricao || 'Item UsiCorte',
-                  valor: formatCurrency(it.valor_unitario || 0),
-                  qtd: it.quantidade || 1,
-                  unitario: it.valor_unitario || 0,
-                  valorGeral: it.valor_total || ((it.valor_unitario || 0) * (it.quantidade || 1)),
-                  cotacao: q.numero,
-                  cotacaoId: q.id,
-                  itemId: it.id,
-                  observacao: it.observacao || (it as any).notes || (it as any).obs || '',
-                  obs: it.observacao || (it as any).notes || (it as any).obs || '',
-                  status: computedQuoteStatus,
-                  desenhoUrl: it.desenho_url || undefined
+                distinctQuotesList.push({
+                  id: q?.id || it.cotacao_id || '',
+                  numero: q?.numero || 'COT-SEM-NUMERO',
+                  cliente: q?.cliente_nome || 'Cliente Balcão',
+                  data: q?.data || q?.created_at || it.created_at || '',
+                  total: Number(q?.valor_total) || Number(it.valor_total) || 0,
+                  createdAt: q?.created_at || it.created_at || ''
                 });
+              }
+
+              const isFaturadoQuote = String(q?.situacao || '').toUpperCase() === 'FATURADO' || String(q?.status || '').toLowerCase() === 'faturado';
+              const computedQuoteStatus = isFaturadoQuote ? 'faturado' : (q?.status as StatusProposta || 'aprovado');
+
+              itemsList.push({
+                idVer: 30000 + idx,
+                data: formatSafeDate(it.created_at || q?.data || q?.created_at),
+                empresa: q?.cliente_nome || 'Cliente Balcão',
+                contato: q?.contato || '-',
+                produto: it.produto || it.material || 'Peça',
+                medida: it.medida || '—',
+                descricao: it.descricao || 'Item UsiCorte',
+                valor: formatCurrency(it.valor_unitario || 0),
+                qtd: Number(it.quantidade) || 1,
+                unitario: Number(it.valor_unitario) || 0,
+                valorGeral: Number(it.valor_total) || ((Number(it.valor_unitario) || 0) * (Number(it.quantidade) || 1)),
+                cotacao: q?.numero || 'COT-TEMP',
+                cotacaoId: q?.id || it.cotacao_id,
+                itemId: it.id,
+                observacao: it.observacao || '',
+                obs: it.observacao || '',
+                status: computedQuoteStatus,
+                desenhoUrl: it.desenho_url || undefined
+              });
             });
-          });
+          }
+        } else {
+          // Busca completa de cotações para pesquisa e filtros dinâmicos
+          const fetchOptions: FetchCotacoesOptions = { forceRefresh };
+          const dbData = await fetchCotacoesDb(undefined, undefined, fetchOptions);
+          if (dbData && dbData.length > 0) {
+            // Ordena por data e criação decrescente (mais recentes primeiro)
+            const sortedDbData = [...dbData].sort((a, b) => {
+              const dateA = new Date(a.created_at || a.data || 0).getTime();
+              const dateB = new Date(b.created_at || b.data || 0).getTime();
+              return dateB - dateA;
+            });
+
+            sortedDbData.forEach((q, qIdx) => {
+              const rawNum = q.numero || q.id || '';
+              const key = String(rawNum).trim().toLowerCase();
+
+              // Se já processamos o registro mais recente deste orçamento, IGNORA versões antigas duplicadas
+              if (!key || seenQuoteNumbers.has(key)) {
+                return;
+              }
+              seenQuoteNumbers.add(key);
+              if (q.id) seenQuoteNumbers.add(String(q.id).trim().toLowerCase());
+
+              distinctQuotesList.push({
+                id: q.id || '',
+                numero: q.numero || 'COT-SEM-NUMERO',
+                cliente: q.cliente_nome || 'Cliente Balcão',
+                data: q.data || q.created_at || '',
+                total: Number(q.valor_total) || 0,
+                createdAt: q.created_at || q.data || ''
+              });
+
+              // Adiciona SOMENTE os itens da versão mais recente desta cotação
+              (q.cotacao_itens || []).forEach((it, itIdx) => {
+                  const isFaturadoQuote = String(q.situacao || '').toUpperCase() === 'FATURADO' || String(q.status || '').toLowerCase() === 'faturado';
+                  const computedQuoteStatus = isFaturadoQuote ? 'faturado' : (q.status as StatusProposta);
+
+                  itemsList.push({
+                    idVer: 30000 + qIdx * 100 + itIdx,
+                    data: formatSafeDate(q.data || q.created_at),
+                    empresa: q.cliente_nome || 'Cliente Balcão',
+                    contato: q.contato || '-',
+                    produto: it.produto || 'Peça',
+                    medida: it.medida || '',
+                    descricao: it.descricao || 'Item UsiCorte',
+                    valor: formatCurrency(it.valor_unitario || 0),
+                    qtd: it.quantidade || 1,
+                    unitario: it.valor_unitario || 0,
+                    valorGeral: it.valor_total || ((it.valor_unitario || 0) * (it.quantidade || 1)),
+                    cotacao: q.numero,
+                    cotacaoId: q.id,
+                    itemId: it.id,
+                    observacao: it.observacao || (it as any).notes || (it as any).obs || '',
+                    obs: it.observacao || (it as any).notes || (it as any).obs || '',
+                    status: computedQuoteStatus,
+                    desenhoUrl: it.desenho_url || undefined
+                  });
+              });
+            });
+          }
         }
       } catch (err) {
         console.warn('Supabase offline ou sem cotações:', err);
       }
 
       // 2. Do LocalStorage (apenas as cotações que NÃO existem no Supabase)
-      const saved = localStorage.getItem('s_orcamentos');
-      if (saved) {
-        try {
-          const quotes: Quote[] = JSON.parse(saved);
-          if (Array.isArray(quotes)) {
-            // Ordena por data de atualização mais recente
-            const sortedLocal = [...quotes].sort((a, b) => {
-              const dateA = new Date(a.updatedAt || a.createdAt || a.date || 0).getTime();
-              const dateB = new Date(b.updatedAt || b.createdAt || b.date || 0).getTime();
-              return dateB - dateA;
-            });
+      // Se já temos a quantidade necessária do limit (ex: 10 cotações mais recentes do Supabase), pula para ser instantâneo
+      const shouldCheckLocalStorage = !limit || distinctQuotesList.length < limit;
+      if (shouldCheckLocalStorage) {
+        const saved = localStorage.getItem('s_orcamentos');
+        if (saved) {
+          try {
+            const quotes: Quote[] = JSON.parse(saved);
+            if (Array.isArray(quotes)) {
+              // Ordena por data de atualização mais recente
+              const sortedLocal = [...quotes].sort((a, b) => {
+                const dateA = new Date(a.updatedAt || a.createdAt || a.date || 0).getTime();
+                const dateB = new Date(b.updatedAt || b.createdAt || b.date || 0).getTime();
+                return dateB - dateA;
+              });
 
-            sortedLocal.forEach((q, qIdx) => {
-              const key = String(q.quoteNumber || q.id || '').trim().toLowerCase();
-              if (key && !seenQuoteNumbers.has(key)) {
-                seenQuoteNumbers.add(key);
+              sortedLocal.forEach((q, qIdx) => {
+                if (limit && distinctQuotesList.length >= limit) return;
 
-                distinctQuotesList.push({
-                  id: q.id || '',
-                  numero: q.quoteNumber || `COT-LOCAL-${qIdx + 1}`,
-                  cliente: q.clientName || 'Cliente Balcão',
-                  data: q.date || q.createdAt || '',
-                  total: q.grandTotal || q.subtotalTotal || (q.items || []).reduce((acc, i) => acc + ((i.unitPrice || 0) * (i.quantity || 1)), 0),
-                  createdAt: q.createdAt || q.updatedAt || q.date || ''
-                });
+                const key = String(q.quoteNumber || q.id || '').trim().toLowerCase();
+                if (key && !seenQuoteNumbers.has(key)) {
+                  seenQuoteNumbers.add(key);
 
-                (q.items || []).forEach((it, itIdx) => {
-                  const obsText = it.notes || it.observacao || (it as any).obs || '';
+                  distinctQuotesList.push({
+                    id: q.id || '',
+                    numero: q.quoteNumber || `COT-LOCAL-${qIdx + 1}`,
+                    cliente: q.clientName || 'Cliente Balcão',
+                    data: q.date || q.createdAt || '',
+                    total: q.grandTotal || q.subtotalTotal || (q.items || []).reduce((acc, i) => acc + ((i.unitPrice || 0) * (i.quantity || 1)), 0),
+                    createdAt: q.createdAt || q.updatedAt || q.date || ''
+                  });
+
+                  (q.items || []).forEach((it, itIdx) => {
+                    const obsText = it.notes || it.observacao || (it as any).obs || '';
                     const isFaturadoLocal = (q.status || '').toLowerCase().includes('faturad') || ((q as any).situacao || '').toUpperCase() === 'FATURADO' || q.paymentStatus === 'Pago';
                     const computedLocalStatus = isFaturadoLocal ? 'faturado' :
                       (q.status?.toLowerCase().includes('aprov') ? 'aprovado' :
@@ -1078,26 +1171,28 @@ export default function ReportsModule({
                       status: computedLocalStatus as StatusProposta,
                       desenhoUrl: it.drawingImage || (it as any).fotoDesenho || (it as any).desenho_url || undefined
                     });
-                });
-              }
-            });
+                  });
+                }
+              });
+            }
+          } catch (e) {
+            console.warn('Erro ao ler s_orcamentos:', e);
           }
-        } catch (e) {
-          console.warn('Erro ao ler s_orcamentos:', e);
-        }
 
-        // Rotina segura de sincronização: envia orçamentos locais pendentes ao Supabase
-        // e só limpa a chave 's_orcamentos' após confirmação de gravação no banco
-        executarMigracaoEmergenciaOrcamentos().then(res => {
-          if (res.migratedCount > 0) {
-            // Se novos orçamentos foram salvos no Supabase, atualiza os dados da consulta
-            loadAllConsultaData();
-          }
-        }).catch(err => {
-          console.warn('Aviso ao sincronizar emergência em ReportsModule:', err);
-        });
+          // Rotina segura de sincronização: envia orçamentos locais pendentes ao Supabase
+          // e só limpa a chave 's_orcamentos' após confirmação de gravação no banco
+          executarMigracaoEmergenciaOrcamentos().then(res => {
+            if (res.migratedCount > 0) {
+              // Se novos orçamentos foram salvos no Supabase, atualiza os dados da consulta
+              loadAllConsultaData();
+            }
+          }).catch(err => {
+            console.warn('Aviso ao sincronizar emergência em ReportsModule:', err);
+          });
+        }
       }
 
+      setIsInitialRecentOnly(Boolean(limit && limit > 0));
       setSavedDbQuotes(distinctQuotesList);
       setDbQuotesItems(itemsList);
     } finally {
@@ -1107,7 +1202,8 @@ export default function ReportsModule({
   };
 
   useEffect(() => {
-    loadAllConsultaData();
+    // 1. Carregamento inicial ultra rápido: traz apenas as 10 cotações mais recentes do Supabase (.limit(10))
+    loadAllConsultaData({ limit: 10 });
 
     const handleMigrated = () => {
       loadAllConsultaData();
@@ -1116,6 +1212,45 @@ export default function ReportsModule({
     return () => {
       window.removeEventListener('cotacoes_migradas_emergencia', handleMigrated);
     };
+  }, []);
+
+  // 3. Ao digitar na pesquisa ou aplicar filtros, substitui automaticamente a listagem inicial de 10 pelo histórico filtrado completo.
+  // E quando o usuário apaga o campo de pesquisa ou limpa os filtros, retorna automaticamente ao estado leve com os 10 últimos itens.
+  useEffect(() => {
+    const hasSearchOrFilter = Boolean(
+      inputBusca.trim() || 
+      clienteBusca.trim() || 
+      (statusFiltro && statusFiltro !== 'todos')
+    );
+
+    if (hasSearchOrFilter) {
+      if (isInitialRecentOnly) {
+        const timer = setTimeout(() => {
+          loadAllConsultaData({ forceRefresh: false });
+        }, 250);
+        return () => clearTimeout(timer);
+      }
+    } else {
+      // Se não há termo de busca e NÃO está no modo inicial (e o usuário não solicitou explicitamente histórico completo):
+      // Retorna automaticamente para os 10 itens mais recentes de forma super rápida e leve!
+      if (!isInitialRecentOnly && !userRequestedFullHistoryRef.current) {
+        const timer = setTimeout(() => {
+          setCurrentPage(1);
+          loadAllConsultaData({ limit: 10, forceRefresh: false });
+        }, 200);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [inputBusca, clienteBusca, statusFiltro, isInitialRecentOnly]);
+
+  // Função dedicada para limpar a pesquisa/filtros e recarregar os 10 últimos itens de forma otimizada
+  const handleLimparPesquisa = useCallback(() => {
+    setInputBusca('');
+    setClienteBusca('');
+    setStatusFiltro('todos');
+    setCurrentPage(1);
+    userRequestedFullHistoryRef.current = false;
+    loadAllConsultaData({ limit: 10, forceRefresh: false });
   }, []);
 
   // Mantém a cotação ativa sincronizada com currentQuote se o usuário estiver na visualização da cotação atual
@@ -3080,7 +3215,14 @@ export default function ReportsModule({
               <button 
                 type="button" 
                 className="btn-print w-full min-w-0 cursor-pointer bg-slate-800 hover:bg-slate-700 text-cyan-400 border border-slate-700 transition-all flex flex-col items-center justify-center disabled:opacity-60" 
-                onClick={() => loadAllConsultaData(true)}
+                onClick={() => {
+                  const hasSearch = Boolean(inputBusca.trim() || clienteBusca.trim() || (statusFiltro && statusFiltro !== 'todos'));
+                  if (isInitialRecentOnly && !hasSearch) {
+                    loadAllConsultaData({ forceRefresh: true, limit: 10 });
+                  } else {
+                    loadAllConsultaData({ forceRefresh: true });
+                  }
+                }}
                 disabled={isLoadingConsulta}
                 title="Recarregar dados do Supabase"
               >
@@ -3379,23 +3521,70 @@ export default function ReportsModule({
                 )}
               </div>
 
-              <input 
-                type="text" 
-                id="inputCliente" 
-                className="input-busca-avancada" 
-                placeholder="Nome do Cliente..." 
-                value={clienteBusca} 
-                onChange={(e) => setClienteBusca(e.target.value)} 
-              />
+              <div className="relative flex-1 min-w-[200px]">
+                <input 
+                  type="text" 
+                  id="inputCliente" 
+                  className="input-busca-avancada w-full pr-8" 
+                  placeholder="Nome do Cliente..." 
+                  value={clienteBusca} 
+                  onChange={(e) => setClienteBusca(e.target.value)} 
+                />
+                {clienteBusca && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setClienteBusca('');
+                      if (!inputBusca.trim() && statusFiltro === 'todos') {
+                        handleLimparPesquisa();
+                      }
+                    }}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-1 cursor-pointer transition-colors"
+                    title="Limpar filtro de cliente"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
 
-              <input 
-                type="text" 
-                id="inputBusca" 
-                className="input-busca-avancada" 
-                placeholder="Digite para pesquisar..." 
-                value={inputBusca} 
-                onChange={(e) => setInputBusca(e.target.value)} 
-              />
+              <div className="relative flex-1 min-w-[250px]">
+                <input 
+                  type="text" 
+                  id="inputBusca" 
+                  className="input-busca-avancada w-full pr-8" 
+                  placeholder="Digite para pesquisar..." 
+                  value={inputBusca} 
+                  onChange={(e) => setInputBusca(e.target.value)} 
+                />
+                {inputBusca && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setInputBusca('');
+                      if (!clienteBusca.trim() && statusFiltro === 'todos') {
+                        handleLimparPesquisa();
+                      }
+                    }}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-1 cursor-pointer transition-colors"
+                    title="Limpar campo de pesquisa"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {/* Botão de Limpar Pesquisa e recarregar os 10 últimos itens de forma otimizada */}
+              {(inputBusca || clienteBusca || statusFiltro !== 'todos' || !isInitialRecentOnly) && (
+                <button
+                  type="button"
+                  onClick={handleLimparPesquisa}
+                  className="h-[37px] px-3 bg-slate-800 hover:bg-slate-700 text-amber-300 hover:text-amber-200 border border-amber-500/40 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs whitespace-nowrap"
+                  title="Limpar pesquisa e recarregar os 10 últimos itens de forma otimizada"
+                >
+                  <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Limpar / 10 Recentes</span>
+                </button>
+              )}
             </div>
 
           </div>
@@ -3661,8 +3850,39 @@ export default function ReportsModule({
           <div className="btn-no-print flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 text-xs text-slate-400 bg-slate-900/60 border border-slate-800 rounded-xl p-3 shadow-xs">
             <div className="flex items-center gap-4 flex-wrap">
               <span>
-                Exibindo <strong className="text-slate-200">{filteredConsultaItems.length === 0 ? 0 : (currentPage - 1) * (pageSize || 1) + 1}</strong> a <strong className="text-slate-200">{pageSize <= 0 ? filteredConsultaItems.length : Math.min(currentPage * pageSize, filteredConsultaItems.length)}</strong> de <strong className="text-slate-200">{filteredConsultaItems.length}</strong> itens filtrados ({allConsultaItems.length} no total)
+                {isInitialRecentOnly && !inputBusca.trim() && !clienteBusca.trim() && statusFiltro === 'todos' ? (
+                  <>Exibindo os <strong className="text-cyan-300">10 itens mais recentes</strong> (Carregamento Otimizado)</>
+                ) : (
+                  <>Exibindo <strong className="text-slate-200">{filteredConsultaItems.length === 0 ? 0 : (currentPage - 1) * (pageSize || 1) + 1}</strong> a <strong className="text-slate-200">{pageSize <= 0 ? filteredConsultaItems.length : Math.min(currentPage * pageSize, filteredConsultaItems.length)}</strong> de <strong className="text-slate-200">{filteredConsultaItems.length}</strong> itens filtrados ({allConsultaItems.length} no total)</>
+                )}
               </span>
+              {isInitialRecentOnly && !inputBusca.trim() && !clienteBusca.trim() && statusFiltro === 'todos' && (
+                <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10.5px] font-bold bg-cyan-950/80 text-cyan-300 border border-cyan-800/60">
+                  ⚡ Últimos 10 Itens
+                  <button
+                    type="button"
+                    onClick={() => {
+                      userRequestedFullHistoryRef.current = true;
+                      loadAllConsultaData({ forceRefresh: false });
+                    }}
+                    className="ml-1 text-cyan-400 hover:text-cyan-200 underline font-semibold cursor-pointer"
+                    title="Carregar todo o histórico do banco de dados com paginação completa"
+                  >
+                    (Carregar todo o histórico)
+                  </button>
+                </span>
+              )}
+              {!isInitialRecentOnly && !inputBusca.trim() && !clienteBusca.trim() && statusFiltro === 'todos' && (
+                <button
+                  type="button"
+                  onClick={handleLimparPesquisa}
+                  className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10.5px] font-bold bg-amber-950/70 text-amber-300 border border-amber-800/60 hover:bg-amber-900/80 transition-colors cursor-pointer"
+                  title="Voltar ao estado leve trazendo apenas os 10 últimos itens"
+                >
+                  <RotateCcw className="w-3 h-3 text-amber-400" />
+                  <span>Voltar aos 10 Recentes</span>
+                </button>
+              )}
               <span className="text-cyan-400 font-semibold">
                 {selectedIds.length} item(ns) selecionado(s)
               </span>
@@ -3674,8 +3894,13 @@ export default function ReportsModule({
                 <select
                   value={pageSize}
                   onChange={(e) => {
-                    setPageSize(Number(e.target.value));
+                    const newSize = Number(e.target.value);
+                    setPageSize(newSize);
                     setCurrentPage(1);
+                    if (isInitialRecentOnly) {
+                      userRequestedFullHistoryRef.current = true;
+                      loadAllConsultaData({ forceRefresh: false });
+                    }
                   }}
                   className="bg-slate-950 border border-slate-700 text-slate-200 rounded-md px-2 py-1 text-xs outline-none focus:border-cyan-500 cursor-pointer"
                 >
@@ -3687,34 +3912,50 @@ export default function ReportsModule({
                 </select>
               </div>
 
-              {pageSize > 0 && totalPages > 1 && (
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                    disabled={currentPage <= 1}
-                    className="p-1.5 rounded-lg border border-slate-700 bg-slate-950 text-slate-300 hover:text-white hover:border-slate-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                    title="Página anterior"
-                  >
-                    <ChevronLeft className="w-4 h-4" />
-                  </button>
+              {isInitialRecentOnly ? (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    userRequestedFullHistoryRef.current = true;
+                    await loadAllConsultaData({ forceRefresh: false });
+                    setCurrentPage(2);
+                  }}
+                  className="px-2.5 py-1 rounded-lg border border-cyan-800 bg-cyan-950/60 hover:bg-cyan-900/80 text-cyan-300 transition-all cursor-pointer flex items-center gap-1.5 text-xs font-semibold shadow-xs"
+                  title="Ativar paginação completa de 50 itens e avançar para a próxima página"
+                >
+                  <span>Ver mais registros (50 por página)</span>
+                  <ChevronRight className="w-3.5 h-3.5 text-cyan-400" />
+                </button>
+              ) : (
+                pageSize > 0 && totalPages > 1 && (
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                      disabled={currentPage <= 1}
+                      className="p-1.5 rounded-lg border border-slate-700 bg-slate-950 text-slate-300 hover:text-white hover:border-slate-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                      title="Página anterior"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
 
-                  <div className="flex items-center gap-1 px-1.5 text-xs">
-                    <span className="text-slate-200 font-bold">{currentPage}</span>
-                    <span className="text-slate-500">/</span>
-                    <span className="text-slate-400">{totalPages}</span>
+                    <div className="flex items-center gap-1 px-1.5 text-xs">
+                      <span className="text-slate-200 font-bold">{currentPage}</span>
+                      <span className="text-slate-500">/</span>
+                      <span className="text-slate-400">{totalPages}</span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                      disabled={currentPage >= totalPages}
+                      className="p-1.5 rounded-lg border border-slate-700 bg-slate-950 text-slate-300 hover:text-white hover:border-slate-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                      title="Próxima página"
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
                   </div>
-
-                  <button
-                    type="button"
-                    onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                    disabled={currentPage >= totalPages}
-                    className="p-1.5 rounded-lg border border-slate-700 bg-slate-950 text-slate-300 hover:text-white hover:border-slate-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                    title="Próxima página"
-                  >
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
-                </div>
+                )
               )}
             </div>
           </div>

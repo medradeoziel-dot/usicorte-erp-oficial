@@ -1078,7 +1078,7 @@ export async function fetchCotacoesDb(
     let q = db
       .from('cotacoes')
       .select('*, cotacao_itens(*)')
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false, nullsFirst: false });
 
     // 1. Filtro server-side por cliente
     if (filtroCliente && filtroCliente.trim()) {
@@ -1145,6 +1145,38 @@ export async function fetchCotacoesDb(
   } catch (err) {
     console.error("Erro na busca de cotações:", err);
     return [];
+  }
+}
+
+/**
+ * Busca direta e ultra-rápida dos últimos N itens da tabela 'cotacao_itens' do Supabase,
+ * trazendo a cotação pai associada para abertura instantânea da Consulta Geral.
+ */
+export async function fetchUltimosItensCotacaoDb(limit = 10): Promise<{ itens: any[]; error: any }> {
+  try {
+    const { data, error, status } = await db
+      .from('cotacao_itens')
+      .select('*, cotacoes(*)')
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      if (!isNotFoundError(error, status)) {
+        console.warn("Erro ao buscar últimos itens de cotações no Supabase:", error.message);
+      }
+      return { itens: [], error };
+    }
+
+    const filtered = (data || []).filter((it: any) => {
+      const q = Array.isArray(it.cotacoes) ? it.cotacoes[0] : it.cotacoes;
+      const num = String(q?.numero || q?.id || '');
+      return !num.includes('021935') && !num.includes('21935');
+    });
+
+    return { itens: filtered, error: null };
+  } catch (err) {
+    console.error("Erro na busca direta de itens de cotação:", err);
+    return { itens: [], error: err };
   }
 }
 
