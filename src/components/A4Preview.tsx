@@ -37,7 +37,7 @@ export default function A4Preview({ pedido, cliente, itens, fotosPorPeca, mode }
   };
 
   const DocumentBlock = ({ label, tagColor = "blue" }: { label?: string; tagColor?: "blue" | "amber" | "emerald" | "slate" }) => (
-    <div className="a4-doc bg-white text-black p-4 sm:p-6" style={{ fontFamily: "Arial, sans-serif" }}>
+    <div className="a4-doc print-container bg-white text-black p-4 sm:p-6 print:overflow-visible print:h-auto print:max-h-none print:p-0" style={{ fontFamily: "Arial, sans-serif" }}>
       {/* Header Centralizado da Empresa com Logo à Esquerda */}
       <CompanyHeader
         documentType="Cotação / Proposta Comercial"
@@ -173,7 +173,7 @@ export default function A4Preview({ pedido, cliente, itens, fotosPorPeca, mode }
 
   if (is2vias) {
     return (
-      <div className="flex flex-col justify-between w-full max-w-4xl mx-auto secao-pedido modelo-duas-vias">
+      <div className="print-container flex flex-col justify-between w-full max-w-4xl mx-auto secao-pedido modelo-duas-vias print:overflow-visible print:h-auto">
         <div className="via-bloco via-cliente border border-black rounded p-1 sm:p-2 bg-white" style={{ pageBreakInside: 'avoid', breakInside: 'avoid' }}>
           <DocumentBlock label="VIA DO CLIENTE" tagColor="blue" />
         </div>
@@ -188,7 +188,7 @@ export default function A4Preview({ pedido, cliente, itens, fotosPorPeca, mode }
   }
 
   return (
-    <div className="w-full max-w-4xl mx-auto border border-slate-300 shadow-xl rounded-xl overflow-hidden bg-white">
+    <div className="print-container w-full max-w-4xl mx-auto border border-slate-300 shadow-xl rounded-xl overflow-hidden bg-white print:border-none print:shadow-none print:rounded-none print:overflow-visible print:max-w-none print:h-auto print:max-h-none">
       <DocumentBlock />
     </div>
   );

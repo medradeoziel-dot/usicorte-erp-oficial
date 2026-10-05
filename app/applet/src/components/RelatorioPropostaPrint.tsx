@@ -57,9 +57,29 @@ export default function RelatorioPropostaPrint({
   };
 
   return (
-    <div className="w-full bg-white text-slate-900 font-sans print:p-0 p-4 sm:p-8 max-w-[1000px] mx-auto box-border overflow-x-hidden">
-      {/* Botão de Impressão */}
-      <div className="print:hidden mb-6 flex justify-end">
+    <>
+      <style>{`
+        @media print {
+          html, body, #root, .print-container {
+            overflow: visible !important;
+            height: auto !important;
+            max-height: none !important;
+          }
+          .no-print {
+            display: none !important;
+          }
+          table {
+            page-break-inside: auto;
+          }
+          tr {
+            page-break-inside: avoid;
+            page-break-after: auto;
+          }
+        }
+      `}</style>
+      <div className="print-container w-full bg-white text-slate-900 font-sans print:p-0 p-4 sm:p-8 max-w-[1000px] mx-auto box-border overflow-x-hidden print:overflow-visible print:h-auto print:max-h-none">
+        {/* Botão de Impressão */}
+        <div className="no-print print:hidden mb-6 flex justify-end">
         <button
           onClick={() => window.print()}
           className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded shadow font-bold text-xs sm:text-sm cursor-pointer transition flex items-center gap-2"
@@ -271,5 +291,6 @@ export default function RelatorioPropostaPrint({
         </div>
       </div>
     </div>
+    </>
   );
 }

@@ -2271,14 +2271,14 @@ export default function ReportsModule({
       : (selectedClientName || displayQuote.clientName || 'CLIENTE BALCÃO');
 
     return (
-    <div className="bg-slate-900/60 p-2 sm:p-6 rounded-2xl border border-slate-800 w-full overflow-x-hidden print:bg-transparent print:p-0 print:m-0 print:border-none print:border-t-0 print:shadow-none">
+    <div className="print-container bg-slate-900/60 p-2 sm:p-6 rounded-2xl border border-slate-800 w-full overflow-x-hidden print:bg-transparent print:p-0 print:m-0 print:border-none print:border-t-0 print:shadow-none print:overflow-visible print:h-auto print:max-h-none">
       
       {/* ===================================================
            PROPOSTA 1: RELATÓRIO A4 INTEIRO (GERAL)
            =================================================== */}
       <div 
         id="doc-A4-inteiro" 
-        className={`documento-modelo secao-proposta bg-white text-slate-900 p-4 sm:p-8 rounded-xl shadow-2xl font-sans w-full max-w-4xl mx-auto overflow-x-hidden ${
+        className={`documento-modelo secao-proposta print-container bg-white text-slate-900 p-4 sm:p-8 rounded-xl shadow-2xl font-sans w-full max-w-4xl mx-auto overflow-x-hidden print:overflow-visible print:h-auto print:max-h-none print:min-h-0 ${
           activeModel === 'A4-inteiro' ? 'block' : 'hidden'
         }`}
         style={{ minHeight: '800px' }}
@@ -2377,7 +2377,7 @@ export default function ReportsModule({
         </div>
 
         {/* 🖥️ DESKTOP: 7-Column Table (>= 640px) */}
-        <table className="hidden sm:table w-full border-collapse text-xs mb-6" border={1} cellPadding={6}>
+        <table className="hidden sm:table w-full border-collapse text-xs mb-6 print:overflow-visible print:h-auto print:max-h-none" border={1} cellPadding={6}>
           <thead>
             <tr className="bg-slate-200 text-slate-900 font-bold uppercase text-[11px] border-b border-black">
               <th className="text-left p-2">PRODUTO / MATERIAL</th>
@@ -2889,7 +2889,7 @@ export default function ReportsModule({
            =================================================== */}
       <div 
         id="doc-proposta-resumida" 
-        className={`documento-modelo secao-proposta-resumida mx-auto ${
+        className={`documento-modelo secao-proposta-resumida print-container mx-auto print:overflow-visible print:h-auto print:max-h-none ${
           activeModel === 'proposta-resumida' ? 'block' : 'hidden'
         }`}
       >
@@ -3032,10 +3032,16 @@ export default function ReportsModule({
       {/* Regras de impressão de todos os modelos */}
       <style>{`
         @media print {
-          html, body, #root, #app-root, main, #screen-relatorios, #screen-consulta, #container-impressao {
+          html, body, #root, #app-root, main, #screen-relatorios, #screen-consulta, #container-impressao, .print-container {
             border-top: none !important;
             border: none !important;
             box-shadow: none !important;
+            overflow: visible !important;
+            height: auto !important;
+            max-height: none !important;
+          }
+          .no-print {
+            display: none !important;
           }
           header, .company-header-centralizado, .etiqueta-header {
             border-top: none !important;
@@ -3046,7 +3052,7 @@ export default function ReportsModule({
           }
           thead { display: table-header-group !important; }
           tfoot { display: table-footer-group !important; }
-          tr { page-break-inside: avoid !important; break-inside: avoid !important; }
+          tr { page-break-inside: avoid !important; break-inside: avoid !important; page-break-after: auto !important; }
           table { page-break-inside: auto !important; }
 
           .etiqueta-card {
@@ -3101,20 +3107,21 @@ export default function ReportsModule({
           body.print-geral .tabela-container,
           body.print-geral .screen-header,
           body.print-geral .documento-modelo:not(.secao-proposta) { display: none !important; }
-          body.print-geral #doc-A4-inteiro { display: block !important; box-shadow: none !important; }
+          body.print-geral #doc-A4-inteiro { display: block !important; box-shadow: none !important; overflow: visible !important; height: auto !important; max-height: none !important; }
 
           body.print-empresa .btn-no-print,
           body.print-empresa .filtros-bar,
           body.print-empresa .tabela-container,
           body.print-empresa .screen-header,
           body.print-empresa .documento-modelo:not(.secao-proposta-resumida) { display: none !important; }
-          body.print-empresa #doc-proposta-resumida { display: block !important; box-shadow: none !important; }
+          body.print-empresa #doc-proposta-resumida { display: block !important; box-shadow: none !important; overflow: visible !important; height: auto !important; max-height: none !important; }
 
           body.print-proposta .btn-no-print,
           body.print-proposta .filtros-bar,
           body.print-proposta .tabela-container,
           body.print-proposta .screen-header,
           body.print-proposta .documento-modelo:not(.secao-proposta):not(.secao-proposta-resumida) { display: none !important; }
+          body.print-proposta #doc-A4-inteiro { display: block !important; box-shadow: none !important; overflow: visible !important; height: auto !important; max-height: none !important; }
 
           .medida-bloco { display: flex !important; flex-direction: column !important; align-items: flex-start !important; }
           .medida-bloco-center { display: flex !important; flex-direction: column !important; align-items: center !important; justify-content: center !important; text-align: center !important; }
@@ -4284,7 +4291,7 @@ export default function ReportsModule({
               </div>
 
               {/* Renderização do Documento Selecionado */}
-              <div id="container-impressao" className="w-full overflow-x-hidden print:border-none print:border-t-0 print:p-0 print:m-0 print:shadow-none">
+              <div id="container-impressao" className="print-container w-full overflow-x-hidden print:border-none print:border-t-0 print:p-0 print:m-0 print:shadow-none print:overflow-visible print:h-auto print:max-h-none">
                 {renderDocumentosImpressao()}
               </div>
             </div>
@@ -4588,7 +4595,7 @@ export default function ReportsModule({
       {/* ===================================================
            CONTAINER DE IMPRESSÃO (O QUE SAI NA IMPRESSORA E NA PRÉVIA)
            =================================================== */}
-      <div id="container-impressao" className="w-full overflow-x-hidden print:border-none print:border-t-0 print:p-0 print:m-0 print:shadow-none">
+      <div id="container-impressao" className="print-container w-full overflow-x-hidden print:border-none print:border-t-0 print:p-0 print:m-0 print:shadow-none print:overflow-visible print:h-auto print:max-h-none">
         {renderDocumentosImpressao()}
       </div>
         </>

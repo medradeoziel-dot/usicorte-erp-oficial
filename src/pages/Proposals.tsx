@@ -618,10 +618,10 @@ export default function Proposals() {
   const hasFotoAtiva = !!fotosPorPeca[pecaAtiva];
 
   return (
-    <div className="flex flex-col h-full min-h-0 bg-slate-950">
+    <div className="print-container flex flex-col h-full min-h-0 bg-slate-950 print:bg-white print:h-auto print:overflow-visible">
       {/* Banner de feedback do banco */}
       {statusFeedback && (
-        <div className={`px-6 py-2 text-xs font-semibold flex items-center gap-2 border-b ${
+        <div className={`no-print px-6 py-2 text-xs font-semibold flex items-center gap-2 border-b ${
           statusFeedback.type === 'success' 
             ? 'bg-emerald-950/80 border-emerald-800 text-emerald-300' 
             : 'bg-rose-950/80 border-rose-800 text-rose-300'
@@ -632,7 +632,7 @@ export default function Proposals() {
       )}
 
       {/* Barra superior de controles e filtros */}
-      <div className="bg-slate-800/60 border-b border-slate-700/60 px-6 py-4 space-y-4 flex-shrink-0">
+      <div className="no-print print:hidden bg-slate-800/60 border-b border-slate-700/60 px-6 py-4 space-y-4 flex-shrink-0">
         <div className="flex flex-wrap items-end gap-4">
           <div className="flex flex-col gap-1 min-w-[220px]">
             <label className="text-slate-400 text-xs font-medium uppercase tracking-wider flex items-center justify-between">
@@ -861,7 +861,7 @@ export default function Proposals() {
           </div>
         )}
 
-        <div className="flex-1 overflow-auto p-6 bg-slate-900/50">
+        <div className="print-container flex-1 overflow-auto p-6 bg-slate-900/50 print:overflow-visible print:h-auto print:max-h-none print:p-0 print:bg-white">
           {!pedidoId ? (
             <div className="flex items-center justify-center h-full text-slate-500 text-sm">
               Selecione um cliente e um pedido para visualizar.
@@ -876,7 +876,7 @@ export default function Proposals() {
               onSelectPeca={setPecaAtiva}
             />
           ) : (
-            <div className="flex justify-center">
+            <div className="print-container flex justify-center print:block print:overflow-visible print:h-auto print:max-h-none">
               <A4Preview
                 pedido={pedido!}
                 cliente={cliente}

@@ -227,11 +227,24 @@ export const QuotePrintView: React.FC<QuotePrintViewProps> = (props) => {
     <>
       <style>{`
         @media print {
+          html, body, #root, .print-container {
+            overflow: visible !important;
+            height: auto !important;
+            max-height: none !important;
+          }
           body {
             background: white !important;
           }
           .no-print {
             display: none !important;
+          }
+          /* Evitar cortes na tabela */
+          table {
+            page-break-inside: auto;
+          }
+          tr {
+            page-break-inside: avoid;
+            page-break-after: auto;
           }
         }
       `}</style>
@@ -365,8 +378,8 @@ export const QuotePrintView: React.FC<QuotePrintViewProps> = (props) => {
       {/* ========================================================= */}
       {/* LAYOUT DESKTOP & IMPRESSÃO (sm:flex / A4)                 */}
       {/* ========================================================= */}
-      <div className="hidden sm:flex justify-center bg-slate-100 p-6 print:p-0 print:bg-white print:block">
-        <div className="w-full max-w-[794px] bg-white rounded-xl shadow-2xl p-8 print:shadow-none print:rounded-none print:p-0 print:max-w-none text-slate-800">
+      <div className="print-container hidden sm:flex justify-center bg-slate-100 p-6 print:p-0 print:bg-white print:block print:overflow-visible print:h-auto print:max-h-none">
+        <div className="print-container w-full max-w-[794px] bg-white rounded-xl shadow-2xl p-8 print:shadow-none print:rounded-none print:p-0 print:max-w-none text-slate-800 print:overflow-visible print:h-auto print:max-h-none">
           
           {/* Header Centralizado da Empresa com Logo à Esquerda */}
           <CompanyHeader 
@@ -394,7 +407,7 @@ export const QuotePrintView: React.FC<QuotePrintViewProps> = (props) => {
           </div>
 
           {/* Tabela Desktop & Impressão (7 Colunas Exatas) */}
-          <table className="w-full text-left border-collapse mb-6 text-xs" border={1} cellPadding={5}>
+          <table className="w-full text-left border-collapse mb-6 text-xs print:overflow-visible print:h-auto print:max-h-none" border={1} cellPadding={5}>
             <thead>
               <tr className="bg-slate-100 text-slate-900 font-bold uppercase text-[10.5px] border-b border-black">
                 <th className="p-2 text-left">PRODUTO / MATERIAL</th>

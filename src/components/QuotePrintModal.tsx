@@ -102,12 +102,12 @@ export default function QuotePrintModal({
       : "Preços com impostos inclusos. Material sujeito à conferência no ato do recebimento.");
 
   return (
-    <div className="fixed inset-0 z-50 w-full h-full overflow-y-auto overflow-x-hidden p-0 sm:p-4 bg-slate-900/80 flex items-start sm:items-center justify-center print:p-0 print:bg-white print:static print:h-auto">
+    <div className="print-container fixed inset-0 z-50 w-full h-full overflow-y-auto overflow-x-hidden p-0 sm:p-4 bg-slate-900/80 flex items-start sm:items-center justify-center print:p-0 print:bg-white print:static print:h-auto print:overflow-visible print:max-h-none">
       {/* Container do Modal */}
-      <div className="bg-white w-full min-h-screen sm:min-h-0 sm:w-full sm:max-w-5xl sm:my-8 sm:rounded-xl overflow-hidden flex flex-col shadow-2xl print:shadow-none print:rounded-none print:w-full print:m-0 print:border-none">
+      <div className="print-container bg-white w-full min-h-screen sm:min-h-0 sm:w-full sm:max-w-5xl sm:my-8 sm:rounded-xl overflow-hidden flex flex-col shadow-2xl print:shadow-none print:rounded-none print:w-full print:m-0 print:border-none print:overflow-visible print:h-auto print:max-h-none print:min-h-0">
 
         {/* Barra Superior de Ações (Oculta na impressão) */}
-        <div className="h-14 border-b border-slate-200 px-4 flex items-center justify-between bg-white shrink-0 sticky top-0 z-10 print:hidden">
+        <div className="h-14 border-b border-slate-200 px-4 flex items-center justify-between bg-white shrink-0 sticky top-0 z-10 print:hidden no-print">
           <div className="flex items-center gap-2">
             <h2 className="font-bold text-slate-800 text-sm sm:text-base">
               Visualizar Proposta #{numeroOrcamento}
@@ -135,7 +135,7 @@ export default function QuotePrintModal({
         </div>
 
         {/* Conteúdo Renderizando QuotePrintView */}
-        <div className="w-full flex-1 overflow-x-hidden bg-slate-100 print:bg-white">
+        <div className="print-container w-full flex-1 overflow-x-hidden bg-slate-100 print:bg-white print:overflow-visible print:h-auto print:max-h-none">
           <QuotePrintView
             quote={quote}
             numeroOrcamento={numeroOrcamento}

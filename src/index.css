@@ -10,6 +10,25 @@
     margin: 8mm;
   }
 
+  html, body, #root, #app-root, main, .print-container {
+    overflow: visible !important;
+    height: auto !important;
+    max-height: none !important;
+  }
+  
+  .no-print {
+    display: none !important;
+  }
+
+  /* Evitar cortes na tabela */
+  table {
+    page-break-inside: auto;
+  }
+  tr {
+    page-break-inside: avoid;
+    page-break-after: auto;
+  }
+
   /* 1. Oculta todos os elementos de navegação, barras laterais, cabeçalhos, filtros e botões da aplicação */
   .no-print, 
   .btn-no-print, 
@@ -218,7 +237,10 @@
   /* ---------------------------------------------------
      MODELO 1: PROPOSTA A4 INTEIRO
      --------------------------------------------------- */
-  .secao-proposta {
+  .secao-proposta,
+  #doc-A4-inteiro,
+  #container-impressao,
+  .print-container {
     width: 100% !important;
     max-width: 100% !important;
     color: #000 !important;
@@ -228,13 +250,17 @@
     box-shadow: none !important;
     border: none !important;
     border-top: none !important;
+    overflow: visible !important;
+    height: auto !important;
+    max-height: none !important;
   }
 
   /* ---------------------------------------------------
      MODELO CORTE & MODELO EMPRESA RESUMIDA
      --------------------------------------------------- */
   .secao-corte,
-  .secao-proposta-resumida {
+  .secao-proposta-resumida,
+  #doc-proposta-resumida {
     width: 100% !important;
     max-width: 100% !important;
     color: #000 !important;
@@ -244,6 +270,9 @@
     box-shadow: none !important;
     border: none !important;
     border-top: none !important;
+    overflow: visible !important;
+    height: auto !important;
+    max-height: none !important;
   }
 
   /* ---------------------------------------------------

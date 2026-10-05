@@ -277,7 +277,7 @@ export default function App() {
   };
 
   return (
-    <div id="app-root" className="h-screen w-screen bg-slate-950 text-slate-100 flex flex-col overflow-hidden font-sans selection:bg-blue-600 selection:text-white">
+    <div id="app-root" className="h-screen w-screen bg-slate-950 text-slate-100 flex flex-col overflow-hidden font-sans selection:bg-blue-600 selection:text-white print:h-auto print:w-auto print:overflow-visible print:bg-white print:block">
       <TopBar 
         currentScreen={currentScreen}
         currentUser={currentUser}
@@ -319,7 +319,7 @@ export default function App() {
         </div>
       )}
 
-      <div className="flex flex-1 relative overflow-hidden">
+      <div className="flex flex-1 relative overflow-hidden print:overflow-visible print:h-auto print:block">
         <Sidebar 
           currentScreen={currentScreen}
           reportsTab={reportsTab}
@@ -338,7 +338,7 @@ export default function App() {
           onLogout={handleLogout}
         />
 
-        <main className="flex-1 bg-slate-950 p-6 overflow-y-auto">
+        <main className="flex-1 bg-slate-950 p-6 overflow-y-auto print:overflow-visible print:h-auto print:max-h-none print:p-0 print:bg-white print:block">
           {isAdmin && currentScreen === 'home' && (
             <DashboardView 
               clients={clients}
