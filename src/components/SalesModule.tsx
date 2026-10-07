@@ -56,8 +56,19 @@ import {
   updateEmitenteNextSequential,
   incrementEmitenteQuoteSequential
 } from '../services/companyService';
+import { createPortal } from 'react-dom';
 import QuotePrintModal, { PrintMode } from './QuotePrintModal';
 import QuotePrintOptionsModal, { TipoImpressaoOrcamento } from './QuotePrintOptionsModal';
+import { 
+  ConsultaPrintDocuments, 
+  TipoImpressaoConsulta,
+  normalizeQuoteForPrint,
+  imprimirOrcamentoGeral,
+  imprimirOrcamentoEmpresa,
+  imprimirOrcamentoPedido,
+  imprimirEtiquetas,
+  imprimirFichaCorte
+} from './ConsultaPrintDocuments';
 import QuoteHistoryModal from './QuoteHistoryModal';
 import MaterialAutocomplete, { AutocompleteOption } from './MaterialAutocomplete';
 import {
@@ -466,6 +477,44 @@ export default function SalesModule({
   const [showPrintOptionsModal, setShowPrintOptionsModal] = useState<boolean>(false);
   const [printModalMode, setPrintModalMode] = useState<TipoImpressaoOrcamento>('GERAL');
   const [autoTriggerPrint, setAutoTriggerPrint] = useState<boolean>(false);
+  const [lastSavedQuoteForPrint, setLastSavedQuoteForPrint] = useState<any | null>(null);
+  const [activeDirectPrint, setActiveDirectPrint] = useState<{ quote: any; tipo: TipoImpressaoConsulta } | null>(null);
+
+  // Efeito responsável por sincronizar a renderização completa do documento e disparar window.print()
+  useEffect(() => {
+    if (activeDirectPrint) {
+      const handleAfterPrint = () => {
+        document.body.classList.remove(
+          'print-pedido', 
+          'print-etiqueta', 
+          'print-proposta', 
+          'print-corte', 
+          'print-geral', 
+          'print-empresa'
+        );
+        setActiveDirectPrint(null);
+        window.removeEventListener('afterprint', handleAfterPrint);
+      };
+
+      window.addEventListener('afterprint', handleAfterPrint);
+      const timer = setTimeout(() => {
+        window.print();
+      }, 250);
+
+      return () => {
+        clearTimeout(timer);
+        document.body.classList.remove(
+          'print-pedido', 
+          'print-etiqueta', 
+          'print-proposta', 
+          'print-corte', 
+          'print-geral', 
+          'print-empresa'
+        );
+        window.removeEventListener('afterprint', handleAfterPrint);
+      };
+    }
+  }, [activeDirectPrint]);
 
   // Feedback banners
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -2019,6 +2068,10 @@ export default function SalesModule({
       console.error('Erro na gravação direta no Supabase:', err);
       setErrorMessage(`Erro ao gravar no Supabase: ${err?.message || 'Falha de rede'}`);
     });
+
+    // Normaliza os dados completos para emissão de qualquer modelo de impressão
+    const normalizedSavedQuote = normalizeQuoteForPrint(currentQuoteObject);
+    setLastSavedQuoteForPrint(normalizedSavedQuote);
 
     // Notificação Toast e abertura automática do Modal de Opções de Impressão
     setSuccessMessage('Orçamento salvo com sucesso!');
@@ -4029,15 +4082,30 @@ export default function SalesModule({
       {/* MODAL DE OPÇÕES DE IMPRESSÃO APÓS SALVAR */}
       {showPrintOptionsModal && (
         <QuotePrintOptionsModal
+          orcamentoSalvo={lastSavedQuoteForPrint || normalizeQuoteForPrint(currentQuoteForModal)}
           quoteNumber={numeroCotacao.trim() || currentQuoteForModal.quoteNumber || 'COT'}
           clientName={clientName.trim() || 'Cliente Balcão'}
           itemCount={items.length}
           totalValue={grandTotal}
           onSelectPrint={(tipo) => {
             setShowPrintOptionsModal(false);
-            setPrintModalMode(tipo);
-            setAutoTriggerPrint(true);
-            setShowPrintModal(true);
+            const quoteToPrint = lastSavedQuoteForPrint || normalizeQuoteForPrint(currentQuoteForModal);
+
+            // Invocação nominal das funções de impressão conforme fluxo técnico:
+            if (tipo === 'GERAL') {
+              imprimirOrcamentoGeral(quoteToPrint);
+            } else if (tipo === 'EMPRESA') {
+              imprimirOrcamentoEmpresa(quoteToPrint);
+            } else if (tipo === 'PEDIDO') {
+              imprimirOrcamentoPedido(quoteToPrint);
+            } else if (tipo === 'ETIQUETAS') {
+              imprimirEtiquetas(quoteToPrint);
+            } else if (tipo === 'CORTE') {
+              imprimirFichaCorte(quoteToPrint);
+            }
+
+            // Ativa a renderização do layout de impressão oficial idêntico à Consulta
+            setActiveDirectPrint({ quote: quoteToPrint, tipo });
           }}
           onClose={() => {
             setShowPrintOptionsModal(false);
@@ -4045,10 +4113,10 @@ export default function SalesModule({
         />
       )}
 
-      {/* MODAL PRINT PROPOSAL */}
+      {/* MODAL PRINT PROPOSAL (PREVIEW COMPLETO) */}
       {showPrintModal && (
         <QuotePrintModal
-          quote={currentQuoteForModal}
+          quote={lastSavedQuoteForPrint || normalizeQuoteForPrint(currentQuoteForModal)}
           initialMode={printModalMode}
           autoPrint={autoTriggerPrint}
           onClose={() => {
@@ -4067,6 +4135,12 @@ export default function SalesModule({
           onDuplicateQuote={(q) => handleLoadQuoteForDuplication({ quote: q, originalNumber: q.quoteNumber || q.id })}
           onClose={() => setShowHistoryModal(false)}
         />
+      )}
+
+      {/* PORTAL DE IMPRESSÃO DIRETA COM LAYOUTS IDÊNTICOS À CONSULTA */}
+      {activeDirectPrint && typeof document !== 'undefined' && createPortal(
+        <ConsultaPrintDocuments quote={activeDirectPrint.quote} tipo={activeDirectPrint.tipo} />,
+        document.body
       )}
 
     </div>

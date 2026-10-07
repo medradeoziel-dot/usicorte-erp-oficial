@@ -9,11 +9,13 @@ import {
   X,
   FileCheck2
 } from 'lucide-react';
+import { TipoImpressaoConsulta } from './ConsultaPrintDocuments';
 
-export type TipoImpressaoOrcamento = 'GERAL' | 'EMPRESA' | 'PEDIDO' | 'ETIQUETAS' | 'CORTE';
+export type TipoImpressaoOrcamento = TipoImpressaoConsulta;
 
 interface QuotePrintOptionsModalProps {
-  quoteNumber: string;
+  orcamentoSalvo?: any;
+  quoteNumber?: string;
   clientName?: string;
   itemCount?: number;
   totalValue?: number;
@@ -22,6 +24,7 @@ interface QuotePrintOptionsModalProps {
 }
 
 export default function QuotePrintOptionsModal({
+  orcamentoSalvo,
   quoteNumber,
   clientName,
   itemCount,
@@ -39,6 +42,24 @@ export default function QuotePrintOptionsModal({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
+
+  const displayQuoteNumber = 
+    quoteNumber || 
+    orcamentoSalvo?.quoteNumber || 
+    orcamentoSalvo?.id || 
+    'COT';
+
+  const displayClientName = 
+    clientName || 
+    orcamentoSalvo?.clientName || 
+    orcamentoSalvo?.cliente?.nome || 
+    'Cliente';
+
+  const displayItemCount = 
+    itemCount ?? 
+    orcamentoSalvo?.items?.length ?? 
+    orcamentoSalvo?.itens?.length ?? 
+    0;
 
   const opcoes: Array<{
     tipo: TipoImpressaoOrcamento;
@@ -96,6 +117,10 @@ export default function QuotePrintOptionsModal({
     },
   ];
 
+  const handleAction = (tipo: TipoImpressaoOrcamento) => {
+    onSelectPrint(tipo);
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs animate-in fade-in duration-200">
       <div 
@@ -116,15 +141,15 @@ export default function QuotePrintOptionsModal({
                   GRAVADO COM SUCESSO
                 </span>
                 <span className="text-xs font-mono font-bold text-slate-400">
-                  Cotação #{quoteNumber}
+                  Cotação #{displayQuoteNumber}
                 </span>
               </div>
               <h2 id="modal-title" className="text-lg sm:text-xl font-black text-slate-100 tracking-tight mt-0.5">
                 Opções de Impressão do Orçamento
               </h2>
               <p className="text-xs text-slate-400 mt-0.5">
-                {clientName ? (
-                  <>Cliente: <strong className="text-slate-200">{clientName}</strong> • </>
+                {displayClientName ? (
+                  <>Cliente: <strong className="text-slate-200">{displayClientName}</strong> ({displayItemCount} {displayItemCount === 1 ? 'item' : 'itens'}) • </>
                 ) : null}
                 Selecione o modelo desejado para emitir a impressão/PDF correspondente:
               </p>
@@ -147,7 +172,7 @@ export default function QuotePrintOptionsModal({
               <button
                 key={opcao.tipo}
                 type="button"
-                onClick={() => onSelectPrint(opcao.tipo)}
+                onClick={() => handleAction(opcao.tipo)}
                 className={`group flex flex-col items-center text-center p-4 rounded-xl border transition-all duration-150 cursor-pointer shadow-md hover:shadow-xl hover:-translate-y-0.5 ${opcao.cardClasses}`}
               >
                 {/* Ícone Visível */}

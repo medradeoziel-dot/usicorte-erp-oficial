@@ -54,7 +54,7 @@
   #screen-clientes,
   #screen-produtos,
   #screen-orcamento,
-  #screen-vendas,
+  #screen-vendas:not(:has(#container-impressao-vendas, .print-container-active, .documento-modelo)),
   #screen-calculadora,
   #screen-ordem-servico,
   #screen-movimentacoes,
