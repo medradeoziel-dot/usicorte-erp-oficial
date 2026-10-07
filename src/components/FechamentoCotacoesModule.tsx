@@ -7,15 +7,14 @@ import {
   atualizarStatusPagamentoCotacaoDb,
   sincronizarPagamentoContaReceberDb
 } from '../lib/db';
-import { formatCurrency, formatSafeDate } from '../utils/calculator';
+import { formatCurrency, formatSafeDate, formatarMedidasLimpa } from '../utils/calculator';
 import { 
   getPagamentosCotacoesMap, 
   darBaixaMultiplasCotacoesDb,
   salvarPagamentosCotacoesMap,
   RegistroPagamentoCotacao
 } from '../services/inventoryFinanceService';
-import ExtratoCobrancaPrint, { ExtratoCotacaoItem } from './ExtratoCobrancaPrint';
-import CompanyHeader from './CompanyHeader';
+import ExtratoCobrancaPrint, { ExtratoCotacaoItem, ExtratoCotacaoItemDetalhado } from './ExtratoCobrancaPrint';
 import {
   FileText,
   Search,
@@ -124,6 +123,20 @@ export default function FechamentoCotacoesModule({
     const seenKeys = new Set<string>();
     const pagamentosMap = getPagamentosCotacoesMap();
 
+    // Cache prévio de orçamentos do LocalStorage para cruzamento rápido de itens
+    let localQuotesList: Quote[] = [];
+    try {
+      const saved = localStorage.getItem('s_orcamentos');
+      if (saved) {
+        localQuotesList = JSON.parse(saved) || [];
+      }
+    } catch {}
+    const localQuotesMap = new Map<string, Quote>();
+    localQuotesList.forEach(lq => {
+      if (lq.quoteNumber) localQuotesMap.set(lq.quoteNumber.trim().toLowerCase(), lq);
+      if (lq.id) localQuotesMap.set(lq.id.trim().toLowerCase(), lq);
+    });
+
     // 1. Carrega do Supabase
     try {
       const dbQuotes = await fetchCotacoesDb();
@@ -134,16 +147,60 @@ export default function FechamentoCotacoesModule({
           seenKeys.add(numKey);
           if (q.id) seenKeys.add(q.id.trim().toLowerCase());
 
-          // Resumo dos itens
+          // Itens detalhados e resumo
+          const matchingLocal = localQuotesMap.get(numKey) || (q.id ? localQuotesMap.get(q.id.trim().toLowerCase()) : undefined);
+          let mappedItens: ExtratoCotacaoItemDetalhado[] = [];
+
+          if (q.cotacao_itens && q.cotacao_itens.length > 0) {
+            mappedItens = q.cotacao_itens.map((it: any, idx: number) => {
+              const unit = Number(it.valor_unitario) || 0;
+              const qte = Number(it.quantidade) || 1;
+              const sub = Number(it.valor_total) || (unit * qte);
+              return {
+                id: it.id || idx + 1,
+                produto: (it.produto || it.material || 'MATERIAL').toUpperCase(),
+                medida: it.medida || '—',
+                descricao: it.descricao || 'Item industrial',
+                info: it.observacao || it.info || '',
+                unitario: unit,
+                qtd: qte,
+                subtotal: sub
+              };
+            });
+          } else if (matchingLocal?.items && matchingLocal.items.length > 0) {
+            mappedItens = matchingLocal.items.map((it: any, idx: number) => {
+              const unit = Number(it.unitPrice || it.valorUnitario || 0);
+              const qte = Number(it.quantity || it.qtd || 1);
+              const sub = Number(it.subtotal || (unit * qte));
+              const med = formatarMedidasLimpa(it);
+              return {
+                id: it.id || idx + 1,
+                produto: (it.constantName || it.constanteNome || it.material || it.produto || 'MATERIAL').toUpperCase(),
+                medida: it.measure || it.medida || (med !== '-' ? med : '—'),
+                descricao: it.description || it.descricao || 'Item de corte',
+                info: it.notes || it.observacao || it.info || '',
+                unitario: unit,
+                qtd: qte,
+                subtotal: sub
+              };
+            });
+          } else {
+            mappedItens = [{
+              id: 1,
+              produto: 'SERVIÇOS DE CORTE DIVERSOS',
+              medida: '—',
+              descricao: q.observacoes || 'Serviços industriais de corte e conformação',
+              info: '',
+              unitario: Number(q.valor_total) || 0,
+              qtd: 1,
+              subtotal: Number(q.valor_total) || 0
+            }];
+          }
+
           let itensResumo = '';
           let pesoTotal = 0;
-          let qtdItens = 0;
-          if (q.cotacao_itens && q.cotacao_itens.length > 0) {
-            qtdItens = q.cotacao_itens.length;
-            itensResumo = q.cotacao_itens.map(i => `${i.produto || i.descricao || 'Item'} (${i.quantidade}x ${i.medida || ''})`).join(' | ');
-          } else {
-            itensResumo = q.observacoes || 'Itens industriais de corte';
-          }
+          let qtdItens = mappedItens.length;
+          itensResumo = mappedItens.map(i => `${i.produto} (${i.qtd}x ${i.medida})`).join(' | ');
 
           // 1. Leitura direta das colunas da tabela 'cotacoes' do Supabase
           const statusPagamentoUpper = String((q as any).status_pagamento || '').trim().toUpperCase();
@@ -188,7 +245,8 @@ export default function FechamentoCotacoesModule({
             qtdItens: qtdItens || 1,
             itensResumo: itensResumo.slice(0, 180),
             statusCotacao: isPagoNaTabela ? 'faturado' : (q.status || 'aprovado'),
-            pagamento: pag
+            pagamento: pag,
+            itens: mappedItens
           });
         });
       }
@@ -207,12 +265,38 @@ export default function FechamentoCotacoesModule({
             if (!numKey || seenKeys.has(numKey)) return;
             seenKeys.add(numKey);
 
-            let itensResumo = '';
+            let localMappedItens: ExtratoCotacaoItemDetalhado[] = [];
             if (lq.items && lq.items.length > 0) {
-              itensResumo = lq.items.map(i => `${i.constantName || i.description || 'Material'} (${i.quantity}x ${i.measure || ''})`).join(' | ');
+              localMappedItens = lq.items.map((it: any, idx: number) => {
+                const unit = Number(it.unitPrice || it.valorUnitario || 0);
+                const qte = Number(it.quantity || it.qtd || 1);
+                const sub = Number(it.subtotal || (unit * qte));
+                const med = formatarMedidasLimpa(it);
+                return {
+                  id: it.id || idx + 1,
+                  produto: (it.constantName || it.constanteNome || it.material || it.produto || 'MATERIAL').toUpperCase(),
+                  medida: it.measure || it.medida || (med !== '-' ? med : '—'),
+                  descricao: it.description || it.descricao || 'Item de corte e dobra',
+                  info: it.notes || it.observacao || it.info || '',
+                  unitario: unit,
+                  qtd: qte,
+                  subtotal: sub
+                };
+              });
             } else {
-              itensResumo = lq.observations || 'Itens de corte e dobra';
+              localMappedItens = [{
+                id: 1,
+                produto: 'SERVIÇOS DE CORTE DIVERSOS',
+                medida: '—',
+                descricao: lq.observations || 'Serviços industriais de corte e conformação',
+                info: '',
+                unitario: Number(lq.grandTotal || lq.subtotalTotal || 0),
+                qtd: 1,
+                subtotal: Number(lq.grandTotal || lq.subtotalTotal || 0)
+              }];
             }
+
+            let itensResumo = localMappedItens.map(i => `${i.produto} (${i.qtd}x ${i.medida})`).join(' | ');
 
             const pag = pagamentosMap[numKey] || {
               status: lq.paymentStatus || 'Pendente',
@@ -233,10 +317,11 @@ export default function FechamentoCotacoesModule({
               clienteContato: lq.contactPerson || '',
               valor: Number(lq.grandTotal || lq.subtotalTotal || 0),
               pesoKg: Number(lq.totalWeightKg || 0),
-              qtdItens: lq.items?.length || 1,
+              qtdItens: localMappedItens.length || 1,
               itensResumo: itensResumo.slice(0, 180),
               statusCotacao: lq.status || 'Rascunho',
-              pagamento: pag
+              pagamento: pag,
+              itens: localMappedItens
             });
           });
         }
@@ -471,7 +556,7 @@ export default function FechamentoCotacoesModule({
       document.body.classList.add('print-fechamento', 'print-extrato');
     };
     const handleAfterPrint = () => {
-      document.body.classList.remove('print-fechamento', 'print-extrato', 'print-fechamento-relatorio');
+      document.body.classList.remove('print-fechamento', 'print-extrato');
     };
 
     window.addEventListener('beforeprint', handleBeforePrint);
@@ -480,7 +565,7 @@ export default function FechamentoCotacoesModule({
     return () => {
       window.removeEventListener('beforeprint', handleBeforePrint);
       window.removeEventListener('afterprint', handleAfterPrint);
-      document.body.classList.remove('print-fechamento', 'print-extrato', 'print-fechamento-relatorio');
+      document.body.classList.remove('print-fechamento', 'print-extrato');
     };
   }, []);
 
@@ -493,42 +578,20 @@ export default function FechamentoCotacoesModule({
     setIsExtratoModalOpen(true);
   };
 
-  // Ação: Imprimir Extrato A4 Limpo e Estruturado
+  // Ação: Imprimir Extrato A4 Formatado em CSS @media print
   const handleImprimirExtrato = () => {
-    document.body.classList.add('print-fechamento', 'print-extrato');
-
-    const onAfterPrint = () => {
-      document.body.classList.remove('print-fechamento', 'print-extrato');
-      window.removeEventListener('afterprint', onAfterPrint);
-    };
-    window.addEventListener('afterprint', onAfterPrint);
-
-    setTimeout(() => {
-      window.print();
-    }, 150);
-  };
-
-  // Ação: Imprimir Relatório Geral de Fechamento (Listagem completa das cotações filtradas em tabela A4)
-  const handleImprimirRelatorioFechamento = () => {
-    if (filteredQuotes.length === 0) {
-      alert('Não há cotações filtradas para imprimir no relatório.');
-      return;
-    }
-
     document.body.classList.remove(
       'print-pedido',
       'print-etiqueta',
       'print-proposta',
       'print-corte',
       'print-geral',
-      'print-empresa',
-      'print-fechamento',
-      'print-extrato'
+      'print-empresa'
     );
-    document.body.classList.add('print-fechamento-relatorio');
+    document.body.classList.add('print-fechamento', 'print-extrato');
 
     const onAfterPrint = () => {
-      document.body.classList.remove('print-fechamento-relatorio');
+      document.body.classList.remove('print-fechamento', 'print-extrato');
       window.removeEventListener('afterprint', onAfterPrint);
     };
     window.addEventListener('afterprint', onAfterPrint);
@@ -774,10 +837,10 @@ export default function FechamentoCotacoesModule({
             overflow: visible !important;
           }
 
-          /* Relatório Geral de Fechamento (somente visível se ativado especificamente) */
-          body.print-fechamento-relatorio .secao-fechamento-relatorio-print {
-            display: block !important;
-            visibility: visible !important;
+          /* Evita que blocos de cotação sejam cortados entre páginas ao imprimir */
+          .bloco-cotacao-extrato {
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
           }
         }
       `}</style>
@@ -1028,45 +1091,28 @@ export default function FechamentoCotacoesModule({
 
         {/* Botões de Ação Principais */}
         <div className="flex items-center gap-2 flex-wrap">
-          <button
-            onClick={handleImprimirRelatorioFechamento}
-            disabled={filteredQuotes.length === 0}
-            className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all ${
-              filteredQuotes.length > 0
-                ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 cursor-pointer hover:border-slate-500'
-                : 'bg-slate-900 text-slate-600 border border-slate-800 cursor-not-allowed'
-            }`}
-            title="Imprimir relatório completo com a listagem de todas as cotações filtradas em formato A4"
-          >
-            <FileSpreadsheet className="w-4 h-4 text-purple-400" />
-            <span>🖨️ Imprimir Relatório Geral</span>
-          </button>
+          {/* Botão destacado quando 1 ou mais cotações são selecionadas na tabela */}
+          {selectedQuotes.length > 0 && (
+            <button
+              onClick={handleAbrirExtrato}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-lg shadow-blue-600/30 transition-all cursor-pointer ring-2 ring-blue-400/50 animate-in fade-in zoom-in-95"
+              title="Visualizar e Imprimir o Extrato de Cobrança das cotações selecionadas"
+            >
+              <Eye className="w-4 h-4" />
+              <span>Visualizar e Imprimir Selecionadas ({selectedQuotes.length})</span>
+            </button>
+          )}
 
-          <button
-            onClick={handleAbrirExtrato}
-            disabled={selectedQuotes.length === 0}
-            className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-sm transition-all ${
-              selectedQuotes.length > 0
-                ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-blue-600/30 cursor-pointer'
-                : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700/50'
-            }`}
-          >
-            <Printer className="w-4 h-4" />
-            <span>Gerar Extrato para Cliente</span>
-          </button>
-
-          <button
-            onClick={handleAbrirBaixa}
-            disabled={selectedQuotes.length === 0}
-            className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 shadow-sm transition-all ${
-              selectedQuotes.length > 0
-                ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/30 cursor-pointer animate-pulse'
-                : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700/50'
-            }`}
-          >
-            <DollarSign className="w-4 h-4" />
-            <span>💰 Dar Baixa nas Selecionadas</span>
-          </button>
+          {selectedQuotes.length > 0 && (
+            <button
+              onClick={handleAbrirBaixa}
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-emerald-600/30 transition-all cursor-pointer animate-pulse"
+              title="Dar baixa de pagamento nas cotações selecionadas"
+            >
+              <DollarSign className="w-4 h-4" />
+              <span>💰 Dar Baixa nas Selecionadas</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -1289,158 +1335,7 @@ export default function FechamentoCotacoesModule({
       {/* FIM DA INTERFACE EM TELA (fechamento-interface-screen) */}
       </div>
 
-      {/* 5. VIEW DE IMPRESSÃO A4: RELATÓRIO GERAL DE COTAÇÕES FILTRADAS */}
-      <div className="secao-fechamento-relatorio-print hidden bg-white text-black p-6 sm:p-8 max-w-[850px] mx-auto font-sans leading-relaxed text-xs">
-        <CompanyHeader 
-          documentType="RELATÓRIO DE COTAÇÕES & FECHAMENTO"
-          documentDate={new Date().toLocaleDateString('pt-BR')}
-          tag="FATURAMENTO"
-          tagColor="blue"
-        />
-
-        {/* Metadados e Parâmetros da Consulta */}
-        <div className="relatorio-meta-box border border-slate-400 rounded-lg p-3 my-3 bg-slate-50 flex justify-between items-center text-xs">
-          <div>
-            <div className="text-[10px] uppercase font-bold text-slate-600">Parâmetros da Consulta</div>
-            <div className="text-sm font-black text-slate-900 uppercase">
-              {filtroCliente.trim() ? filtroCliente.trim() : 'Todos os Clientes / Consolidado'}
-            </div>
-            <div className="text-xs text-slate-700 mt-0.5">
-              <span>Período: </span>
-              <strong>
-                {filtroDataInicio && filtroDataFim 
-                  ? `${formatSafeDate(filtroDataInicio)} até ${formatSafeDate(filtroDataFim)}`
-                  : filtroDataInicio 
-                  ? `A partir de ${formatSafeDate(filtroDataInicio)}`
-                  : filtroDataFim 
-                  ? `Até ${formatSafeDate(filtroDataFim)}`
-                  : 'Consolidado Geral'}
-              </strong>
-              {filtroStatusPagamento !== 'todas' && (
-                <span className="ml-2">
-                  | Situação: <strong>{filtroStatusPagamento === 'pagos' ? 'Somente Pagos' : 'Somente Pendentes'}</strong>
-                </span>
-              )}
-            </div>
-          </div>
-
-          <div className="text-right">
-            <span className="text-[10px] uppercase font-bold text-slate-600 block">Total de Registros</span>
-            <span className="text-base font-black font-mono text-slate-950">
-              {filteredQuotes.length} {filteredQuotes.length === 1 ? 'Cotação' : 'Cotações'}
-            </span>
-            <span className="text-[10px] text-slate-500 block">
-              Emissão: {new Date().toLocaleDateString('pt-BR')} {new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-            </span>
-          </div>
-        </div>
-
-        {/* Cards Rápidos de Indicadores no Relatório Impresso */}
-        <div className="relatorio-cards-box flex gap-3 mb-3">
-          <div className="relatorio-card-item flex-1 border border-slate-400 rounded-lg p-2 text-center bg-slate-50">
-            <span className="text-[10px] font-bold text-slate-600 uppercase block">Total Geral Faturado</span>
-            <span className="text-sm font-black font-mono text-slate-900 block">
-              {formatCurrency(totalValorFiltrado)}
-            </span>
-            <span className="text-[9px] text-slate-500">{filteredQuotes.length} pedidos</span>
-          </div>
-
-          <div className="relatorio-card-item flex-1 border border-amber-300 rounded-lg p-2 text-center bg-amber-50">
-            <span className="text-[10px] font-bold text-amber-800 uppercase block">Pendente de Baixa</span>
-            <span className="text-sm font-black font-mono text-amber-950 block">
-              {formatCurrency(totalPendentesValor)}
-            </span>
-          </div>
-
-          <div className="relatorio-card-item flex-1 border border-emerald-300 rounded-lg p-2 text-center bg-emerald-50">
-            <span className="text-[10px] font-bold text-emerald-800 uppercase block">Total Baixado / Pago</span>
-            <span className="text-sm font-black font-mono text-emerald-950 block">
-              {formatCurrency(totalPagasValor)}
-            </span>
-          </div>
-        </div>
-
-        {/* Tabela Estruturada de Cotações */}
-        <table className="w-full border-collapse border border-slate-400 text-xs mb-4">
-          <thead>
-            <tr className="bg-slate-200 text-slate-900 border-b border-slate-400 font-bold uppercase text-[9.5px]">
-              <th className="border border-slate-400 px-2 py-1.5 text-center w-10">Item</th>
-              <th className="border border-slate-400 px-2 py-1.5 text-center w-20">Nº Cotação</th>
-              <th className="border border-slate-400 px-2 py-1.5 text-center w-20">Data</th>
-              <th className="border border-slate-400 px-2.5 py-1.5 text-left">Cliente / Empresa</th>
-              <th className="border border-slate-400 px-2.5 py-1.5 text-left">Resumo Itens / Serviços</th>
-              <th className="border border-slate-400 px-2 py-1.5 text-center w-20">Situação</th>
-              <th className="border border-slate-400 px-2 py-1.5 text-center w-20">Baixa</th>
-              <th className="border border-slate-400 px-2.5 py-1.5 text-right w-24">Valor (R$)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredQuotes.map((q, idx) => {
-              const isPago = q.pagamento?.status === 'Pago';
-              return (
-                <tr key={q.numero || q.id || idx} className={idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}>
-                  <td className="border border-slate-300 px-2 py-1.5 text-center font-mono text-slate-600 text-[10px]">
-                    {String(idx + 1).padStart(2, '0')}
-                  </td>
-                  <td className="border border-slate-300 px-2 py-1.5 text-center font-mono font-bold text-slate-900 text-[10.5px]">
-                    {q.numero}
-                  </td>
-                  <td className="border border-slate-300 px-2 py-1.5 text-center text-slate-700 whitespace-nowrap text-[10px]">
-                    {formatSafeDate(q.data)}
-                  </td>
-                  <td className="border border-slate-300 px-2.5 py-1.5 text-slate-900 font-semibold text-[10.5px] uppercase">
-                    {q.cliente}
-                  </td>
-                  <td className="border border-slate-300 px-2.5 py-1.5 text-slate-800 text-[10px]">
-                    {q.itensResumo || 'Serviços de corte'}
-                  </td>
-                  <td className="border border-slate-300 px-2 py-1.5 text-center text-[10px]">
-                    <span className="font-semibold text-slate-700 uppercase">
-                      {q.statusCotacao || 'Aprovado'}
-                    </span>
-                  </td>
-                  <td className="border border-slate-300 px-2 py-1.5 text-center text-[9.5px]">
-                    <span className={`inline-block px-1.5 py-0.5 rounded font-bold uppercase ${
-                      isPago ? 'bg-emerald-100 text-emerald-900' : 'bg-amber-100 text-amber-900'
-                    }`}>
-                      {isPago ? 'Pago' : 'Pendente'}
-                    </span>
-                  </td>
-                  <td className="border border-slate-300 px-2.5 py-1.5 text-right font-mono font-bold text-slate-950 whitespace-nowrap text-[10.5px]">
-                    {formatCurrency(q.valor)}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-          <tfoot>
-            <tr className="bg-slate-100 font-bold border-t-2 border-slate-400">
-              <td colSpan={7} className="border border-slate-400 px-3 py-2 text-right uppercase text-slate-700 text-[10.5px]">
-                Total ({filteredQuotes.length} cotações listadas):
-              </td>
-              <td className="border border-slate-400 px-2.5 py-2 text-right font-mono font-black text-xs text-slate-950 whitespace-nowrap">
-                {formatCurrency(totalValorFiltrado)}
-              </td>
-            </tr>
-          </tfoot>
-        </table>
-
-        {/* Assinaturas / Conferência no Rodapé do Relatório */}
-        <div className="relatorio-assinaturas flex justify-between gap-8 pt-4 mt-3 border-t border-slate-300 text-center text-xs">
-          <div className="flex-1">
-            <div className="border-b border-slate-400 w-4/5 mx-auto mb-1"></div>
-            <div className="font-bold text-slate-900">Usi Corte Metais</div>
-            <div className="text-[10px] text-slate-600">Departamento Financeiro & Faturamento</div>
-          </div>
-          <div className="flex-1">
-            <div className="border-b border-slate-400 w-4/5 mx-auto mb-1"></div>
-            <div className="font-bold text-slate-900">Conferência & Visto da Gerência</div>
-            <div className="text-[10px] text-slate-600">Visto do Administrador</div>
-          </div>
-        </div>
-      </div>
-
-      {/* 6. MODAL DE PRÉVIA E IMPRESSÃO DO EXTRATO DE COBRANÇA (A4) */}
+      {/* 5. MODAL DE PRÉ-VISUALIZAÇÃO DINÂMICA DO EXTRATO DE COBRANÇA (A4 / PDF) */}
       {isExtratoModalOpen && (
         <div className="extrato-modal-overlay fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 overflow-y-auto print:static print:p-0 print:m-0 print:bg-transparent">
           <div className="extrato-modal-content bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[95vh] flex flex-col overflow-hidden shadow-2xl print:bg-transparent print:border-none print:border-t-0 print:shadow-none print:max-h-none print:w-full print:rounded-none">
@@ -1451,9 +1346,9 @@ export default function FechamentoCotacoesModule({
                   <Printer className="w-5 h-5" />
                 </div>
                 <div>
-                  <h2 className="text-sm font-bold text-white">Extrato de Cobrança / Faturamento para o Cliente</h2>
+                  <h2 className="text-sm font-bold text-white">Pré-visualização do Relatório / Extrato de Cobrança</h2>
                   <p className="text-[11px] text-slate-400">
-                    {selectedQuotes.length} cotações selecionadas | Total: {formatCurrency(totalValorSelecionado)}
+                    {selectedQuotes.length} cotação(ões) selecionada(s) | Total: {formatCurrency(totalValorSelecionado)}
                   </p>
                 </div>
               </div>
@@ -1462,14 +1357,23 @@ export default function FechamentoCotacoesModule({
                 <button
                   onClick={handleImprimirExtrato}
                   className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-lg shadow-blue-600/30 transition-all cursor-pointer"
+                  title="Imprimir ou Salvar em PDF"
                 >
                   <Printer className="w-4 h-4" />
-                  <span>Imprimir Extrato A4 / PDF</span>
+                  <span>Imprimir / Salvar PDF</span>
+                </button>
+
+                <button
+                  onClick={() => setIsExtratoModalOpen(false)}
+                  className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  Fechar Pré-visualização
                 </button>
 
                 <button
                   onClick={() => setIsExtratoModalOpen(false)}
                   className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800 transition-colors"
+                  title="Fechar"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -1489,14 +1393,23 @@ export default function FechamentoCotacoesModule({
             </div>
 
             {/* Rodapé Modal */}
-            <div className="extrato-modal-footer p-3 border-t border-slate-800 bg-slate-950 flex items-center justify-between text-xs text-slate-400 shrink-0 no-print btn-no-print">
-              <span>Layout certificado para impressão em folha A4 e envio de cobrança via WhatsApp / PDF.</span>
-              <button
-                onClick={() => setIsExtratoModalOpen(false)}
-                className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-semibold transition-colors"
-              >
-                Fechar Prévia
-              </button>
+            <div className="extrato-modal-footer p-3 border-t border-slate-800 bg-slate-950 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400 shrink-0 no-print btn-no-print">
+              <span>Layout certificado para impressão em folha A4 e exportação em PDF.</span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setIsExtratoModalOpen(false)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-semibold transition-colors cursor-pointer text-xs"
+                >
+                  Fechar Pré-visualização
+                </button>
+                <button
+                  onClick={handleImprimirExtrato}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-lg shadow-blue-600/30 transition-all cursor-pointer"
+                >
+                  <Printer className="w-4 h-4" />
+                  <span>Imprimir / Salvar PDF</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>

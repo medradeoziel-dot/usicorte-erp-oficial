@@ -225,6 +225,12 @@
     overflow: visible !important;
   }
 
+  /* Evita que blocos de cotação sejam cortados entre páginas ao imprimir */
+  .bloco-cotacao-extrato {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
   /* Relatório Geral de Fechamento (somente visível se ativado especificamente) */
   body:not(.print-fechamento-relatorio) .secao-fechamento-relatorio-print {
     display: none !important;
