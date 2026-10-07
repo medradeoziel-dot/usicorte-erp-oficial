@@ -8,7 +8,7 @@ export const DEFAULT_COMPANY_DATA: CompanyFiscalData = {
   corporateName: 'L. M. BANZATTO METAIS',
   tradeName: 'USICORTE METAIS',
   cnpj: '25.038.430/0001-23',
-  ie: '209632312114',
+  ie: '20963213114',
   im: '558747',
   cnae: '4744001',
   taxRegime: 'Simples Nacional',

@@ -10,6 +10,38 @@
     margin: 8mm;
   }
 
+  /* 1. REGRA TÉCNICA DE IMPRESSÃO:
+     Oculta rigorosamente toda a interface principal do sistema (inputs, botões, formulários, controles visuais)
+     e exibe exclusivamente a área do relatório formatado */
+  body * {
+    visibility: hidden;
+  }
+
+  /* Exibe exclusivamente a área do relatório formatado */
+  #print-area,
+  #print-area *,
+  #container-impressao,
+  #container-impressao *,
+  #container-impressao-vendas,
+  #container-impressao-vendas * {
+    visibility: visible;
+  }
+
+  #print-area,
+  #container-impressao,
+  #container-impressao-vendas {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: transparent !important;
+    overflow: visible !important;
+    height: auto !important;
+    max-height: none !important;
+  }
+
   html, body, #root, #app-root, main, .print-container {
     overflow: visible !important;
     height: auto !important;
@@ -54,7 +86,7 @@
   #screen-clientes,
   #screen-produtos,
   #screen-orcamento,
-  #screen-vendas:not(:has(#container-impressao-vendas, .print-container-active, .documento-modelo)),
+  #screen-vendas,
   #screen-calculadora,
   #screen-ordem-servico,
   #screen-movimentacoes,

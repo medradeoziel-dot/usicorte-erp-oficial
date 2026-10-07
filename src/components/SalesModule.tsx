@@ -480,6 +480,11 @@ export default function SalesModule({
   const [lastSavedQuoteForPrint, setLastSavedQuoteForPrint] = useState<any | null>(null);
   const [activeDirectPrint, setActiveDirectPrint] = useState<{ quote: any; tipo: TipoImpressaoConsulta } | null>(null);
 
+  // Refs para autofoco imediato na entrada de novas cotações
+  const clientSelectRef = useRef<HTMLSelectElement | null>(null);
+  const clientNameInputRef = useRef<HTMLInputElement | null>(null);
+  const handleAdvanceToNextQuoteRef = useRef<(() => void) | null>(null);
+
   // Efeito responsável por sincronizar a renderização completa do documento e disparar window.print()
   useEffect(() => {
     if (activeDirectPrint) {
@@ -494,6 +499,12 @@ export default function SalesModule({
         );
         setActiveDirectPrint(null);
         window.removeEventListener('afterprint', handleAfterPrint);
+
+        // FLUXO AUTOMÁTICO: Assim que a janela de impressão for fechada ou confirmada:
+        // Limpa todos os campos da tela atual, gera o novo sequencial e foca no 1º campo de digitação!
+        if (handleAdvanceToNextQuoteRef.current) {
+          handleAdvanceToNextQuoteRef.current();
+        }
       };
 
       window.addEventListener('afterprint', handleAfterPrint);
@@ -2202,8 +2213,11 @@ export default function SalesModule({
     setTimeout(() => setSuccessMessage(null), 5000);
   };
 
-  // New clean quote - busca as configurações de numeração diretamente da tabela 'emitente' no Supabase
-  const handleNewQuote = async () => {
+  // FLUXO AUTOMÁTICO PARA PRÓXIMA COTAÇÃO AO SALVAR/IMPRIMIR
+  // 1. Limpa todos os campos da tela (Cliente, Lista de Itens, Descontos, Observações, Desenhos)
+  // 2. Gera/Avança automaticamente para o novo Número de Cotação sequencial
+  // 3. Posiciona o foco (.focus()) automaticamente no primeiro campo de digitação
+  const handleAdvanceToNextQuote = async (showNotification = true) => {
     setEditingQuoteId(null);
     setEditingOriginalQuoteNumber(null);
     setEditingQuoteCreatedAt(null);
@@ -2238,13 +2252,35 @@ export default function SalesModule({
       setAutoSuggestedNumber(targetNum);
       setAutoSuggestedSeq(res.sequential);
       setNumeroCotacao(targetNum);
-      setSuccessMessage(`Novo orçamento iniciado! Sugestão sequencial: ${targetNum}`);
-      setTimeout(() => setSuccessMessage(null), 2500);
+      if (showNotification) {
+        setSuccessMessage(`Próxima cotação (${targetNum}) pronta para digitação!`);
+        setTimeout(() => setSuccessMessage(null), 3000);
+      }
     } catch (err) {
-      setSuccessMessage(`Novo orçamento iniciado! Número gerado: ${quickId}`);
-      setTimeout(() => setSuccessMessage(null), 2500);
+      if (showNotification) {
+        setSuccessMessage(`Próxima cotação (${quickId}) pronta para digitação!`);
+        setTimeout(() => setSuccessMessage(null), 3000);
+      }
     }
+
+    // Posiciona o foco (.focus()) automaticamente no primeiro campo de digitação (Busca de Cliente ou Inserção de Produto)
+    setTimeout(() => {
+      if (clientSelectRef.current) {
+        clientSelectRef.current.focus();
+      } else if (clientNameInputRef.current) {
+        clientNameInputRef.current.focus();
+      } else if (constantInputRef.current) {
+        constantInputRef.current.focus();
+      }
+    }, 150);
   };
+
+  // Mantém a referência sincronizada para o listener onafterprint
+  useEffect(() => {
+    handleAdvanceToNextQuoteRef.current = () => handleAdvanceToNextQuote(true);
+  });
+
+  const handleNewQuote = () => handleAdvanceToNextQuote(true);
 
   // Load a quote from history modal / edit action - MANTÉM FIXO o número e ID original
   const handleLoadQuoteFromHistory = (quote: Quote) => {
@@ -2468,11 +2504,12 @@ export default function SalesModule({
 
         <div className="flex items-center gap-2 flex-wrap">
           <button
-            onClick={handleNewQuote}
-            className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
+            onClick={() => handleAdvanceToNextQuote(true)}
+            className="px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+            title="Limpa todos os campos, gera a nova numeração sequencial e posiciona o foco no primeiro campo"
           >
-            <RotateCcw className="w-3.5 h-3.5" />
-            Novo Orçamento
+            <RotateCcw className="w-3.5 h-3.5 text-indigo-600" />
+            Próxima Cotação (Novo)
           </button>
 
           <button
@@ -2651,6 +2688,7 @@ export default function SalesModule({
             </div>
 
             <select
+              ref={clientSelectRef}
               value={selectedClientId}
               onChange={(e) => handleClientSelect(e.target.value)}
               className="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-hidden transition-all"
@@ -2668,6 +2706,7 @@ export default function SalesModule({
           <div className="md:col-span-6 space-y-1.5">
             <label className="block text-xs font-bold text-slate-700">Razão Social / Nome do Cliente</label>
             <input
+              ref={clientNameInputRef}
               type="text"
               placeholder="Ex: Usinagem & Estruturas Brasil Ltda"
               value={clientName}
@@ -4109,6 +4148,7 @@ export default function SalesModule({
           }}
           onClose={() => {
             setShowPrintOptionsModal(false);
+            handleAdvanceToNextQuote(true);
           }}
         />
       )}
@@ -4139,7 +4179,9 @@ export default function SalesModule({
 
       {/* PORTAL DE IMPRESSÃO DIRETA COM LAYOUTS IDÊNTICOS À CONSULTA */}
       {activeDirectPrint && typeof document !== 'undefined' && createPortal(
-        <ConsultaPrintDocuments quote={activeDirectPrint.quote} tipo={activeDirectPrint.tipo} />,
+        <div id="print-area">
+          <ConsultaPrintDocuments quote={activeDirectPrint.quote} tipo={activeDirectPrint.tipo} />
+        </div>,
         document.body
       )}
 

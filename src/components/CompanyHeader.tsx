@@ -95,7 +95,9 @@ export default function CompanyHeader({
               compact ? 'text-xs sm:text-sm md:text-base' : 'text-sm sm:text-base md:text-lg lg:text-xl'
             }`}
           >
-            {activeCompany.corporateName || DEFAULT_COMPANY_DATA.corporateName}
+            {activeCompany.tradeName && activeCompany.corporateName && activeCompany.tradeName.toUpperCase() !== activeCompany.corporateName.toUpperCase()
+              ? `${activeCompany.tradeName} / ${activeCompany.corporateName}`
+              : (activeCompany.corporateName || DEFAULT_COMPANY_DATA.corporateName)}
           </h1>
 
           {/* Linha 2 */}

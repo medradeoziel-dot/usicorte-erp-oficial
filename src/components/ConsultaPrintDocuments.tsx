@@ -148,8 +148,8 @@ export function ConsultaPrintDocuments({ quote, tipo }: ConsultaPrintDocumentsPr
 
   return (
     <div 
-      id="container-impressao-vendas" 
-      className="print-container w-full overflow-x-hidden bg-slate-900/60 p-2 sm:p-6 rounded-2xl border border-slate-800 print:bg-transparent print:p-0 print:m-0 print:border-none print:shadow-none print:overflow-visible print:h-auto print:max-h-none"
+      id="print-area" 
+      className="print-area container-impressao-vendas print-container w-full overflow-x-hidden bg-slate-900/60 p-2 sm:p-6 rounded-2xl border border-slate-800 print:bg-transparent print:p-0 print:m-0 print:border-none print:shadow-none print:overflow-visible print:h-auto print:max-h-none"
     >
       {/* ===================================================
            1. GERAL: RELATÓRIO A4 INTEIRO
@@ -439,7 +439,7 @@ export function ConsultaPrintDocuments({ quote, tipo }: ConsultaPrintDocumentsPr
         {/* LINHA DE DESTAQUE / CORTE ENTRE AS DUAS VIAS */}
         <div className="linha-corte my-1.5 border-b border-dashed border-[#999] text-center relative w-full h-0">
           <span className="bg-white px-2.5 text-[9.5px] font-bold text-slate-500 relative -top-2">
-            ✂️ CORTE AQUI
+            --- ✂ CORTE AQUI ---
           </span>
         </div>
 
