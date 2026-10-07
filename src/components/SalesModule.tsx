@@ -56,7 +56,8 @@ import {
   updateEmitenteNextSequential,
   incrementEmitenteQuoteSequential
 } from '../services/companyService';
-import QuotePrintModal from './QuotePrintModal';
+import QuotePrintModal, { PrintMode } from './QuotePrintModal';
+import QuotePrintOptionsModal, { TipoImpressaoOrcamento } from './QuotePrintOptionsModal';
 import QuoteHistoryModal from './QuoteHistoryModal';
 import MaterialAutocomplete, { AutocompleteOption } from './MaterialAutocomplete';
 import {
@@ -462,6 +463,9 @@ export default function SalesModule({
   // Modals & History state
   const [showHistoryModal, setShowHistoryModal] = useState<boolean>(false);
   const [showPrintModal, setShowPrintModal] = useState<boolean>(false);
+  const [showPrintOptionsModal, setShowPrintOptionsModal] = useState<boolean>(false);
+  const [printModalMode, setPrintModalMode] = useState<TipoImpressaoOrcamento>('GERAL');
+  const [autoTriggerPrint, setAutoTriggerPrint] = useState<boolean>(false);
 
   // Feedback banners
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -2010,18 +2014,20 @@ export default function SalesModule({
       if (res.error) {
         console.warn('Aviso ao gravar no Supabase:', res.error);
         setErrorMessage(`Aviso ao gravar no Supabase: ${res.error.message || 'Falha de comunicação'}`);
-      } else {
-        setSuccessMessage(isEditing || existsIndex >= 0 ? `Orçamento ${cleanNum} atualizado diretamente no Supabase! ⚡` : `Orçamento ${cleanNum} gravado diretamente no Supabase! ⚡`);
       }
     }).catch((err) => {
       console.error('Erro na gravação direta no Supabase:', err);
       setErrorMessage(`Erro ao gravar no Supabase: ${err?.message || 'Falha de rede'}`);
     });
 
+    // Notificação Toast e abertura automática do Modal de Opções de Impressão
+    setSuccessMessage('Orçamento salvo com sucesso!');
+    setShowPrintOptionsModal(true);
+
     setTimeout(() => {
       setSuccessMessage(null);
       setErrorMessage(null);
-    }, 4000);
+    }, 4500);
   };
 
   // Aprovar cotação com 1 clique (baixa estoque + gera contas a receber + UPDATE direto no Supabase)
@@ -4002,7 +4008,10 @@ export default function SalesModule({
                 </button>
 
                 <button
-                  onClick={() => setShowPrintModal(true)}
+                  onClick={() => {
+                    setAutoTriggerPrint(false);
+                    setShowPrintModal(true);
+                  }}
                   className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs transition-all cursor-pointer"
                 >
                   <Printer className="w-4 h-4" />
@@ -4017,11 +4026,35 @@ export default function SalesModule({
 
       </div>
 
+      {/* MODAL DE OPÇÕES DE IMPRESSÃO APÓS SALVAR */}
+      {showPrintOptionsModal && (
+        <QuotePrintOptionsModal
+          quoteNumber={numeroCotacao.trim() || currentQuoteForModal.quoteNumber || 'COT'}
+          clientName={clientName.trim() || 'Cliente Balcão'}
+          itemCount={items.length}
+          totalValue={grandTotal}
+          onSelectPrint={(tipo) => {
+            setShowPrintOptionsModal(false);
+            setPrintModalMode(tipo);
+            setAutoTriggerPrint(true);
+            setShowPrintModal(true);
+          }}
+          onClose={() => {
+            setShowPrintOptionsModal(false);
+          }}
+        />
+      )}
+
       {/* MODAL PRINT PROPOSAL */}
       {showPrintModal && (
         <QuotePrintModal
           quote={currentQuoteForModal}
-          onClose={() => setShowPrintModal(false)}
+          initialMode={printModalMode}
+          autoPrint={autoTriggerPrint}
+          onClose={() => {
+            setShowPrintModal(false);
+            setAutoTriggerPrint(false);
+          }}
         />
       )}
 
