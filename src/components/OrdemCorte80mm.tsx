@@ -72,12 +72,13 @@ export default function OrdemCorte80mm({
 
   return (
     <div
-      className={`ordem-corte-80mm-root bg-white text-black font-mono select-text box-border ${className}`}
+      className={`ordem-corte-80mm-root w-full bg-white text-black font-mono select-text box-border ${className}`}
       style={{
         width: '100%',
-        maxWidth: '72mm',
+        maxWidth: '80mm',
         margin: '0 auto',
-        padding: '2mm 0',
+        padding: '4px',
+        boxSizing: 'border-box',
         color: '#000000',
         backgroundColor: '#ffffff',
         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
@@ -90,29 +91,44 @@ export default function OrdemCorte80mm({
         @media print {
           @page {
             size: 80mm auto;
-            margin: 2mm;
+            margin: 0;
           }
-          body.print-corte-80 {
+          body, .print-container {
             width: 80mm !important;
             max-width: 80mm !important;
             margin: 0 !important;
-            padding: 0 !important;
+            padding: 3mm !important;
+            box-sizing: border-box !important;
             background: #ffffff !important;
             color: #000000 !important;
           }
-          body.print-corte-80 * {
+          body.print-corte-80,
+          body.print-corte-80 .print-container,
+          body.print-corte-80 .ordem-corte-80mm-root {
+            width: 80mm !important;
+            max-width: 80mm !important;
+            margin: 0 !important;
+            padding: 3mm !important;
+            box-sizing: border-box !important;
+            background: #ffffff !important;
+            color: #000000 !important;
+          }
+          * {
             color: #000000 !important;
             border-color: #000000 !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
           }
           .ordem-corte-80mm-root {
-            width: 72mm !important;
-            max-width: 72mm !important;
+            width: 100% !important;
+            max-width: 80mm !important;
             margin: 0 auto !important;
-            padding: 1mm 0 !important;
+            padding: 0 !important;
+            box-sizing: border-box !important;
           }
           .bloco-item-corte {
+            width: 100% !important;
+            box-sizing: border-box !important;
             page-break-inside: avoid !important;
             break-inside: avoid !important;
           }
@@ -122,68 +138,64 @@ export default function OrdemCorte80mm({
       {/* =========================================================================
           1. CABEÇALHO COMPACTO (CUPOM TÉRMICO 80MM)
           ========================================================================= */}
-      <header className="text-center pb-1">
+      <header className="w-full text-center pb-1">
         <h1 
-          className="font-black text-center tracking-wider leading-tight m-0 uppercase"
+          className="w-full font-black text-center tracking-wider leading-tight m-0 uppercase"
           style={{ fontSize: '18px', color: '#000000', fontWeight: 900 }}
         >
           === ORDEM DE CORTE ===
         </h1>
         <div 
-          className="font-black text-center tracking-widest mt-0.5 uppercase"
+          className="w-full font-black text-center tracking-widest mt-0.5 uppercase"
           style={{ fontSize: '14px', color: '#000000', fontWeight: 900 }}
         >
           USICORTE METAIS
         </div>
 
-        {/* Linha Divisória Serrilhada / Sólida */}
-        <div 
-          className="my-1 text-center font-bold overflow-hidden select-none"
-          style={{ fontSize: '12px', letterSpacing: '-0.5px', color: '#000000' }}
-        >
-          --------------------------------
-        </div>
+        {/* Linha Divisória de Largura Total */}
+        <div className="w-full border-b-2 border-dashed border-black my-2" />
 
-        {/* Dados do Pedido / Destino */}
-        <div className="text-left space-y-1" style={{ color: '#000000' }}>
-          <div className="flex items-start text-xs leading-snug">
-            <span className="w-20 shrink-0 font-black" style={{ fontSize: '13px', color: '#000000' }}>CLIENTE:</span>
-            <span className="font-black uppercase break-words flex-1" style={{ fontSize: '14px', color: '#000000', fontWeight: 900 }}>
+        {/* Dados do Pedido / Destino com Flexbox de Largura Total */}
+        <div className="w-full text-left space-y-1.5" style={{ color: '#000000' }}>
+          <div className="flex justify-between items-start w-full leading-snug">
+            <span className="font-bold min-w-[80px] shrink-0 text-black" style={{ fontSize: '13px' }}>
+              CLIENTE:
+            </span>
+            <span className="font-bold uppercase break-words text-right flex-1 text-black" style={{ fontSize: '14px', fontWeight: 900 }}>
               {nomeCliente.toUpperCase()}
             </span>
           </div>
 
-          <div className="flex items-center text-xs leading-snug">
-            <span className="w-20 shrink-0 font-black" style={{ fontSize: '13px', color: '#000000' }}>COTAÇÃO:</span>
-            <span className="font-black font-mono flex-1" style={{ fontSize: '14px', color: '#000000', fontWeight: 900 }}>
+          <div className="flex justify-between items-center w-full leading-snug">
+            <span className="font-bold min-w-[80px] shrink-0 text-black" style={{ fontSize: '13px' }}>
+              COTAÇÃO:
+            </span>
+            <span className="font-bold font-mono text-right flex-1 text-black" style={{ fontSize: '14px', fontWeight: 900 }}>
               #{numCotacao}
             </span>
           </div>
 
-          <div className="flex items-center text-xs leading-snug">
-            <span className="w-20 shrink-0 font-black" style={{ fontSize: '12px', color: '#000000' }}>DATA/HORA:</span>
-            <span className="font-black flex-1" style={{ fontSize: '13px', color: '#000000', fontWeight: 900 }}>
+          <div className="flex justify-between items-center w-full leading-snug">
+            <span className="font-bold min-w-[80px] shrink-0 text-black" style={{ fontSize: '13px' }}>
+              DATA/HORA:
+            </span>
+            <span className="font-bold text-right flex-1 text-black" style={{ fontSize: '13px', fontWeight: 900 }}>
               {dataHoraImpressao}
             </span>
           </div>
         </div>
 
-        {/* Linha Divisória Serrilhada */}
-        <div 
-          className="my-1 text-center font-bold overflow-hidden select-none"
-          style={{ fontSize: '12px', letterSpacing: '-0.5px', color: '#000000' }}
-        >
-          --------------------------------
-        </div>
+        {/* Linha Divisória de Largura Total */}
+        <div className="w-full border-b-2 border-dashed border-black my-2" />
       </header>
 
       {/* =========================================================================
-          2. LISTA DE ITENS (ESTRUTURA EMPILHADA EM BLOCOS INDIVIDUAIS DE ALTO CONTRASTE)
+          2. LISTA DE ITENS (ESTRUTURA EMPILHADA EM BLOCOS DE LARGURA TOTAL 100%)
           ========================================================================= */}
-      <main className="space-y-2.5 my-1">
+      <main className="w-full space-y-2.5 my-1">
         {listaItens.length === 0 ? (
           <div 
-            className="p-3 text-center border-2 border-black font-bold text-xs"
+            className="w-full p-3 text-center border-2 border-black font-bold text-xs box-border"
             style={{ border: '2px solid #000000', color: '#000000' }}
           >
             NENHUM ITEM PARA CORTE
@@ -201,27 +213,27 @@ export default function OrdemCorte80mm({
             return (
               <section
                 key={item?.id || item?.idVer || idx}
-                className="bloco-item-corte bg-white overflow-hidden"
+                className="bloco-item-corte w-full border-2 border-black p-2 my-2 bg-white box-border"
                 style={{
                   border: '2px solid #000000',
                   borderRadius: '3px',
                   pageBreakInside: 'avoid',
                   breakInside: 'avoid',
-                  marginBottom: '7px',
-                  backgroundColor: '#ffffff'
+                  backgroundColor: '#ffffff',
+                  boxSizing: 'border-box'
                 }}
               >
                 {/* ┌────────────────────────────────────────┐
-                    │ [  ] CORTADO   | ITEM #1   | QTD: 2 PÇS │
-                    ├────────────────────────────────────────┤ */}
+                    │ [  ] CORTADO  |  ITEM #1   |  QTD: 2 PÇS│
+                    └────────────────────────────────────────┘ */}
                 <div 
-                  className="flex items-center justify-between px-2 py-1.5 bg-white font-black"
+                  className="flex justify-between items-center w-full pb-1.5 font-black"
                   style={{
                     borderBottom: '2px solid #000000',
                     color: '#000000'
                   }}
                 >
-                  {/* Caixa de Checagem Física para o Operador */}
+                  {/* Lado Esquerdo: Checkbox + Cortado + Item # */}
                   <div className="flex items-center gap-1.5">
                     <span 
                       className="inline-block bg-white shrink-0" 
@@ -233,65 +245,74 @@ export default function OrdemCorte80mm({
                       }} 
                     />
                     <span style={{ fontSize: '13px', fontWeight: 900 }}>CORTADO</span>
+                    <span className="text-black font-black mx-0.5">|</span>
+                    <span style={{ fontSize: '14px', fontWeight: 900 }}>
+                      ITEM #{numItem}
+                    </span>
                   </div>
 
-                  <span style={{ fontSize: '14px', fontWeight: 900 }}>
-                    ITEM #{numItem}
-                  </span>
-
+                  {/* Lado Direito: Quantidade Empurrada para a Borda Direita */}
                   <span 
-                    className="font-black uppercase"
+                    className="font-black uppercase text-right"
                     style={{ fontSize: '14px', fontWeight: 900 }}
                   >
                     QTD: {qtd} PÇS
                   </span>
                 </div>
 
-                {/* ├────────────────────────────────────────┤
+                {/* ┌────────────────────────────────────────┐
                     │ MATERIAL: OXICORTE A36                 │
                     │ MEDIDAS:  1" x 50 x 195 mm             │
                     │ FORMA:    RETANGULO                    │
                     │ OBS/COD:  PCM 055                      │
                     └────────────────────────────────────────┘ */}
                 <div 
-                  className="p-2 space-y-1 leading-snug bg-white"
+                  className="w-full pt-1.5 space-y-1 leading-snug bg-white"
                   style={{ color: '#000000' }}
                 >
-                  <div className="flex items-start">
-                    <span className="w-22 shrink-0 font-black" style={{ fontSize: '13px', color: '#000000' }}>MATERIAL:</span>
+                  <div className="flex justify-between items-start w-full py-0.5">
+                    <span className="font-bold min-w-[90px] shrink-0 text-black" style={{ fontSize: '13px' }}>
+                      MATERIAL:
+                    </span>
                     <span 
-                      className="font-black uppercase break-words flex-1" 
-                      style={{ fontSize: '14px', color: '#000000', fontWeight: 900 }}
+                      className="font-black uppercase break-words text-right flex-1 text-black" 
+                      style={{ fontSize: '14px', fontWeight: 900 }}
                     >
                       {material}
                     </span>
                   </div>
 
-                  <div className="flex items-start">
-                    <span className="w-22 shrink-0 font-black" style={{ fontSize: '13px', color: '#000000' }}>MEDIDAS:</span>
+                  <div className="flex justify-between items-start w-full py-0.5">
+                    <span className="font-bold min-w-[90px] shrink-0 text-black" style={{ fontSize: '13px' }}>
+                      MEDIDAS:
+                    </span>
                     <span 
-                      className="font-black uppercase font-mono break-words flex-1" 
-                      style={{ fontSize: '14px', color: '#000000', fontWeight: 900 }}
+                      className="font-black uppercase font-mono break-words text-right flex-1 text-black" 
+                      style={{ fontSize: '14px', fontWeight: 900 }}
                     >
                       {medidas}
                     </span>
                   </div>
 
-                  <div className="flex items-start">
-                    <span className="w-22 shrink-0 font-black" style={{ fontSize: '13px', color: '#000000' }}>FORMA:</span>
+                  <div className="flex justify-between items-start w-full py-0.5">
+                    <span className="font-bold min-w-[90px] shrink-0 text-black" style={{ fontSize: '13px' }}>
+                      FORMA:
+                    </span>
                     <span 
-                      className="font-black uppercase break-words flex-1" 
-                      style={{ fontSize: '14px', color: '#000000', fontWeight: 900 }}
+                      className="font-black uppercase break-words text-right flex-1 text-black" 
+                      style={{ fontSize: '13px', fontWeight: 900 }}
                     >
                       {forma}
                     </span>
                   </div>
 
-                  <div className="flex items-start">
-                    <span className="w-22 shrink-0 font-black" style={{ fontSize: '13px', color: '#000000' }}>OBS/COD:</span>
+                  <div className="flex justify-between items-start w-full py-0.5">
+                    <span className="font-bold min-w-[90px] shrink-0 text-black" style={{ fontSize: '13px' }}>
+                      OBS/COD:
+                    </span>
                     <span 
-                      className="font-black uppercase break-words flex-1" 
-                      style={{ fontSize: '13.5px', color: '#000000', fontWeight: 900 }}
+                      className="font-black uppercase break-words text-right flex-1 text-black" 
+                      style={{ fontSize: '13.5px', fontWeight: 900 }}
                     >
                       {obsCod}
                     </span>
@@ -306,18 +327,13 @@ export default function OrdemCorte80mm({
       {/* =========================================================================
           3. RODAPÉ DO CUPOM TÉRMICO (80MM)
           ========================================================================= */}
-      <footer className="pt-1" style={{ color: '#000000', pageBreakInside: 'avoid', breakInside: 'avoid' }}>
-        {/* Linha Divisória Serrilhada */}
-        <div 
-          className="my-1 text-center font-bold overflow-hidden select-none"
-          style={{ fontSize: '12px', letterSpacing: '-0.5px', color: '#000000' }}
-        >
-          --------------------------------
-        </div>
+      <footer className="w-full pt-1" style={{ color: '#000000', pageBreakInside: 'avoid', breakInside: 'avoid' }}>
+        {/* Linha Divisória de Largura Total */}
+        <div className="w-full border-b-2 border-dashed border-black my-2" />
 
-        {/* Totais da Ordem */}
+        {/* Totais da Ordem Alinhados nas Extremidades */}
         <div 
-          className="flex justify-between items-center px-1 font-black uppercase"
+          className="flex justify-between items-center w-full px-0.5 font-black uppercase"
           style={{ fontSize: '14px', color: '#000000', fontWeight: 900 }}
         >
           <span>ITENS: {totalTiposItens}</span>
@@ -325,31 +341,31 @@ export default function OrdemCorte80mm({
         </div>
 
         {/* Campo para Visto do Operador no Chão de Fábrica */}
-        <div className="pt-4 pb-1">
+        <div className="pt-3 pb-1 w-full">
           <div 
-            className="font-black uppercase mb-1" 
+            className="flex justify-between items-center w-full font-black uppercase mb-1" 
             style={{ fontSize: '13px', color: '#000000', fontWeight: 900 }}
           >
-            VISTO DO OPERADOR: ______________________
+            <span>VISTO DO OPERADOR:</span>
           </div>
           <div 
+            className="w-full border-b-2 border-black mt-4 mb-2" 
             style={{ 
               borderBottom: '2px solid #000000', 
-              height: '18px', 
               width: '100%' 
             }} 
           />
         </div>
 
-        {/* Assinatura Final da Marca */}
+        {/* Assinatura Final da Marca Centralizada */}
         <div 
-          className="text-center pt-2 font-black uppercase tracking-widest"
-          style={{ fontSize: '15px', color: '#000000', fontWeight: 900 }}
+          className="w-full text-center pt-2 font-black uppercase tracking-widest"
+          style={{ fontSize: '16px', color: '#000000', fontWeight: 900 }}
         >
           USICORTE METAIS
         </div>
         <div 
-          className="text-center font-bold text-xs mt-0.5"
+          className="w-full text-center font-bold text-xs mt-0.5"
           style={{ color: '#000000', fontWeight: 900 }}
         >
           CORTE CNC & USINAGEM

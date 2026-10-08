@@ -3278,11 +3278,13 @@ export default function ReportsModule({
              }
            }`
         : activeModel === 'corte-80'
-        ? `@page { size: 80mm auto; margin: 2mm; }
+        ? `@page { size: 80mm auto; margin: 0; }
            @media print {
-             html, body { width: 80mm !important; max-width: 80mm !important; margin: 0 !important; padding: 0 !important; background: #ffffff !important; color: #000000 !important; }
-             body.print-corte-80 .secao-corte-80mm { width: 72mm !important; max-width: 72mm !important; margin: 0 auto !important; padding: 1mm 0 !important; }
-             .bloco-item-corte { break-inside: avoid !important; page-break-inside: avoid !important; }
+             body, .print-container { width: 80mm !important; max-width: 80mm !important; margin: 0 !important; padding: 3mm !important; box-sizing: border-box !important; }
+             body.print-corte-80, body.print-corte-80 .print-container, body.print-corte-80 .ordem-corte-80mm-root { width: 80mm !important; max-width: 80mm !important; margin: 0 !important; padding: 3mm !important; box-sizing: border-box !important; background: #ffffff !important; color: #000000 !important; }
+             body.print-corte-80 .secao-corte-80mm { width: 100% !important; max-width: 80mm !important; margin: 0 auto !important; padding: 0 !important; box-sizing: border-box !important; }
+             .bloco-item-corte { width: 100% !important; box-sizing: border-box !important; break-inside: avoid !important; page-break-inside: avoid !important; }
+             * { color: #000000 !important; border-color: #000000 !important; }
            }`
         : `@page { size: A4 portrait; margin: 8mm; }
            @media print {
@@ -3338,7 +3340,7 @@ export default function ReportsModule({
           body.print-corte-80 .tabela-container,
           body.print-corte-80 .screen-header,
           body.print-corte-80 .documento-modelo:not(.secao-corte-80mm) { display: none !important; }
-          body.print-corte-80 #doc-corte-80 { display: block !important; box-shadow: none !important; padding: 0 !important; width: 72mm !important; margin: 0 auto !important; }
+          body.print-corte-80 #doc-corte-80 { display: block !important; box-shadow: none !important; padding: 0 !important; width: 100% !important; max-width: 80mm !important; margin: 0 auto !important; box-sizing: border-box !important; }
           body.print-corte-80 * { color: #000000 !important; border-color: #000000 !important; }
 
           body.print-pedido .btn-no-print,

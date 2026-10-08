@@ -730,7 +730,7 @@ export function ConsultaPrintDocuments({ quote, tipo }: ConsultaPrintDocumentsPr
            =================================================== */}
       <div 
         id="doc-corte-80mm" 
-        className={`documento-modelo secao-corte-80mm print-container bg-white text-black p-2 font-mono w-full max-w-[80mm] mx-auto overflow-x-hidden print:overflow-visible print:h-auto print:max-h-none print:min-h-0 ${
+        className={`documento-modelo secao-corte-80mm print-container bg-white text-black p-1 font-mono w-full max-w-[80mm] mx-auto box-border overflow-x-hidden print:overflow-visible print:h-auto print:max-h-none print:min-h-0 print:p-0 ${
           tipo === 'CORTE_80MM' ? 'block' : 'hidden'
         }`}
       >
