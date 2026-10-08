@@ -21,7 +21,7 @@ interface DanfeEspelhoA4Props {
   client?: Client | null;
   company?: CompanyFiscalData;
   isPrevia?: boolean;
-  onClose: () => void;
+  onClose?: () => void;
   onTransmitir?: () => void;
   onOpenEdit?: () => void;
   isTransmitting?: boolean;
@@ -222,14 +222,16 @@ export default function DanfeEspelhoA4({
             </button>
           )}
 
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-1.5 bg-slate-800 hover:bg-rose-600 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
-            title="Fechar"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-1.5 bg-slate-800 hover:bg-rose-600 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
+              title="Fechar"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
         </div>
       </div>
 

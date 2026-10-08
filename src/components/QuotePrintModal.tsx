@@ -5,7 +5,8 @@ import {
   Building2, 
   ClipboardList, 
   Tag, 
-  Scissors 
+  Scissors,
+  Receipt
 } from "lucide-react";
 import { 
   ConsultaPrintDocuments, 
@@ -87,6 +88,13 @@ export default function QuotePrintModal({
       sublabel: 'Ficha CNC',
       icon: <Scissors className="w-4 h-4" />,
       activeClasses: 'bg-rose-600 text-white shadow-xs',
+    },
+    {
+      mode: 'CORTE_80MM',
+      label: 'CUPOM 80MM',
+      sublabel: 'Corte Térmico 80mm',
+      icon: <Receipt className="w-4 h-4" />,
+      activeClasses: 'bg-orange-600 text-white shadow-xs',
     },
   ];
 

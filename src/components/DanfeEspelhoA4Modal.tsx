@@ -38,7 +38,7 @@ export default function DanfeEspelhoA4Modal({
     }
   }, [initialCompany, isOpen]);
 
-  if (!isOpen) return null;
+  if (!isOpen || !quote) return null;
 
   const isPrevia = isPreviaProp !== undefined ? isPreviaProp : (quote.status_nfe !== 'Emitida');
 
@@ -158,6 +158,9 @@ export default function DanfeEspelhoA4Modal({
               client={client}
               company={company}
               isPrevia={isPrevia}
+              onClose={onClose}
+              onTransmitir={onTransmit}
+              isTransmitting={isTransmitting}
             />
           </div>
         </div>

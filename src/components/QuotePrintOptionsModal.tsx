@@ -194,6 +194,15 @@ export default function QuotePrintOptionsModal({
       iconBgClasses: 'bg-rose-500/10 border-rose-500/30 text-rose-400',
     },
     {
+      tipo: 'CORTE_80MM',
+      titulo: 'CUPOM 80MM',
+      subtitulo: 'CORTE TÉRMICO',
+      descricao: 'Ordem de corte em cupom térmico para bobina de 80mm',
+      icone: <Printer className="w-6 h-6 text-orange-400 group-hover:scale-110 transition-transform" />,
+      cardClasses: 'hover:border-orange-500 hover:bg-orange-950/40 border-slate-700 bg-slate-900/90 text-orange-300',
+      iconBgClasses: 'bg-orange-500/10 border-orange-500/30 text-orange-400',
+    },
+    {
       tipo: 'NFE',
       titulo: 'NOTA FISCAL',
       subtitulo: isNfeEmitida ? 'DANFE EMITIDA' : 'NF-E / DANFE',
@@ -287,9 +296,9 @@ export default function QuotePrintOptionsModal({
             </button>
           </div>
 
-          {/* Grade Horizontal com os 6 botões de ação com ícones visíveis */}
+          {/* Grade Horizontal com os 7 botões de ação com ícones visíveis */}
           <div className="p-5 sm:p-6">
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3">
               {opcoes.map((opcao) => (
                 <button
                   key={opcao.tipo}

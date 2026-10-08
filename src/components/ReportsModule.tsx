@@ -65,9 +65,15 @@ import {
   RotateCw,
   RotateCcw,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Send,
+  FileCheck2,
+  Receipt
 } from 'lucide-react';
 import BoletosGestaoModal from './BoletosGestaoModal';
+import EmissaoNfeModal from './EmissaoNfeModal';
+import DanfeEspelhoA4Modal from './DanfeEspelhoA4Modal';
+import OrdemCorte80mm from './OrdemCorte80mm';
 import { 
   ContaReceberParcela,
   fetchBoletosDb,
@@ -140,7 +146,7 @@ export function getStatusLabel(rawStatus?: string): string {
   return getStatusOption(rawStatus).label;
 }
 
-type PrintModelType = 'A4-inteiro' | 'A4-2vias' | 'etiqueta-80' | 'proposta-resumida' | 'corte';
+type PrintModelType = 'A4-inteiro' | 'A4-2vias' | 'etiqueta-80' | 'proposta-resumida' | 'corte' | 'corte-80';
 
 export interface ConsultaItem {
   idVer: number;
@@ -161,6 +167,10 @@ export interface ConsultaItem {
   obs?: string;
   status: StatusProposta;
   desenhoUrl?: string;
+  status_nfe?: string;
+  nfe_numero?: string;
+  nfe_chave?: string;
+  danfe_url?: string;
 }
 
 // Dados de consulta (inicia vazio para produção)
@@ -636,6 +646,11 @@ export default function ReportsModule({
   const [isQuickPayingBoletoId, setIsQuickPayingBoletoId] = useState<string | null>(null);
   const [vencimentosDismissed, setVencimentosDismissed] = useState<boolean>(false);
 
+  // Estados para Emissão e Visualização de Nota Fiscal Eletrônica (NF-e / DANFE)
+  const [quoteForNfeModal, setQuoteForNfeModal] = useState<Quote | null>(null);
+  const [quoteForDanfeModal, setQuoteForDanfeModal] = useState<Quote | null>(null);
+  const [isLoadingNfeQuote, setIsLoadingNfeQuote] = useState<boolean>(false);
+
   // Carregamento inicial de boletos cadastrados
   useEffect(() => {
     fetchBoletosDb()
@@ -910,7 +925,15 @@ export default function ReportsModule({
           shipping: 0,
           totalWeightKg: 0,
           createdAt: cot.created_at || new Date().toISOString(),
-          updatedAt: cot.created_at || new Date().toISOString()
+          updatedAt: cot.created_at || new Date().toISOString(),
+          status_nfe: cot.status_nfe,
+          nfe_numero: cot.nfe_numero,
+          nfe_chave: cot.nfe_chave,
+          danfe_url: cot.danfe_url,
+          xml_url: cot.xml_url,
+          serie_nfe: (cot as any).serie_nfe,
+          protocolo_nfe: (cot as any).protocolo_nfe,
+          nfe_emitida_em: (cot as any).nfe_emitida_em
         };
 
         setActiveQuote(newQ);
@@ -968,6 +991,204 @@ export default function ReportsModule({
     }
 
     return null;
+  };
+
+  // Helper para resolver dados completos do cliente para emissão fiscal
+  const resolveClientForQuote = useCallback((quote: Quote | null): Client | null => {
+    if (!quote) return null;
+    const found = clients.find(
+      c => (quote.clientId && c.id === quote.clientId) ||
+           (quote.clientDocument && c.document && c.document.replace(/\D/g, '') === quote.clientDocument.replace(/\D/g, '')) ||
+           (quote.clientName && c.name && c.name.trim().toLowerCase() === quote.clientName.trim().toLowerCase())
+    );
+    if (found) return found;
+    return {
+      id: quote.clientId || 'cli-temp',
+      name: quote.clientName || 'Cliente Balcão',
+      tradeName: quote.clientName || 'Cliente Balcão',
+      document: quote.clientDocument || '00.000.000/0001-00',
+      type: (quote.clientDocument && quote.clientDocument.replace(/\D/g, '').length === 11) ? 'CPF' : 'CNPJ',
+      situation: 'Regular',
+      enabled: true,
+      registrationDate: new Date().toISOString().slice(0, 10),
+      phone: quote.clientPhone || '',
+      email: quote.clientEmail || '',
+      city: quote.clientCity || 'Bauru',
+      state: quote.clientState || 'SP',
+      street: quote.clientStreet || '',
+      neighborhood: quote.clientNeighborhood || '',
+      cep: quote.clientCep || ''
+    } as unknown as Client;
+  }, [clients]);
+
+  // Carrega e reconstrói a cotação completa para operações fiscais da NF-e
+  const resolveQuoteForNfe = async (item: ConsultaItem): Promise<Quote | null> => {
+    setIsLoadingNfeQuote(true);
+    try {
+      const targetId = item.cotacaoId || item.cotacao;
+      let quoteObj: Quote | null = null;
+      if (targetId) {
+        quoteObj = await carregarCotacaoPorId(targetId);
+      }
+      if (!quoteObj) {
+        try {
+          const saved = localStorage.getItem('s_orcamentos');
+          if (saved) {
+            const parsed: Quote[] = JSON.parse(saved);
+            const found = parsed.find(
+              q => (q.quoteNumber && q.quoteNumber.trim().toLowerCase() === String(item.cotacao).trim().toLowerCase()) ||
+                   (q.id && q.id === item.cotacaoId) ||
+                   (q.id && q.id === item.cotacao)
+            );
+            if (found) quoteObj = found;
+          }
+        } catch (e) {
+          console.warn('Erro ao carregar do localStorage:', e);
+        }
+      }
+
+      if (!quoteObj) {
+        const sameQuoteItems = dbQuotesItems.filter(
+          i => (i.cotacao && i.cotacao === item.cotacao) || (i.cotacaoId && i.cotacaoId === item.cotacaoId)
+        );
+        const itemsToUse = sameQuoteItems.length > 0 ? sameQuoteItems : [item];
+        const totalGeralReconstruido = itemsToUse.reduce(
+          (acc, curr) => acc + (curr.valorGeral || (curr.unitario * curr.qtd)), 0
+        );
+        const mappedItems: QuoteItem[] = itemsToUse.map((it, idx) => ({
+          id: String(it.itemId || (idx + 1)),
+          date: it.data || new Date().toISOString().slice(0, 10),
+          companyName: it.empresa || 'Cliente Selecionado',
+          constant: '1.0',
+          diameter: it.medida || '',
+          description: it.descricao || it.produto || `Item #${idx + 1}`,
+          descricao: it.descricao || it.produto || `Item #${idx + 1}`,
+          material: it.produto || 'Aço Carbono',
+          constanteNome: it.produto || 'Material',
+          measure: it.medida || 'Conforme desenho',
+          widthLength: it.medida || '',
+          quantity: Number(it.qtd) || 1,
+          qtd: Number(it.qtd) || 1,
+          unitPrice: Number(it.unitario) || 0,
+          valorUnitario: Number(it.unitario) || 0,
+          subtotal: Number(it.valorGeral) || ((Number(it.unitario) || 0) * (Number(it.qtd) || 1)),
+          notes: it.observacao || it.obs || '',
+          observacao: it.observacao || it.obs || '',
+          drawingImage: it.desenhoUrl || undefined,
+          fotoDesenho: it.desenhoUrl || undefined,
+          totalWeightKg: 0,
+          pesoTotal: 0
+        }));
+
+        quoteObj = {
+          id: item.cotacaoId || item.cotacao || `COT-${Date.now()}`,
+          quoteNumber: item.cotacao || 'COT-TEMP',
+          date: item.data || new Date().toISOString().slice(0, 10),
+          clientName: item.empresa || 'Cliente Balcão',
+          contactPerson: item.contato !== '-' ? item.contato : '',
+          status: item.status === 'aprovado' ? 'Aprovado' : item.status === 'pendente' ? 'Enviado' : 'Rascunho',
+          validityDays: 10,
+          paymentTerms: 'À Vista / Pix',
+          observations: item.observacao || '',
+          items: mappedItems,
+          subtotalTotal: totalGeralReconstruido,
+          grandTotal: totalGeralReconstruido,
+          discount: 0,
+          shipping: 0,
+          totalWeightKg: 0,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          status_nfe: item.status_nfe,
+          nfe_numero: item.nfe_numero,
+          nfe_chave: item.nfe_chave,
+          danfe_url: item.danfe_url
+        };
+      }
+      return quoteObj;
+    } finally {
+      setIsLoadingNfeQuote(false);
+    }
+  };
+
+  // Abre o modal de emissão / transmissão da NF-e para a SEFAZ
+  const handleAbrirEmissaoNfe = async (item: ConsultaItem) => {
+    const quote = await resolveQuoteForNfe(item);
+    if (quote) {
+      setQuoteForNfeModal(quote);
+    } else {
+      setDeleteFeedback({
+        message: 'Não foi possível carregar os dados desta cotação para emissão fiscal.',
+        type: 'error'
+      });
+    }
+  };
+
+  // Abre o modal de visualização e conferência da DANFE A4
+  const handleAbrirVisualizacaoDanfe = async (item: ConsultaItem) => {
+    const quote = await resolveQuoteForNfe(item);
+    if (quote) {
+      setQuoteForDanfeModal(quote);
+    } else {
+      setDeleteFeedback({
+        message: 'Não foi possível carregar os dados desta cotação para visualização da DANFE.',
+        type: 'error'
+      });
+    }
+  };
+
+  // Disparo de emissão de NF-e a partir da barra superior
+  const handleEmitirNfeTopBar = async () => {
+    const selectedItem = filteredConsultaItems.find(it => selectedIds.includes(it.idVer)) || 
+      (selectedIds.length === 0 && filteredConsultaItems.length === 1 ? filteredConsultaItems[0] : null);
+
+    if (!selectedItem) {
+      setDeleteFeedback({
+        message: 'Selecione uma cotação/pedido na tabela (marcando a caixa de seleção) para emitir a NF-e.',
+        type: 'error'
+      });
+      return;
+    }
+    await handleAbrirEmissaoNfe(selectedItem);
+  };
+
+  // Disparo de visualização de DANFE a partir da barra superior
+  const handleVisualizarDanfeTopBar = async () => {
+    const selectedItem = filteredConsultaItems.find(it => selectedIds.includes(it.idVer)) || 
+      (selectedIds.length === 0 && filteredConsultaItems.length === 1 ? filteredConsultaItems[0] : null);
+
+    if (!selectedItem) {
+      setDeleteFeedback({
+        message: 'Selecione uma cotação/pedido na tabela (marcando a caixa de seleção) para visualizar a DANFE.',
+        type: 'error'
+      });
+      return;
+    }
+    await handleAbrirVisualizacaoDanfe(selectedItem);
+  };
+
+  // Callback de sucesso ao emitir / autorizar NF-e
+  const handleNfeSuccess = (updatedQuote: Quote) => {
+    setDeleteFeedback({
+      message: `Nota Fiscal (NF-e Nº ${updatedQuote.nfe_numero || ''}) autorizada e emitida com sucesso!`,
+      type: 'success'
+    });
+    setDbQuotesItems(prev => prev.map(item => {
+      const match = 
+        (item.cotacao && item.cotacao === updatedQuote.quoteNumber) ||
+        (item.cotacaoId && item.cotacaoId === updatedQuote.id) ||
+        (item.cotacao && item.cotacao === updatedQuote.id);
+      if (match) {
+        return {
+          ...item,
+          status_nfe: updatedQuote.status_nfe,
+          nfe_numero: updatedQuote.nfe_numero,
+          nfe_chave: updatedQuote.nfe_chave,
+          danfe_url: updatedQuote.danfe_url
+        };
+      }
+      return item;
+    }));
+    loadAllConsultaData({ forceRefresh: true });
   };
 
   // Carrega cotações e itens do Supabase e LocalStorage com deduplicação rigorosa e exibindo apenas a versão mais recente
@@ -1041,7 +1262,11 @@ export default function ReportsModule({
                 observacao: it.observacao || '',
                 obs: it.observacao || '',
                 status: computedQuoteStatus,
-                desenhoUrl: it.desenho_url || undefined
+                desenhoUrl: it.desenho_url || undefined,
+                status_nfe: q?.status_nfe,
+                nfe_numero: q?.nfe_numero,
+                nfe_chave: q?.nfe_chave,
+                danfe_url: q?.danfe_url
               });
             });
           }
@@ -1100,7 +1325,11 @@ export default function ReportsModule({
                     observacao: it.observacao || (it as any).notes || (it as any).obs || '',
                     obs: it.observacao || (it as any).notes || (it as any).obs || '',
                     status: computedQuoteStatus,
-                    desenhoUrl: it.desenho_url || undefined
+                    desenhoUrl: it.desenho_url || undefined,
+                    status_nfe: q.status_nfe,
+                    nfe_numero: q.nfe_numero,
+                    nfe_chave: q.nfe_chave,
+                    danfe_url: q.danfe_url
                   });
               });
             });
@@ -1169,7 +1398,11 @@ export default function ReportsModule({
                       observacao: obsText,
                       obs: obsText,
                       status: computedLocalStatus as StatusProposta,
-                      desenhoUrl: it.drawingImage || (it as any).fotoDesenho || (it as any).desenho_url || undefined
+                      desenhoUrl: it.drawingImage || (it as any).fotoDesenho || (it as any).desenho_url || undefined,
+                      status_nfe: q.status_nfe,
+                      nfe_numero: q.nfe_numero,
+                      nfe_chave: q.nfe_chave,
+                      danfe_url: q.danfe_url
                     });
                   });
                 }
@@ -1707,16 +1940,20 @@ export default function ReportsModule({
   // ✅ Padronização de todos os botões de impressão da CONSULTA (GERAL, EMPRESA, PEDIDO, ETIQUETAS, CORTE)
   // Utiliza EXCLUSIVAMENTE a cotação/itens selecionados na tabela da Consulta,
   // 100% isolado do estado ou cache da primeira aba.
-  const imprimirRelatorioGeral = async (tipoRelatorio: 'GERAL' | 'EMPRESA' | 'PEDIDO' | 'ETIQUETAS' | 'CORTE') => {
+  const imprimirRelatorioGeral = async (tipoRelatorio: 'GERAL' | 'EMPRESA' | 'PEDIDO' | 'ETIQUETAS' | 'CORTE' | 'CORTE_80') => {
     if (selectedIds.length === 0) {
       alert(`Por favor, selecione ao menos um item da tabela para gerar o relatório de ${tipoRelatorio}.`);
       return;
     }
 
-    document.body.classList.remove('print-pedido', 'print-etiqueta', 'print-proposta', 'print-corte', 'print-geral', 'print-empresa');
+    document.body.classList.remove('print-pedido', 'print-etiqueta', 'print-proposta', 'print-corte', 'print-corte-80', 'print-geral', 'print-empresa');
 
     // Configura o modelo ativo e classe de impressão conforme o botão acionado (renderizado na tela de Consulta)
-    if (tipoRelatorio === 'CORTE') {
+    if (tipoRelatorio === 'CORTE_80') {
+      setActiveModel('corte-80');
+      setPrintMode('corte');
+      document.body.classList.add('print-corte-80');
+    } else if (tipoRelatorio === 'CORTE') {
       setActiveModel('corte');
       setPrintMode('corte');
       document.body.classList.add('print-corte');
@@ -1740,7 +1977,7 @@ export default function ReportsModule({
 
     // Aciona a caixa de impressão após breve delay para atualização da renderização
     const onAfterPrint = () => {
-      document.body.classList.remove('print-pedido', 'print-etiqueta', 'print-proposta', 'print-corte', 'print-geral', 'print-empresa');
+      document.body.classList.remove('print-pedido', 'print-etiqueta', 'print-proposta', 'print-corte', 'print-corte-80', 'print-geral', 'print-empresa');
       window.removeEventListener('afterprint', onAfterPrint);
     };
     window.addEventListener('afterprint', onAfterPrint);
@@ -3004,6 +3241,23 @@ export default function ReportsModule({
         </p>
       </div>
 
+      {/* ===================================================
+           PROPOSTA 6: MODELO DE ORDEM DE CORTE TÉRMICO 80MM (CUPOM)
+           =================================================== */}
+      <div
+        id="doc-corte-80"
+        className={`documento-modelo secao-corte-80mm bg-white text-black p-2 font-mono w-full max-w-[80mm] mx-auto ${
+          activeModel === 'corte-80' ? 'block' : 'hidden'
+        }`}
+      >
+        <OrdemCorte80mm
+          itens={displayQuote.items}
+          cliente={effectiveClientName}
+          numeroPedido={displayQuote.quoteNumber || displayQuote.id || '00124'}
+          data={displayQuote.date || new Date().toLocaleDateString('pt-BR')}
+        />
+      </div>
+
     </div>
     );
   };
@@ -3011,7 +3265,7 @@ export default function ReportsModule({
   return (
     <div id="screen-relatorios" className="space-y-6">
 
-      {/* Tamanho de página: A4 RETRATO para todos os modelos, exceto ETIQUETAS */}
+      {/* Tamanho de página: A4 RETRATO para todos os modelos, exceto ETIQUETAS e CORTE 80MM */}
       <style>{activeModel === 'etiqueta-80'
         ? `@page { size: auto; margin: 5mm; }
            @media print {
@@ -3023,10 +3277,17 @@ export default function ReportsModule({
                padding: 8px !important;
              }
            }`
+        : activeModel === 'corte-80'
+        ? `@page { size: 80mm auto; margin: 2mm; }
+           @media print {
+             html, body { width: 80mm !important; max-width: 80mm !important; margin: 0 !important; padding: 0 !important; background: #ffffff !important; color: #000000 !important; }
+             body.print-corte-80 .secao-corte-80mm { width: 72mm !important; max-width: 72mm !important; margin: 0 auto !important; padding: 1mm 0 !important; }
+             .bloco-item-corte { break-inside: avoid !important; page-break-inside: avoid !important; }
+           }`
         : `@page { size: A4 portrait; margin: 8mm; }
            @media print {
              html, body { width: 100%; height: 100%; margin: 0; padding: 0; }
-             .documento-modelo:not(.secao-etiqueta) { width: 100% !important; max-width: 100% !important; margin: 0 auto !important; box-shadow: none !important; border: none !important; border-top: none !important; }
+             .documento-modelo:not(.secao-etiqueta):not(.secao-corte-80mm) { width: 100% !important; max-width: 100% !important; margin: 0 auto !important; box-shadow: none !important; border: none !important; border-top: none !important; }
            }`}</style>
 
       {/* Regras de impressão de todos os modelos */}
@@ -3071,6 +3332,14 @@ export default function ReportsModule({
           body.print-corte #doc-corte { display: block !important; box-shadow: none !important; padding: 0 !important; }
           body.print-corte #doc-corte table { page-break-inside: auto; }
           body.print-corte #doc-corte tr { page-break-inside: avoid; }
+
+          body.print-corte-80 .btn-no-print,
+          body.print-corte-80 .filtros-bar,
+          body.print-corte-80 .tabela-container,
+          body.print-corte-80 .screen-header,
+          body.print-corte-80 .documento-modelo:not(.secao-corte-80mm) { display: none !important; }
+          body.print-corte-80 #doc-corte-80 { display: block !important; box-shadow: none !important; padding: 0 !important; width: 72mm !important; margin: 0 auto !important; }
+          body.print-corte-80 * { color: #000000 !important; border-color: #000000 !important; }
 
           body.print-pedido .btn-no-print,
           body.print-pedido .filtros-bar,
@@ -3218,7 +3487,7 @@ export default function ReportsModule({
           <div className="filtros-bar btn-no-print">
             
             {/* Botões de Impressão e Ações */}
-            <div className="botoes-impressao grid grid-cols-2 sm:grid-cols-4 md:grid-cols-8 gap-2.5 w-full">
+            <div className="botoes-impressao grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 xl:grid-cols-11 gap-2.5 w-full">
               <button 
                 type="button" 
                 className="btn-print w-full min-w-0 cursor-pointer bg-slate-800 hover:bg-slate-700 text-cyan-400 border border-slate-700 transition-all flex flex-col items-center justify-center disabled:opacity-60" 
@@ -3274,9 +3543,53 @@ export default function ReportsModule({
                 type="button" 
                 className="btn-print w-full min-w-0 cursor-pointer" 
                 onClick={() => imprimirRelatorioGeral('CORTE')}
-                title="Imprimir Ordem de Corte"
+                title="Imprimir Ordem de Corte (A4)"
               >
                 <span>✂️</span> CORTE
+              </button>
+              <button 
+                type="button" 
+                className="btn-print w-full min-w-0 cursor-pointer" 
+                onClick={() => imprimirRelatorioGeral('CORTE_80')}
+                title="Imprimir Ordem de Corte em Cupom Térmico (80mm)"
+              >
+                <span>🧾</span> CUPOM 80MM
+              </button>
+              <button 
+                type="button" 
+                className={`btn-print w-full min-w-0 cursor-pointer border transition-all ${
+                  selectedIds.length > 0
+                    ? 'bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-400 shadow-md shadow-emerald-600/30'
+                    : 'bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 border-emerald-600/50'
+                }`}
+                onClick={handleEmitirNfeTopBar}
+                disabled={isLoadingNfeQuote}
+                title={selectedIds.length > 0 ? "Emitir / Transmitir Nota Fiscal (NF-e) do pedido selecionado para a SEFAZ" : "Emitir NF-e (selecione um pedido na tabela)"}
+              >
+                <span className="flex items-center justify-center">
+                  {isLoadingNfeQuote ? (
+                    <Loader2 className="w-4 h-4 mb-0.5 animate-spin text-emerald-300" />
+                  ) : (
+                    <Send className="w-4 h-4 mb-0.5 text-emerald-300" />
+                  )}
+                </span>
+                EMITIR NF-E
+              </button>
+              <button 
+                type="button" 
+                className={`btn-print w-full min-w-0 cursor-pointer border transition-all ${
+                  selectedIds.length > 0
+                    ? 'bg-teal-600 hover:bg-teal-500 text-white border-teal-400 shadow-md shadow-teal-600/30'
+                    : 'bg-teal-950/40 hover:bg-teal-900/60 text-teal-300 border-teal-600/50'
+                }`}
+                onClick={handleVisualizarDanfeTopBar}
+                disabled={isLoadingNfeQuote}
+                title={selectedIds.length > 0 ? "Visualizar DANFE A4 oficial (Espelho da NF-e) do pedido selecionado" : "Visualizar DANFE A4 (selecione um pedido na tabela)"}
+              >
+                <span className="flex items-center justify-center">
+                  <FileCheck2 className="w-4 h-4 mb-0.5 text-teal-300" />
+                </span>
+                VER DANFE
               </button>
               <button
                 type="button"
@@ -3610,7 +3923,7 @@ export default function ReportsModule({
                       title="Selecionar todos os itens da página atual"
                     />
                   </th>
-                  <th style={{ minWidth: '190px', textAlign: 'center' }}>Ações</th>
+                  <th style={{ minWidth: '255px', textAlign: 'center' }}>Ações</th>
                   <th>Cotação</th>
                   <th style={{ minWidth: '135px', textAlign: 'center' }}>Situação</th>
                   <th>Data</th>
@@ -3729,6 +4042,40 @@ export default function ReportsModule({
                             </button>
                             <button
                               type="button"
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                await handleAbrirEmissaoNfe(item);
+                              }}
+                              className={`p-1.5 rounded-md transition-all cursor-pointer flex items-center justify-center shadow-xs ${
+                                item.status_nfe === 'Emitida'
+                                  ? 'bg-emerald-600/30 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-500/50'
+                                  : 'bg-emerald-600/20 hover:bg-emerald-600 text-emerald-400 hover:text-white border border-emerald-500/40'
+                              }`}
+                              title={
+                                item.status_nfe === 'Emitida'
+                                  ? `NF-e já Emitida (Nº ${item.nfe_numero || ''}). Clique para ver detalhes fiscais ou retransmitir`
+                                  : 'Emitir Nota Fiscal Eletrônica (NF-e) para a SEFAZ deste pedido'
+                              }
+                            >
+                              <Send className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                await handleAbrirVisualizacaoDanfe(item);
+                              }}
+                              className="p-1.5 bg-teal-600/20 hover:bg-teal-600 text-teal-300 hover:text-white border border-teal-500/40 rounded-md transition-all cursor-pointer flex items-center justify-center shadow-xs"
+                              title={
+                                item.status_nfe === 'Emitida'
+                                  ? `Visualizar DANFE Oficial da NF-e Nº ${item.nfe_numero || ''}`
+                                  : 'Visualizar Prévia da DANFE A4 (Espelho da Nota Fiscal)'
+                              }
+                            >
+                              <FileCheck2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 handleItemImageButtonClick(item);
@@ -3763,7 +4110,20 @@ export default function ReportsModule({
                             </button>
                           </div>
                         </td>
-                        <td><strong>{item.cotacao || '-'}</strong></td>
+                        <td>
+                          <div className="flex flex-col gap-0.5">
+                            <strong>{item.cotacao || '-'}</strong>
+                            {item.status_nfe === 'Emitida' && (
+                              <span 
+                                className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-950/70 border border-emerald-500/40 px-1.5 py-0.5 rounded-md w-fit"
+                                title={`NF-e autorizada pela SEFAZ. Chave: ${item.nfe_chave || 'Autorizada'}`}
+                              >
+                                <CheckCircle2 className="w-2.5 h-2.5 text-emerald-400" />
+                                NF-e {item.nfe_numero || 'OK'}
+                              </span>
+                            )}
+                          </div>
+                        </td>
                         <td style={{ textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
                           {/* Elemento Interativo de Alteração Rápida de Situação com fundo claro, texto azul e bolinha colorida */}
                           <div className="status-dropdown-wrapper relative inline-block text-left">
@@ -4266,6 +4626,18 @@ export default function ReportsModule({
                     >
                       ✂️ Corte
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveModel('corte-80');
+                        setPrintMode('corte');
+                      }}
+                      className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+                        activeModel === 'corte-80' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      🧾 Cupom 80mm
+                    </button>
                   </div>
                 </div>
 
@@ -4273,19 +4645,20 @@ export default function ReportsModule({
                   <button
                     type="button"
                     onClick={() => {
-                      const mapPrint: Record<PrintModelType, 'GERAL' | 'EMPRESA' | 'PEDIDO' | 'ETIQUETAS' | 'CORTE'> = {
+                      const mapPrint: Record<PrintModelType, 'GERAL' | 'EMPRESA' | 'PEDIDO' | 'ETIQUETAS' | 'CORTE' | 'CORTE_80'> = {
                         'A4-inteiro': 'GERAL',
                         'proposta-resumida': 'EMPRESA',
                         'A4-2vias': 'PEDIDO',
                         'etiqueta-80': 'ETIQUETAS',
-                        'corte': 'CORTE'
+                        'corte': 'CORTE',
+                        'corte-80': 'CORTE_80'
                       };
                       imprimirRelatorioGeral(mapPrint[activeModel] || 'GERAL');
                     }}
                     className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg transition-all shadow-md shadow-emerald-600/30 flex items-center gap-1.5 cursor-pointer"
                   >
                     <Printer className="w-3.5 h-3.5" />
-                    <span>Imprimir ({activeModel === 'A4-inteiro' ? 'Geral' : activeModel === 'proposta-resumida' ? 'Empresa' : activeModel === 'A4-2vias' ? 'Pedido' : activeModel === 'etiqueta-80' ? 'Etiquetas' : 'Corte'})</span>
+                    <span>Imprimir ({activeModel === 'A4-inteiro' ? 'Geral' : activeModel === 'proposta-resumida' ? 'Empresa' : activeModel === 'A4-2vias' ? 'Pedido' : activeModel === 'etiqueta-80' ? 'Etiquetas' : activeModel === 'corte-80' ? 'Cupom 80mm' : 'Corte'})</span>
                   </button>
                 </div>
               </div>
@@ -4312,6 +4685,39 @@ export default function ReportsModule({
               boletosExistentes={boletos}
               onBoletosAtualizados={(atualizados) => setBoletos(atualizados)}
               onFeedback={(tipo, mensagem) => setDeleteFeedback({ message: mensagem, type: tipo })}
+            />
+          )}
+
+          {/* ===================================================
+               MODAL DE EMISSÃO / TRANSMISSÃO FISCAL DA NF-E (SEFAZ)
+               =================================================== */}
+          {quoteForNfeModal && (
+            <EmissaoNfeModal
+              quote={quoteForNfeModal}
+              client={resolveClientForQuote(quoteForNfeModal)}
+              onSuccess={(updated) => {
+                handleNfeSuccess(updated);
+                setQuoteForNfeModal(null);
+              }}
+              onClose={() => setQuoteForNfeModal(null)}
+            />
+          )}
+
+          {/* ===================================================
+               MODAL DE VISUALIZAÇÃO DA DANFE A4 OFICIAL (NF-E)
+               =================================================== */}
+          {quoteForDanfeModal && (
+            <DanfeEspelhoA4Modal
+              isOpen={Boolean(quoteForDanfeModal)}
+              onClose={() => setQuoteForDanfeModal(null)}
+              quote={quoteForDanfeModal}
+              client={resolveClientForQuote(quoteForDanfeModal)}
+              isPrevia={quoteForDanfeModal.status_nfe !== 'Emitida'}
+              onTransmit={() => {
+                const q = quoteForDanfeModal;
+                setQuoteForDanfeModal(null);
+                if (q) setQuoteForNfeModal(q);
+              }}
             />
           )}
 

@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import CompanyHeader from './CompanyHeader';
 import { QuotePrintView } from './QuotePrintView';
 import EtiquetaDesenho from './EtiquetaDesenho';
+import OrdemCorte80mm from './OrdemCorte80mm';
 import { 
   formatCurrency, 
   formatSafeDate, 
@@ -12,7 +13,7 @@ import {
 } from '../utils/calculator';
 import { Quote } from '../types';
 
-export type TipoImpressaoConsulta = 'GERAL' | 'EMPRESA' | 'PEDIDO' | 'ETIQUETAS' | 'CORTE';
+export type TipoImpressaoConsulta = 'GERAL' | 'EMPRESA' | 'PEDIDO' | 'ETIQUETAS' | 'CORTE' | 'CORTE_80MM';
 
 // Normaliza o objeto de orçamento para garantir dados 100% completos e consistentes
 export function normalizeQuoteForPrint(rawQuote: any): any {
@@ -723,6 +724,23 @@ export function ConsultaPrintDocuments({ quote, tipo }: ConsultaPrintDocumentsPr
           www.usicortemetais.com.br
         </p>
       </div>
+
+      {/* ===================================================
+           6. ORDEM DE CORTE TÉRMICO 80MM (CUPOM TÉRMICO)
+           =================================================== */}
+      <div 
+        id="doc-corte-80mm" 
+        className={`documento-modelo secao-corte-80mm print-container bg-white text-black p-2 font-mono w-full max-w-[80mm] mx-auto overflow-x-hidden print:overflow-visible print:h-auto print:max-h-none print:min-h-0 ${
+          tipo === 'CORTE_80MM' ? 'block' : 'hidden'
+        }`}
+      >
+        <OrdemCorte80mm
+          itens={q.items}
+          cliente={effectiveClientName}
+          numeroPedido={q.quoteNumber || '00124'}
+          data={q.date || new Date().toLocaleDateString('pt-BR')}
+        />
+      </div>
     </div>
   );
 }
@@ -748,12 +766,15 @@ export function dispararImpressaoConsulta(
     'print-etiqueta', 
     'print-proposta', 
     'print-corte', 
+    'print-corte-80',
     'print-geral', 
     'print-empresa'
   );
 
   // Define a classe correta conforme o modelo
-  if (tipo === 'CORTE') {
+  if (tipo === 'CORTE_80MM') {
+    document.body.classList.add('print-corte-80');
+  } else if (tipo === 'CORTE') {
     document.body.classList.add('print-corte');
   } else if (tipo === 'GERAL') {
     document.body.classList.add('print-geral');
@@ -772,6 +793,7 @@ export function dispararImpressaoConsulta(
       'print-etiqueta', 
       'print-proposta', 
       'print-corte', 
+      'print-corte-80',
       'print-geral', 
       'print-empresa'
     );
@@ -807,4 +829,8 @@ export function imprimirEtiquetas(orcamentoSalvo: any, onAfterPrint?: () => void
 
 export function imprimirFichaCorte(orcamentoSalvo: any, onAfterPrint?: () => void) {
   dispararImpressaoConsulta(orcamentoSalvo, 'CORTE', onAfterPrint);
+}
+
+export function imprimirOrdemCorte80mm(orcamentoSalvo: any, onAfterPrint?: () => void) {
+  dispararImpressaoConsulta(orcamentoSalvo, 'CORTE_80MM', onAfterPrint);
 }

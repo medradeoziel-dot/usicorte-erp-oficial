@@ -180,7 +180,48 @@
   body.print-corte .secao-pedido { display: none !important; }
   body.print-corte .secao-proposta { display: none !important; }
   body.print-corte .secao-proposta-resumida { display: none !important; }
+  body.print-corte .secao-corte-80mm { display: none !important; }
   body.print-corte .secao-corte { display: block !important; }
+
+  /* Modo Corte Térmico 80mm (Cupom): */
+  body.print-corte-80 {
+    width: 80mm !important;
+    max-width: 80mm !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+  body.print-corte-80 #print-area,
+  body.print-corte-80 #container-impressao,
+  body.print-corte-80 #container-impressao-vendas,
+  body.print-corte-80 .secao-corte-80mm {
+    width: 72mm !important;
+    max-width: 72mm !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+    display: block !important;
+    visibility: visible !important;
+  }
+  body.print-corte-80 * {
+    color: #000000 !important;
+    border-color: #000000 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  body.print-corte-80 .secao-etiqueta { display: none !important; }
+  body.print-corte-80 .secao-pedido { display: none !important; }
+  body.print-corte-80 .secao-proposta { display: none !important; }
+  body.print-corte-80 .secao-proposta-resumida { display: none !important; }
+  body.print-corte-80 .secao-corte { display: none !important; }
+  body.print-corte-80 .secao-corte-80mm { display: block !important; visibility: visible !important; }
+
+  body.print-pedido .secao-corte-80mm { display: none !important; }
+  body.print-etiqueta .secao-corte-80mm { display: none !important; }
+  body.print-proposta .secao-corte-80mm,
+  body.print-geral .secao-corte-80mm { display: none !important; }
+  body.print-empresa .secao-corte-80mm { display: none !important; }
+  body.print-fechamento .secao-corte-80mm { display: none !important; }
 
   /* Modo Fechamento & Extrato de Cotações (Isolado) */
   body.print-fechamento .secao-etiqueta,

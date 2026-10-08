@@ -69,7 +69,8 @@ import {
   imprimirOrcamentoEmpresa,
   imprimirOrcamentoPedido,
   imprimirEtiquetas,
-  imprimirFichaCorte
+  imprimirFichaCorte,
+  imprimirOrdemCorte80mm
 } from './ConsultaPrintDocuments';
 import QuoteHistoryModal from './QuoteHistoryModal';
 import MaterialAutocomplete, { AutocompleteOption } from './MaterialAutocomplete';
@@ -517,6 +518,7 @@ export default function SalesModule({
           'print-etiqueta', 
           'print-proposta', 
           'print-corte', 
+          'print-corte-80',
           'print-geral', 
           'print-empresa'
         );
@@ -542,6 +544,7 @@ export default function SalesModule({
           'print-etiqueta', 
           'print-proposta', 
           'print-corte', 
+          'print-corte-80',
           'print-geral', 
           'print-empresa'
         );
@@ -4226,6 +4229,8 @@ export default function SalesModule({
               imprimirEtiquetas(quoteToPrint);
             } else if (tipo === 'CORTE') {
               imprimirFichaCorte(quoteToPrint);
+            } else if (tipo === 'CORTE_80MM') {
+              imprimirOrdemCorte80mm(quoteToPrint);
             }
 
             // Ativa a renderização do layout de impressão oficial idêntico à Consulta
