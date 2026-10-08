@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import CompanyHeader from './CompanyHeader';
 import { QuotePrintView } from './QuotePrintView';
 import EtiquetaDesenho from './EtiquetaDesenho';
-import OrdemCorte80mm from './OrdemCorte80mm';
+import OrdemCorte80mm, { imprimirCupom80mm, gerarHtmlCupom80mm } from './OrdemCorte80mm';
 import { 
   formatCurrency, 
   formatSafeDate, 
@@ -760,6 +760,13 @@ export function dispararImpressaoConsulta(
   const quoteNormalizado = normalizeQuoteForPrint(orcamento);
   if (!quoteNormalizado) return;
 
+  // Para o cupom de corte térmico 80mm, imprime em janela popup isolada
+  // evitando que o navegador assuma a página inteira A4 e encolha o cupom
+  if (tipo === 'CORTE_80MM') {
+    imprimirCupom80mm(quoteNormalizado, onAfterPrintCallback);
+    return;
+  }
+
   // Remove qualquer classe anterior de impressão
   document.body.classList.remove(
     'print-pedido', 
@@ -772,9 +779,7 @@ export function dispararImpressaoConsulta(
   );
 
   // Define a classe correta conforme o modelo
-  if (tipo === 'CORTE_80MM') {
-    document.body.classList.add('print-corte-80');
-  } else if (tipo === 'CORTE') {
+  if (tipo === 'CORTE') {
     document.body.classList.add('print-corte');
   } else if (tipo === 'GERAL') {
     document.body.classList.add('print-geral');
@@ -832,5 +837,9 @@ export function imprimirFichaCorte(orcamentoSalvo: any, onAfterPrint?: () => voi
 }
 
 export function imprimirOrdemCorte80mm(orcamentoSalvo: any, onAfterPrint?: () => void) {
-  dispararImpressaoConsulta(orcamentoSalvo, 'CORTE_80MM', onAfterPrint);
+  const norm = normalizeQuoteForPrint(orcamentoSalvo) || orcamentoSalvo;
+  imprimirCupom80mm(norm, onAfterPrint);
 }
+
+export const imprimirCupomCorte80mm = imprimirOrdemCorte80mm;
+export { imprimirCupom80mm, gerarHtmlCupom80mm };

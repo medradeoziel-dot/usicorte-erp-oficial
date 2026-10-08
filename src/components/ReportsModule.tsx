@@ -73,7 +73,7 @@ import {
 import BoletosGestaoModal from './BoletosGestaoModal';
 import EmissaoNfeModal from './EmissaoNfeModal';
 import DanfeEspelhoA4Modal from './DanfeEspelhoA4Modal';
-import OrdemCorte80mm from './OrdemCorte80mm';
+import OrdemCorte80mm, { imprimirCupom80mm } from './OrdemCorte80mm';
 import { 
   ContaReceberParcela,
   fetchBoletosDb,
@@ -1937,55 +1937,6 @@ export default function ReportsModule({
     }
   };
 
-  // ✅ Padronização de todos os botões de impressão da CONSULTA (GERAL, EMPRESA, PEDIDO, ETIQUETAS, CORTE)
-  // Utiliza EXCLUSIVAMENTE a cotação/itens selecionados na tabela da Consulta,
-  // 100% isolado do estado ou cache da primeira aba.
-  const imprimirRelatorioGeral = async (tipoRelatorio: 'GERAL' | 'EMPRESA' | 'PEDIDO' | 'ETIQUETAS' | 'CORTE' | 'CORTE_80') => {
-    if (selectedIds.length === 0) {
-      alert(`Por favor, selecione ao menos um item da tabela para gerar o relatório de ${tipoRelatorio}.`);
-      return;
-    }
-
-    document.body.classList.remove('print-pedido', 'print-etiqueta', 'print-proposta', 'print-corte', 'print-corte-80', 'print-geral', 'print-empresa');
-
-    // Configura o modelo ativo e classe de impressão conforme o botão acionado (renderizado na tela de Consulta)
-    if (tipoRelatorio === 'CORTE_80') {
-      setActiveModel('corte-80');
-      setPrintMode('corte');
-      document.body.classList.add('print-corte-80');
-    } else if (tipoRelatorio === 'CORTE') {
-      setActiveModel('corte');
-      setPrintMode('corte');
-      document.body.classList.add('print-corte');
-    } else if (tipoRelatorio === 'GERAL') {
-      setActiveModel('A4-inteiro');
-      setPrintMode('proposta');
-      document.body.classList.add('print-geral');
-    } else if (tipoRelatorio === 'EMPRESA') {
-      setActiveModel('proposta-resumida');
-      setPrintMode('proposta');
-      document.body.classList.add('print-empresa');
-    } else if (tipoRelatorio === 'PEDIDO') {
-      setActiveModel('A4-2vias');
-      setPrintMode('pedido');
-      document.body.classList.add('print-pedido');
-    } else if (tipoRelatorio === 'ETIQUETAS') {
-      setActiveModel('etiqueta-80');
-      setPrintMode('etiqueta');
-      document.body.classList.add('print-etiqueta');
-    }
-
-    // Aciona a caixa de impressão após breve delay para atualização da renderização
-    const onAfterPrint = () => {
-      document.body.classList.remove('print-pedido', 'print-etiqueta', 'print-proposta', 'print-corte', 'print-corte-80', 'print-geral', 'print-empresa');
-      window.removeEventListener('afterprint', onAfterPrint);
-    };
-    window.addEventListener('afterprint', onAfterPrint);
-
-    setTimeout(() => {
-      window.print();
-    }, 250);
-  };
 
   // Sync client name if quote updates
   useEffect(() => {
@@ -2416,6 +2367,68 @@ export default function ReportsModule({
   const discountVal = displayQuote.discount || 0;
   const shippingVal = displayQuote.shipping || 0;
   const grandTotal = displayQuote.grandTotal || (subtotalValue - discountVal + shippingVal);
+
+  const effectiveClientName = activeTab === 'consulta'
+    ? (displayQuote.clientName || 'CLIENTE BALCÃO')
+    : (selectedClientName || displayQuote.clientName || 'CLIENTE BALCÃO');
+
+  // ✅ Padronização de todos os botões de impressão da CONSULTA (GERAL, EMPRESA, PEDIDO, ETIQUETAS, CORTE, CORTE_80)
+  // Utiliza EXCLUSIVAMENTE a cotação/itens selecionados na tabela da Consulta,
+  // 100% isolado do estado ou cache da primeira aba.
+  const imprimirRelatorioGeral = async (tipoRelatorio: 'GERAL' | 'EMPRESA' | 'PEDIDO' | 'ETIQUETAS' | 'CORTE' | 'CORTE_80') => {
+    if (selectedIds.length === 0) {
+      alert(`Por favor, selecione ao menos um item da tabela para gerar o relatório de ${tipoRelatorio}.`);
+      return;
+    }
+
+    // Para o modelo CORTE 80MM, dispara em janela popup isolada para a impressora térmica POS-80C
+    if (tipoRelatorio === 'CORTE_80') {
+      setActiveModel('corte-80');
+      setPrintMode('corte');
+      imprimirCupom80mm({
+        itens: displayQuote.items,
+        cliente: effectiveClientName,
+        numeroPedido: displayQuote.quoteNumber || displayQuote.id || '00124',
+        data: displayQuote.date || new Date().toLocaleDateString('pt-BR')
+      });
+      return;
+    }
+
+    document.body.classList.remove('print-pedido', 'print-etiqueta', 'print-proposta', 'print-corte', 'print-corte-80', 'print-geral', 'print-empresa');
+
+    if (tipoRelatorio === 'CORTE') {
+      setActiveModel('corte');
+      setPrintMode('corte');
+      document.body.classList.add('print-corte');
+    } else if (tipoRelatorio === 'GERAL') {
+      setActiveModel('A4-inteiro');
+      setPrintMode('proposta');
+      document.body.classList.add('print-geral');
+    } else if (tipoRelatorio === 'EMPRESA') {
+      setActiveModel('proposta-resumida');
+      setPrintMode('proposta');
+      document.body.classList.add('print-empresa');
+    } else if (tipoRelatorio === 'PEDIDO') {
+      setActiveModel('A4-2vias');
+      setPrintMode('pedido');
+      document.body.classList.add('print-pedido');
+    } else if (tipoRelatorio === 'ETIQUETAS') {
+      setActiveModel('etiqueta-80');
+      setPrintMode('etiqueta');
+      document.body.classList.add('print-etiqueta');
+    }
+
+    // Aciona a caixa de impressão após breve delay para atualização da renderização
+    const onAfterPrint = () => {
+      document.body.classList.remove('print-pedido', 'print-etiqueta', 'print-proposta', 'print-corte', 'print-corte-80', 'print-geral', 'print-empresa');
+      window.removeEventListener('afterprint', onAfterPrint);
+    };
+    window.addEventListener('afterprint', onAfterPrint);
+
+    setTimeout(() => {
+      window.print();
+    }, 250);
+  };
 
   const getItemDateReports = (item: any) => {
     const rawDate =

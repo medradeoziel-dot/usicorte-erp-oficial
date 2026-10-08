@@ -13,10 +13,20 @@ export interface OrdemCorte80mmProps {
   className?: string;
 }
 
+function escapeHtml(str: any): string {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 /**
  * Identifica a forma geométrica / perfil do item para chão de fábrica
  */
-function resolverFormaItem(item: any): string {
+export function resolverFormaItem(item: any): string {
   if (item?.forma) return String(item.forma).toUpperCase();
 
   const geom = String(item?.geometryType || item?.profileType || '').toLowerCase();
@@ -44,6 +54,321 @@ function resolverFormaItem(item: any): string {
 
   return 'RETÂNGULO';
 }
+
+/**
+ * Gera o código HTML completo da Ordem de Corte 80mm
+ * Ocupando 100% da largura útil da bobina de 80mm com alto contraste
+ */
+export function gerarHtmlCupom80mm(dadosOrdem: any): string {
+  const listaItens = dadosOrdem?.itens || dadosOrdem?.items || [];
+  const nomeCliente = (
+    dadosOrdem?.cliente?.nome ||
+    dadosOrdem?.cliente ||
+    dadosOrdem?.clientName ||
+    dadosOrdem?.client?.name ||
+    dadosOrdem?.empresa ||
+    'CLIENTE BALCÃO'
+  ).toString().trim().toUpperCase();
+
+  const numCotacao = (
+    dadosOrdem?.quoteNumber ||
+    dadosOrdem?.numeroPedido ||
+    dadosOrdem?.id ||
+    dadosOrdem?.numero ||
+    'S/N'
+  ).toString().trim();
+
+  const dataRef = dadosOrdem?.data || dadosOrdem?.date || formatSafeDate(new Date());
+  const agora = new Date();
+  const horaFormatada = agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  const dataHoraImpressao = `${dataRef} às ${horaFormatada}`;
+
+  const totalTiposItens = listaItens.length;
+  const totalPecas = listaItens.reduce((acc: number, it: any) => acc + (Number(it?.qtd ?? it?.quantity) || 1), 0);
+
+  const itensHtml = listaItens.length === 0
+    ? `
+      <div style="width: 100%; padding: 12px; text-align: center; border: 2px solid #000; font-weight: bold; font-size: 13px; box-sizing: border-box;">
+        NENHUM ITEM PARA CORTE
+      </div>
+    `
+    : listaItens.map((item: any, idx: number) => {
+        const numItem = idx + 1;
+        const qtd = Number(item?.qtd ?? item?.quantity) || 1;
+        const material = item?.material || item?.constanteNome || item?.constantName || item?.produto || 'MATERIAL';
+        const medidas = formatarMedidasLimpa(item) || item?.medida || item?.dimensions || item?.medidas || '—';
+        const forma = resolverFormaItem(item);
+        const obsEspecifica = getObservacaoEspecificaItem(item);
+        const obsCod = obsEspecifica || item?.observacao || item?.notes || item?.descricao || item?.description || '-';
+
+        return `
+          <div class="card-item">
+            <div class="flex-between" style="border-bottom: 2px solid #000; padding-bottom: 4px; margin-bottom: 6px; font-weight: 900;">
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <span style="display: inline-block; width: 14px; height: 14px; border: 2px solid #000; background: #fff; flex-shrink: 0;"></span>
+                <span style="font-size: 13px; font-weight: 900;">CORTADO</span>
+                <span style="margin: 0 2px;">|</span>
+                <span style="font-size: 14px; font-weight: 900;">ITEM #${numItem}</span>
+              </div>
+              <span style="font-size: 14px; font-weight: 900; text-align: right; text-transform: uppercase;">QTD: ${qtd} PÇS</span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 4px; width: 100%;">
+              <div class="row-field">
+                <span class="field-label">MATERIAL:</span>
+                <span class="field-value">${escapeHtml(material)}</span>
+              </div>
+              <div class="row-field">
+                <span class="field-label">MEDIDAS:</span>
+                <span class="field-value" style="font-family: monospace;">${escapeHtml(medidas)}</span>
+              </div>
+              <div class="row-field">
+                <span class="field-label">FORMA:</span>
+                <span class="field-value">${escapeHtml(forma)}</span>
+              </div>
+              <div class="row-field">
+                <span class="field-label">OBS/COD:</span>
+                <span class="field-value">${escapeHtml(obsCod)}</span>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+  return `
+    <div style="width: 100%; max-width: 80mm; margin: 0 auto; box-sizing: border-box; text-align: left;">
+      <!-- CABEÇALHO COMPACTO -->
+      <header style="text-align: center; width: 100%; margin-bottom: 4px;">
+        <h1 style="font-size: 18px; font-weight: 900; margin: 0; padding: 0; text-align: center; text-transform: uppercase; letter-spacing: 0.5px;">
+          === ORDEM DE CORTE ===
+        </h1>
+        <div style="font-size: 14px; font-weight: 900; margin-top: 3px; text-transform: uppercase; letter-spacing: 1px;">
+          USICORTE METAIS
+        </div>
+
+        <div class="hr-line"></div>
+
+        <div style="width: 100%; display: flex; flex-direction: column; gap: 4px; text-align: left;">
+          <div class="flex-between" style="align-items: flex-start;">
+            <span style="font-weight: bold; min-width: 80px; font-size: 13px;">CLIENTE:</span>
+            <span style="font-weight: 900; font-size: 14px; text-align: right; flex: 1; text-transform: uppercase; word-break: break-word;">${escapeHtml(nomeCliente)}</span>
+          </div>
+          <div class="flex-between" style="align-items: center;">
+            <span style="font-weight: bold; min-width: 80px; font-size: 13px;">COTAÇÃO:</span>
+            <span style="font-weight: 900; font-size: 14px; text-align: right; flex: 1; font-family: monospace;">#${escapeHtml(numCotacao)}</span>
+          </div>
+          <div class="flex-between" style="align-items: center;">
+            <span style="font-weight: bold; min-width: 80px; font-size: 13px;">DATA/HORA:</span>
+            <span style="font-weight: 900; font-size: 13px; text-align: right; flex: 1;">${escapeHtml(dataHoraImpressao)}</span>
+          </div>
+        </div>
+
+        <div class="hr-line"></div>
+      </header>
+
+      <!-- LISTA DE ITENS -->
+      <main style="width: 100%; margin: 4px 0;">
+        ${itensHtml}
+      </main>
+
+      <!-- RODAPÉ DO CUPOM -->
+      <footer style="width: 100%; margin-top: 4px; page-break-inside: avoid; break-inside: avoid;">
+        <div class="hr-line"></div>
+
+        <div class="flex-between" style="font-size: 14px; font-weight: 900; padding: 0 2px; text-transform: uppercase;">
+          <span>ITENS: ${totalTiposItens}</span>
+          <span>TOTAL: ${totalPecas} ${totalPecas === 1 ? 'PEÇA' : 'PEÇAS'}</span>
+        </div>
+
+        <div style="width: 100%; margin-top: 10px; margin-bottom: 12px;">
+          <div style="font-size: 13px; font-weight: 900; text-transform: uppercase; margin-bottom: 4px;">
+            VISTO DO OPERADOR:
+          </div>
+          <div style="border-bottom: 2px solid #000; width: 100%; margin-top: 22px; margin-bottom: 4px;"></div>
+        </div>
+
+        <div style="text-align: center; font-size: 16px; font-weight: 900; text-transform: uppercase; letter-spacing: 1.5px; margin-top: 10px;">
+          USICORTE METAIS
+        </div>
+        <div style="text-align: center; font-size: 11px; font-weight: 900; text-transform: uppercase; margin-top: 2px;">
+          CORTE CNC & USINAGEM
+        </div>
+      </footer>
+    </div>
+  `;
+}
+
+/**
+ * Função de Impressão em Janela Popup Isolada (para POS-80C e bobinas de 80mm)
+ * Garante que o navegador imprima estritamente no rolo térmico sem assumir folha A4
+ */
+export function imprimirCupom80mm(dadosOrdem: any, onAfterPrint?: () => void): void {
+  const janela = window.open('', '_blank', 'width=400,height=600');
+  const corpoHtml = gerarHtmlCupom80mm(dadosOrdem);
+  const numCotacao = dadosOrdem?.quoteNumber || dadosOrdem?.numeroPedido || dadosOrdem?.id || '';
+
+  const docHtml = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>Ordem de Corte 80mm${numCotacao ? ` - #${numCotacao}` : ''}</title>
+        <style>
+          @page {
+            size: 80mm auto;
+            margin: 0mm;
+          }
+          html, body {
+            width: 80mm;
+            margin: 0;
+            padding: 4px;
+            font-family: monospace, sans-serif;
+            color: #000;
+            background: #fff;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+          * {
+            box-sizing: border-box;
+            color: #000 !important;
+            border-color: #000 !important;
+          }
+          .hr-line {
+            border-bottom: 2px dashed #000;
+            margin: 8px 0;
+            width: 100%;
+          }
+          .card-item {
+            border: 2px solid #000;
+            padding: 6px;
+            margin-bottom: 8px;
+            width: 100%;
+            page-break-inside: avoid;
+            break-inside: avoid;
+            background: #fff;
+            box-sizing: border-box;
+          }
+          .flex-between {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            width: 100%;
+          }
+          .row-field {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            width: 100%;
+            padding: 1px 0;
+            line-height: 1.3;
+          }
+          .field-label {
+            font-weight: bold;
+            min-width: 90px;
+            flex-shrink: 0;
+            font-size: 13px;
+          }
+          .field-value {
+            font-weight: 900;
+            text-align: right;
+            flex: 1;
+            font-size: 14px;
+            word-break: break-word;
+            text-transform: uppercase;
+          }
+          @media print {
+            @page {
+              size: 80mm auto;
+              margin: 0mm;
+            }
+            body {
+              width: 80mm !important;
+              max-width: 80mm !important;
+              margin: 0 !important;
+              padding: 3mm !important;
+            }
+            .card-item {
+              page-break-inside: avoid !important;
+              break-inside: avoid !important;
+            }
+            * {
+              color: #000000 !important;
+              border-color: #000000 !important;
+            }
+          }
+        </style>
+      </head>
+      <body>
+        ${corpoHtml}
+        <script>
+          function dispararImpressao() {
+            window.focus();
+            window.print();
+            setTimeout(function() {
+              try { window.close(); } catch(e) {}
+            }, 600);
+          }
+          if (document.readyState === 'complete') {
+            setTimeout(dispararImpressao, 150);
+          } else {
+            window.onload = function() {
+              setTimeout(dispararImpressao, 100);
+            };
+          }
+        </script>
+      </body>
+    </html>
+  `;
+
+  if (janela) {
+    janela.document.open();
+    janela.document.write(docHtml);
+    janela.document.close();
+    if (onAfterPrint) {
+      janela.onafterprint = onAfterPrint;
+    }
+    return;
+  }
+
+  // Fallback seguro caso o navegador bloqueie popups:
+  const iframe = document.createElement('iframe');
+  iframe.style.position = 'fixed';
+  iframe.style.top = '0';
+  iframe.style.left = '0';
+  iframe.style.width = '80mm';
+  iframe.style.height = '100%';
+  iframe.style.border = 'none';
+  iframe.style.zIndex = '-9999';
+  iframe.style.visibility = 'hidden';
+  document.body.appendChild(iframe);
+
+  const doc = iframe.contentWindow?.document || iframe.contentDocument;
+  if (doc) {
+    doc.open();
+    doc.write(docHtml);
+    doc.close();
+
+    setTimeout(() => {
+      try {
+        iframe.contentWindow?.focus();
+        iframe.contentWindow?.print();
+      } catch (err) {
+        console.error('Erro ao disparar impressão via iframe:', err);
+      } finally {
+        setTimeout(() => {
+          if (iframe.parentNode) {
+            iframe.parentNode.removeChild(iframe);
+          }
+          if (onAfterPrint) onAfterPrint();
+        }, 1500);
+      }
+    }, 300);
+  }
+}
+
+/**
+ * Alias para manter compatibilidade com nomes anteriores
+ */
+export const imprimirOrdemCorte80mm = imprimirCupom80mm;
 
 export default function OrdemCorte80mm({
   itens,
@@ -134,6 +459,26 @@ export default function OrdemCorte80mm({
           }
         }
       `}</style>
+
+      {/* Botão de Impressão Direta em Janela Isolada (Visível apenas em tela / Oculto na impressão) */}
+      <div className="w-full mb-3 print:hidden no-print">
+        <button
+          type="button"
+          onClick={() =>
+            imprimirCupom80mm({
+              itens: listaItens,
+              cliente: nomeCliente,
+              numeroPedido: numCotacao,
+              data: dataRef,
+            })
+          }
+          className="w-full py-2.5 px-3 bg-black hover:bg-neutral-800 text-white font-mono font-bold text-xs rounded uppercase tracking-wider flex items-center justify-center gap-2 shadow-md cursor-pointer transition-all border border-black"
+          title="Abrir e imprimir na janela popup isolada de 80mm"
+        >
+          <span>🖨️</span>
+          <span>IMPRIMIR CUPOM 80MM (POPUP ISOLADO)</span>
+        </button>
+      </div>
 
       {/* =========================================================================
           1. CABEÇALHO COMPACTO (CUPOM TÉRMICO 80MM)

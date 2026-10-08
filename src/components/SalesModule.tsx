@@ -511,7 +511,7 @@ export default function SalesModule({
 
   // Efeito responsável por sincronizar a renderização completa do documento e disparar window.print()
   useEffect(() => {
-    if (activeDirectPrint) {
+    if (activeDirectPrint && activeDirectPrint.tipo !== 'CORTE_80MM') {
       const handleAfterPrint = () => {
         document.body.classList.remove(
           'print-pedido', 
@@ -4219,7 +4219,16 @@ export default function SalesModule({
             }
 
             // Invocação nominal das funções de impressão conforme fluxo técnico:
-            if (tipo === 'GERAL') {
+            if (tipo === 'CORTE_80MM') {
+              // Cupom térmico 80mm abre em janela popup isolada (sem disparar window.print() na página principal)
+              imprimirOrdemCorte80mm(quoteToPrint, () => {
+                if (handleAdvanceToNextQuoteRef.current) {
+                  handleAdvanceToNextQuoteRef.current();
+                }
+              });
+              setShowPrintOptionsModal(false);
+              return;
+            } else if (tipo === 'GERAL') {
               imprimirOrcamentoGeral(quoteToPrint);
             } else if (tipo === 'EMPRESA') {
               imprimirOrcamentoEmpresa(quoteToPrint);
@@ -4229,8 +4238,6 @@ export default function SalesModule({
               imprimirEtiquetas(quoteToPrint);
             } else if (tipo === 'CORTE') {
               imprimirFichaCorte(quoteToPrint);
-            } else if (tipo === 'CORTE_80MM') {
-              imprimirOrdemCorte80mm(quoteToPrint);
             }
 
             // Ativa a renderização do layout de impressão oficial idêntico à Consulta
