@@ -237,6 +237,11 @@ export interface MaterialProfile {
   k: number;
   defaultPriceKg: number;
   description: string;
+  ncm?: string;
+  cfop_interno?: string;
+  cfop_externo?: string;
+  unidade_medida?: string;
+  csosn?: string;
 }
 
 export interface TabelaConstanteItem {
@@ -245,6 +250,11 @@ export interface TabelaConstanteItem {
   precoKg: number;
   tipo: 'chapa' | 'macico' | 'bucha';
   descricao?: string;
+  ncm?: string;
+  cfop_interno?: string;
+  cfop_externo?: string;
+  unidade_medida?: string;
+  csosn?: string;
 }
 
 // Tabela canônica oficial de Materiais / Constantes e Preços/Kg

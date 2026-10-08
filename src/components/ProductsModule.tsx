@@ -24,7 +24,8 @@ import {
   Loader2,
   Sparkles,
   Layers,
-  CheckCircle2
+  CheckCircle2,
+  FileText
 } from 'lucide-react';
 
 interface ProductsModuleProps {
@@ -46,12 +47,22 @@ export default function ProductsModule({ onSelectProductForQuote }: ProductsModu
     tipo: TipoGeometriaExtensa;
     constante: string;
     preco_base: string;
+    ncm: string;
+    cfop_interno: string;
+    cfop_externo: string;
+    unidade_medida: string;
+    csosn: string;
   }>({
     nome: '',
     descricao: '',
     tipo: 'Redondo / Maciço',
     constante: '0.0062',
-    preco_base: '45,00'
+    preco_base: '45,00',
+    ncm: '72085200',
+    cfop_interno: '5102',
+    cfop_externo: '6102',
+    unidade_medida: 'PC',
+    csosn: '102 - Sem permissão de crédito'
   });
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -77,7 +88,12 @@ export default function ProductsModule({ onSelectProductForQuote }: ProductsModu
       descricao: '',
       tipo: 'Redondo / Maciço',
       constante: '0.0062',
-      preco_base: '45,00'
+      preco_base: '45,00',
+      ncm: '72085200',
+      cfop_interno: '5102',
+      cfop_externo: '6102',
+      unidade_medida: 'PC',
+      csosn: '102 - Sem permissão de crédito'
     });
     setFormError(null);
     setIsModalOpen(true);
@@ -90,7 +106,12 @@ export default function ProductsModule({ onSelectProductForQuote }: ProductsModu
       descricao: mat.descricao || '',
       tipo: mat.tipoExtenso,
       constante: String(mat.k),
-      preco_base: mat.precoKg.toFixed(2).replace('.', ',')
+      preco_base: mat.precoKg.toFixed(2).replace('.', ','),
+      ncm: mat.ncm || '72085200',
+      cfop_interno: mat.cfop_interno || '5102',
+      cfop_externo: mat.cfop_externo || '6102',
+      unidade_medida: mat.unidade_medida || 'PC',
+      csosn: mat.csosn || '102 - Sem permissão de crédito'
     });
     setFormError(null);
     setIsModalOpen(true);
@@ -152,7 +173,12 @@ export default function ProductsModule({ onSelectProductForQuote }: ProductsModu
           descricao: formData.descricao,
           tipo: formData.tipo,
           constante: kNum,
-          preco_base: precoNum
+          preco_base: precoNum,
+          ncm: formData.ncm,
+          cfop_interno: formData.cfop_interno,
+          cfop_externo: formData.cfop_externo,
+          unidade_medida: formData.unidade_medida,
+          csosn: formData.csosn
         });
 
         if (res.error) {
@@ -168,7 +194,12 @@ export default function ProductsModule({ onSelectProductForQuote }: ProductsModu
           descricao: formData.descricao,
           tipo: formData.tipo,
           constante: kNum,
-          preco_base: precoNum
+          preco_base: precoNum,
+          ncm: formData.ncm,
+          cfop_interno: formData.cfop_interno,
+          cfop_externo: formData.cfop_externo,
+          unidade_medida: formData.unidade_medida,
+          csosn: formData.csosn
         });
 
         if (res.error) {
@@ -215,7 +246,9 @@ export default function ProductsModule({ onSelectProductForQuote }: ProductsModu
       item.tipo.toLowerCase().includes(q) ||
       item.tipoExtenso.toLowerCase().includes(q) ||
       item.k.toString().includes(q) ||
-      item.precoKg.toString().includes(q);
+      item.precoKg.toString().includes(q) ||
+      (item.ncm && item.ncm.toLowerCase().includes(q)) ||
+      (item.unidade_medida && item.unidade_medida.toLowerCase().includes(q));
 
     const matchesCategory = categoryFilter === 'ALL' || item.tipo === categoryFilter;
 
@@ -411,6 +444,8 @@ export default function ProductsModule({ onSelectProductForQuote }: ProductsModu
                 <th className="py-3 px-4">Nome do Material</th>
                 <th className="py-3 px-4">Descrição</th>
                 <th className="py-3 px-4">Tipo / Geometria</th>
+                <th className="py-3 px-3 text-center" title="Nomenclatura Comum do Mercosul">NCM</th>
+                <th className="py-3 px-2 text-center" title="Unidade Comercial">UN</th>
                 <th className="py-3 px-4 text-center">Constante Metalúrgica (k)</th>
                 <th className="py-3 px-4 text-right">Preço Base (R$/Kg)</th>
                 <th className="py-3 px-4">Fórmula Teórica de Peso</th>
@@ -420,7 +455,7 @@ export default function ProductsModule({ onSelectProductForQuote }: ProductsModu
             <tbody className="divide-y divide-slate-700/50">
               {filteredMaterials.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-12 text-center text-slate-400">
+                  <td colSpan={10} className="py-12 text-center text-slate-400">
                     {loading ? (
                       <div className="flex flex-col items-center justify-center gap-2">
                         <Loader2 className="w-6 h-6 animate-spin text-blue-400" />
@@ -458,6 +493,14 @@ export default function ProductsModule({ onSelectProductForQuote }: ProductsModu
                     </td>
                     <td className="py-3 px-4">
                       {getGeometryBadge(item.tipo)}
+                    </td>
+                    <td className="py-3 px-3 text-center">
+                      <span className="font-mono text-[11px] font-semibold text-slate-300 bg-slate-900/80 px-2 py-0.5 rounded border border-slate-700/80">
+                        {item.ncm || '72085200'}
+                      </span>
+                    </td>
+                    <td className="py-3 px-2 text-center font-mono text-xs font-bold text-blue-400">
+                      {item.unidade_medida || 'PC'}
                     </td>
                     <td className="py-3 px-4 text-center font-mono font-bold text-amber-300 bg-slate-900/30 rounded">
                       {item.k}
@@ -682,6 +725,117 @@ export default function ProductsModule({ onSelectProductForQuote }: ProductsModu
                   {formData.tipo === 'Chapa / Placa' && `Esp (mm) × Larg (mm) × Comp (mm) × ${formData.constante || '0'}`}
                   {formData.tipo === 'Bucha / Tubo' && `(ØExt² - ØInt²) × Comp (mm) × ${formData.constante || '0'}`}
                 </span>
+              </div>
+
+              {/* Informações Fiscais & Tributárias (NF-e) */}
+              <div className="pt-4 border-t border-slate-700/80 space-y-3">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 rounded-lg bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
+                    <FileText className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-200">
+                      Informações Fiscais & Tributárias (NF-e)
+                    </h4>
+                    <p className="text-[10px] text-slate-400">
+                      Parâmetros tributários transmitidos à SEFAZ na emissão da Nota Fiscal
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {/* 1. NCM */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                      NCM <span className="text-rose-400">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="72085200"
+                      value={formData.ncm}
+                      onChange={(e) => setFormData(prev => ({ ...prev, ncm: e.target.value.replace(/\D/g, '') }))}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono font-bold text-slate-100 placeholder:text-slate-500 focus:outline-hidden focus:border-indigo-500"
+                    />
+                    <span className="text-[9px] text-slate-500 mt-0.5 block">8 dígitos (Padrão: 72085200)</span>
+                  </div>
+
+                  {/* 2. CFOP Interno/SP */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                      CFOP Interno / SP <span className="text-rose-400">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="5102"
+                      value={formData.cfop_interno}
+                      onChange={(e) => setFormData(prev => ({ ...prev, cfop_interno: e.target.value.replace(/\D/g, '') }))}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono font-bold text-slate-100 placeholder:text-slate-500 focus:outline-hidden focus:border-indigo-500"
+                    />
+                    <span className="text-[9px] text-slate-500 mt-0.5 block">Vendas SP (Padrão: 5102)</span>
+                  </div>
+
+                  {/* 3. CFOP Interestadual */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                      CFOP Interestadual <span className="text-rose-400">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="6102"
+                      value={formData.cfop_externo}
+                      onChange={(e) => setFormData(prev => ({ ...prev, cfop_externo: e.target.value.replace(/\D/g, '') }))}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono font-bold text-slate-100 placeholder:text-slate-500 focus:outline-hidden focus:border-indigo-500"
+                    />
+                    <span className="text-[9px] text-slate-500 mt-0.5 block">Outros estados (Padrão: 6102)</span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {/* 4. Unidade Comercial */}
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                      Unidade Comercial <span className="text-rose-400">*</span>
+                    </label>
+                    <select
+                      value={formData.unidade_medida}
+                      onChange={(e) => setFormData(prev => ({ ...prev, unidade_medida: e.target.value }))}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs font-bold text-slate-100 focus:outline-hidden focus:border-indigo-500 cursor-pointer"
+                    >
+                      <option value="PC">PC (Peça)</option>
+                      <option value="KG">KG (Quilograma)</option>
+                      <option value="M">M (Metro)</option>
+                      <option value="M2">M2 (Metro Quadrado)</option>
+                      <option value="UN">UN (Unidade)</option>
+                    </select>
+                    <span className="text-[9px] text-slate-500 mt-0.5 block">Padrão: PC</span>
+                  </div>
+
+                  {/* 5. CSOSN */}
+                  <div className="sm:col-span-2">
+                    <label className="block text-[11px] font-bold text-slate-300 mb-1">
+                      CSOSN (Simples Nacional) <span className="text-rose-400">*</span>
+                    </label>
+                    <select
+                      value={formData.csosn}
+                      onChange={(e) => setFormData(prev => ({ ...prev, csosn: e.target.value }))}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs font-medium text-slate-100 focus:outline-hidden focus:border-indigo-500 cursor-pointer"
+                    >
+                      <option value="101 - Com permissão de crédito">101 - Tributada pelo Simples Nacional com permissão de crédito</option>
+                      <option value="102 - Sem permissão de crédito">102 - Sem permissão de crédito</option>
+                      <option value="103 - Isenção do ICMS no Simples Nacional">103 - Isenção do ICMS no Simples Nacional</option>
+                      <option value="201 - Com permissão de crédito e cobrança por ST">201 - Com permissão de crédito e ST</option>
+                      <option value="202 - Sem permissão de crédito e cobrança por ST">202 - Sem permissão de crédito e ST</option>
+                      <option value="300 - Imune">300 - Imune</option>
+                      <option value="400 - Não tributada pelo Simples Nacional">400 - Não tributada pelo Simples Nacional</option>
+                      <option value="500 - ICMS cobrado anteriormente por ST">500 - ICMS cobrado anteriormente por ST</option>
+                      <option value="900 - Outros">900 - Outros</option>
+                    </select>
+                    <span className="text-[9px] text-slate-500 mt-0.5 block">Padrão: 102 - Sem permissão de crédito</span>
+                  </div>
+                </div>
               </div>
 
               {/* Modal Buttons */}

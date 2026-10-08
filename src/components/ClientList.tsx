@@ -34,11 +34,13 @@ export default function ClientList({
     const contact = (c.contactPerson || c.contato || '').toLowerCase();
     const email = (c.email || '').toLowerCase();
     const phone = (c.phone || c.telefone || '').replace(/\D/g, '');
+    const ie = (c.inscricao_estadual || c.inscricaoEstadual || c.ie || '').toLowerCase();
 
     return (
       name.includes(term) ||
       fantasy.includes(term) ||
       doc.includes(term) ||
+      ie.includes(term) ||
       city.includes(term) ||
       state.includes(term) ||
       contact.includes(term) ||
@@ -202,9 +204,25 @@ export default function ClientList({
 
                 {/* Document and location footer */}
                 <div className="flex items-center justify-between text-[11px] text-slate-500 pt-1.5 border-t border-slate-200/40 font-mono mt-0.5">
-                  <span>
-                    {clientType === 'CNPJ' ? formatCNPJ(clientDoc) : formatCPF(clientDoc)}
-                  </span>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span>
+                      {clientType === 'CNPJ' ? formatCNPJ(clientDoc) : formatCPF(clientDoc)}
+                    </span>
+                    {(client.inscricao_estadual || client.inscricaoEstadual) && (
+                      <span className="text-[9px] text-indigo-700 bg-indigo-50/80 px-1 py-0.2 rounded border border-indigo-100 font-sans" title="Inscrição Estadual">
+                        IE: {client.inscricao_estadual || client.inscricaoEstadual}
+                      </span>
+                    )}
+                    {(client.indicador_ie || (client as any).indicadorIe) && (
+                      <span className="text-[9px] text-slate-600 bg-slate-100/90 px-1 py-0.2 rounded border border-slate-200 font-sans" title="Indicador de IE (SEFAZ)">
+                        {String(client.indicador_ie || (client as any).indicadorIe) === '1' 
+                          ? 'Contribuinte' 
+                          : String(client.indicador_ie || (client as any).indicadorIe) === '2' 
+                            ? 'Isento' 
+                            : 'Não Contribuinte'}
+                      </span>
+                    )}
+                  </div>
                   {(clientCity || clientState) && (
                     <span className="text-slate-400 text-[10px] uppercase font-sans">
                       {clientCity}{clientCity && clientState ? ', ' : ''}{clientState}

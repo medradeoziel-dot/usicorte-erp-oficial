@@ -15,6 +15,12 @@ export interface Client {
   email: string; // E-mail
   enabled: boolean; // Habilitado
   registrationDate: string; // Data de Cadastro (YYYY-MM-DD)
+  // Campos Fiscais (NF-e)
+  inscricaoEstadual?: string;
+  inscricao_estadual?: string;
+  indicadorIe?: string;
+  indicador_ie?: string;
+  ie?: string;
   // Aliases opcionais em português para interoperabilidade direta com o Supabase
   tipo?: 'CNPJ' | 'CPF' | string;
   documento?: string;
@@ -82,6 +88,14 @@ export interface QuoteItem {
   fotoDesenho?: string;
   desenhoUrl?: string;
   desenho_url?: string;
+  // Informações Fiscais do Item (NF-e)
+  ncm?: string;
+  cfop?: string;
+  cfop_interno?: string;
+  cfop_externo?: string;
+  unidade_medida?: string;
+  unidadeMedida?: string;
+  csosn?: string;
 }
 
 export interface Quote {
@@ -95,6 +109,9 @@ export interface Quote {
   clientEmail?: string;
   clientCity?: string;
   clientState?: string;
+  clientStreet?: string;
+  clientNeighborhood?: string;
+  clientCep?: string;
   date: string;
   validityDays: number;
   paymentTerms: string;
@@ -119,6 +136,16 @@ export interface Quote {
   fotoDesenho?: string;
   createdAt: string;
   updatedAt: string;
+  // Campos Fiscais da Nota Fiscal Eletrônica (NF-e)
+  status_nfe?: 'Pendente' | 'Processando' | 'Emitida' | 'Erro' | string;
+  nfe_chave?: string;
+  nfe_numero?: string;
+  danfe_url?: string;
+  xml_url?: string;
+  mensagem_erro_nfe?: string;
+  nfe_emitida_em?: string;
+  serie_nfe?: string;
+  protocolo_nfe?: string;
 }
 
 export interface ViaCepResponse {

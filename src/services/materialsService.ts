@@ -18,6 +18,11 @@ export interface MaterialSupabaseRecord {
   sae?: string;
   norma?: string;
   descricao?: string;
+  ncm?: string;
+  cfop_interno?: string;
+  cfop_externo?: string;
+  unidade_medida?: string;
+  csosn?: string;
   created_at?: string;
 }
 
@@ -31,6 +36,11 @@ export interface MaterialItem {
   sae?: string;
   norma?: string;
   descricao?: string;
+  ncm: string;
+  cfop_interno: string;
+  cfop_externo: string;
+  unidade_medida: string;
+  csosn: string;
   created_at?: string;
 }
 
@@ -78,6 +88,11 @@ export function mapSupabaseToItem(record: any): MaterialItem {
     sae: record.sae ? String(record.sae) : '',
     norma: record.norma ? String(record.norma) : '',
     descricao: rawDescricao,
+    ncm: record.ncm ? String(record.ncm).trim() : '72085200',
+    cfop_interno: record.cfop_interno ? String(record.cfop_interno).trim() : '5102',
+    cfop_externo: record.cfop_externo ? String(record.cfop_externo).trim() : '6102',
+    unidade_medida: record.unidade_medida ? String(record.unidade_medida).trim().toUpperCase() : 'PC',
+    csosn: record.csosn ? String(record.csosn).trim() : '102 - Sem permissão de crédito',
     created_at: record.created_at
   };
 }
@@ -90,7 +105,12 @@ export function materialItemToProfile(item: MaterialItem): MaterialProfile {
     tipo: item.tipo,
     k: item.k,
     defaultPriceKg: item.precoKg,
-    description: cleanDesc || item.nome
+    description: cleanDesc || item.nome,
+    ncm: item.ncm || '72085200',
+    cfop_interno: item.cfop_interno || '5102',
+    cfop_externo: item.cfop_externo || '6102',
+    unidade_medida: item.unidade_medida || 'PC',
+    csosn: item.csosn || '102 - Sem permissão de crédito'
   };
 }
 
@@ -100,7 +120,12 @@ export function materialItemToConstante(item: MaterialItem): TabelaConstanteItem
     k: item.k,
     precoKg: item.precoKg,
     tipo: item.tipo,
-    descricao: item.descricao ? item.descricao.trim() : ''
+    descricao: item.descricao ? item.descricao.trim() : '',
+    ncm: item.ncm || '72085200',
+    cfop_interno: item.cfop_interno || '5102',
+    cfop_externo: item.cfop_externo || '6102',
+    unidade_medida: item.unidade_medida || 'PC',
+    csosn: item.csosn || '102 - Sem permissão de crédito'
   };
 }
 
@@ -162,7 +187,12 @@ export function getCachedMaterials(): MaterialItem[] {
     tipo: c.tipo,
     tipoExtenso: tipoParaExtenso(c.tipo),
     k: c.k,
-    precoKg: c.precoKg
+    precoKg: c.precoKg,
+    ncm: (c as any).ncm || '72085200',
+    cfop_interno: (c as any).cfop_interno || '5102',
+    cfop_externo: (c as any).cfop_externo || '6102',
+    unidade_medida: (c as any).unidade_medida || 'PC',
+    csosn: (c as any).csosn || '102 - Sem permissão de crédito'
   }));
 
   syncGlobalMaterials(defaults);
@@ -225,6 +255,11 @@ export async function createMaterialDb(payload: {
   tipo: TipoGeometriaExtensa;
   constante: number;
   preco_base: number;
+  ncm?: string;
+  cfop_interno?: string;
+  cfop_externo?: string;
+  unidade_medida?: string;
+  csosn?: string;
 }): Promise<{ data: MaterialItem | null; error: string | null }> {
   const cleanNome = payload.nome.trim().toUpperCase();
   if (!cleanNome) {
@@ -242,26 +277,64 @@ export async function createMaterialDb(payload: {
   }
 
   const cleanDescricao = payload.descricao !== undefined ? payload.descricao.trim() : '';
+  const fiscalNcm = (payload.ncm || '72085200').trim();
+  const fiscalCfopInt = (payload.cfop_interno || '5102').trim();
+  const fiscalCfopExt = (payload.cfop_externo || '6102').trim();
+  const fiscalUn = (payload.unidade_medida || 'PC').trim().toUpperCase();
+  const fiscalCsosn = (payload.csosn || '102 - Sem permissão de crédito').trim();
 
   try {
-    const { data, error } = await db
+    const fullPayload = {
+      nome: cleanNome,
+      descricao: cleanDescricao,
+      tipo: payload.tipo,
+      constante: kVal,
+      preco_base: precoVal,
+      ncm: fiscalNcm,
+      cfop_interno: fiscalCfopInt,
+      cfop_externo: fiscalCfopExt,
+      unidade_medida: fiscalUn,
+      csosn: fiscalCsosn
+    };
+
+    let { data, error } = await db
       .from('materiais')
-      .insert({
+      .insert(fullPayload)
+      .select()
+      .single();
+
+    // Fallback gracioso caso colunas fiscais ainda não existam no schema da tabela
+    if (error) {
+      const basicPayload = {
         nome: cleanNome,
         descricao: cleanDescricao,
         tipo: payload.tipo,
         constante: kVal,
         preco_base: precoVal
-      })
-      .select()
-      .single();
+      };
+      const fallbackRes = await db
+        .from('materiais')
+        .insert(basicPayload)
+        .select()
+        .single();
 
-    if (error) {
-      console.error('Erro ao inserir material no Supabase:', error);
-      return { data: null, error: error.message || 'Falha ao gravar material no banco.' };
+      if (fallbackRes.error) {
+        console.error('Erro ao inserir material no Supabase:', fallbackRes.error);
+        return { data: null, error: fallbackRes.error.message || 'Falha ao gravar material no banco.' };
+      }
+      data = fallbackRes.data;
+      error = null;
     }
 
-    const newItem = mapSupabaseToItem({ ...data, descricao: data?.descricao ?? cleanDescricao });
+    const newItem = mapSupabaseToItem({ 
+      ...data, 
+      descricao: data?.descricao ?? cleanDescricao,
+      ncm: data?.ncm || fiscalNcm,
+      cfop_interno: data?.cfop_interno || fiscalCfopInt,
+      cfop_externo: data?.cfop_externo || fiscalCfopExt,
+      unidade_medida: data?.unidade_medida || fiscalUn,
+      csosn: data?.csosn || fiscalCsosn
+    });
 
     // Atualiza cache e notifica
     const current = getCachedMaterials();
@@ -286,6 +359,11 @@ export async function updateMaterialDb(
     tipo: TipoGeometriaExtensa;
     constante: number;
     preco_base: number;
+    ncm?: string;
+    cfop_interno?: string;
+    cfop_externo?: string;
+    unidade_medida?: string;
+    csosn?: string;
   }
 ): Promise<{ data: MaterialItem | null; error: string | null }> {
   const cleanNome = payload.nome.trim().toUpperCase();
@@ -304,27 +382,66 @@ export async function updateMaterialDb(
   }
 
   const cleanDescricao = payload.descricao !== undefined ? payload.descricao.trim() : '';
+  const fiscalNcm = (payload.ncm || '72085200').trim();
+  const fiscalCfopInt = (payload.cfop_interno || '5102').trim();
+  const fiscalCfopExt = (payload.cfop_externo || '6102').trim();
+  const fiscalUn = (payload.unidade_medida || 'PC').trim().toUpperCase();
+  const fiscalCsosn = (payload.csosn || '102 - Sem permissão de crédito').trim();
 
   try {
-    const { data, error } = await db
+    const fullPayload = {
+      nome: cleanNome,
+      descricao: cleanDescricao,
+      tipo: payload.tipo,
+      constante: kVal,
+      preco_base: precoVal,
+      ncm: fiscalNcm,
+      cfop_interno: fiscalCfopInt,
+      cfop_externo: fiscalCfopExt,
+      unidade_medida: fiscalUn,
+      csosn: fiscalCsosn
+    };
+
+    let { data, error } = await db
       .from('materiais')
-      .update({
+      .update(fullPayload)
+      .eq('id', id)
+      .select()
+      .single();
+
+    // Fallback gracioso caso colunas fiscais ainda não existam no schema
+    if (error) {
+      const basicPayload = {
         nome: cleanNome,
         descricao: cleanDescricao,
         tipo: payload.tipo,
         constante: kVal,
         preco_base: precoVal
-      })
-      .eq('id', id)
-      .select()
-      .single();
+      };
+      const fallbackRes = await db
+        .from('materiais')
+        .update(basicPayload)
+        .eq('id', id)
+        .select()
+        .single();
 
-    if (error) {
-      console.error('Erro ao atualizar material no Supabase:', error);
-      return { data: null, error: error.message || 'Falha ao atualizar material no banco.' };
+      if (fallbackRes.error) {
+        console.error('Erro ao atualizar material no Supabase:', fallbackRes.error);
+        return { data: null, error: fallbackRes.error.message || 'Falha ao atualizar material no banco.' };
+      }
+      data = fallbackRes.data;
+      error = null;
     }
 
-    const updatedItem = mapSupabaseToItem({ ...data, descricao: data?.descricao ?? cleanDescricao });
+    const updatedItem = mapSupabaseToItem({ 
+      ...data, 
+      descricao: data?.descricao ?? cleanDescricao,
+      ncm: data?.ncm || fiscalNcm,
+      cfop_interno: data?.cfop_interno || fiscalCfopInt,
+      cfop_externo: data?.cfop_externo || fiscalCfopExt,
+      unidade_medida: data?.unidade_medida || fiscalUn,
+      csosn: data?.csosn || fiscalCsosn
+    });
 
     // Atualiza cache e notifica
     const current = getCachedMaterials();

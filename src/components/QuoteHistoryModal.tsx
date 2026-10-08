@@ -1,13 +1,15 @@
 import React, { useState, useMemo } from 'react';
-import { Quote } from '../types';
+import { Quote, Client } from '../types';
 import { formatCurrency, formatSafeDate } from '../utils/calculator';
+import EmissaoNfeModal from './EmissaoNfeModal';
+import { abrirDanfeEmNovaAba } from '../services/nfeService';
 import { 
   History, 
   Search, 
   X, 
   Trash2, 
   Edit3, 
-  Pencil,
+  Pencil, 
   FileText, 
   CheckCircle2, 
   Clock, 
@@ -16,32 +18,47 @@ import {
   User, 
   DollarSign, 
   Download,
-  Copy
+  Copy,
+  Printer,
+  Send,
+  ExternalLink
 } from 'lucide-react';
 
 interface QuoteHistoryModalProps {
   quotes: Quote[];
+  clients?: Client[];
   onSelectQuote: (quote: Quote) => void;
   onDeleteQuote: (id: string) => void;
   onDuplicateQuote?: (quote: Quote) => void;
+  onUpdateQuote?: (quote: Quote) => void;
   onClose: () => void;
 }
 
 export default function QuoteHistoryModal({
   quotes,
+  clients = [],
   onSelectQuote,
   onDeleteQuote,
   onDuplicateQuote,
+  onUpdateQuote,
   onClose
 }: QuoteHistoryModalProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
+  const [filterNfe, setFilterNfe] = useState<string>('ALL');
+  const [quoteForNfe, setQuoteForNfe] = useState<Quote | null>(null);
+  const [localQuotes, setLocalQuotes] = useState<Quote[]>(quotes);
+
+  // Mantém localQuotes em sincronia quando a prop quotes atualizar
+  React.useEffect(() => {
+    setLocalQuotes(quotes);
+  }, [quotes]);
 
   // Deduplicação preventiva por id / quoteNumber
   const uniqueQuotes = useMemo(() => {
     const seen = new Set<string>();
     const result: Quote[] = [];
-    quotes.forEach(q => {
+    localQuotes.forEach(q => {
       const key = (q.quoteNumber || q.id || '').trim().toLowerCase();
       if (key && !seen.has(key)) {
         seen.add(key);
@@ -51,7 +68,7 @@ export default function QuoteHistoryModal({
       }
     });
     return result;
-  }, [quotes]);
+  }, [localQuotes]);
 
   const filteredQuotes = uniqueQuotes.filter(q => {
     const quoteNum = q.quoteNumber || q.id || '';
@@ -61,11 +78,18 @@ export default function QuoteHistoryModal({
       quoteNum.toLowerCase().includes(searchTerm.toLowerCase()) ||
       cName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       cPerson.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (q.items || []).some(i => (i.description || i.descricao || '').toLowerCase().includes(searchTerm.toLowerCase()));
+      (q.items || []).some(i => (i.description || i.descricao || '').toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (q.nfe_numero && q.nfe_numero.includes(searchTerm));
 
     const matchesStatus = filterStatus === 'ALL' || q.status === filterStatus;
+    
+    const stNfe = (q.status_nfe || 'Pendente').toLowerCase();
+    const matchesNfe = filterNfe === 'ALL' || 
+      (filterNfe === 'Emitida' && stNfe === 'emitida') ||
+      (filterNfe === 'Pendente' && (stNfe === 'pendente' || !q.status_nfe)) ||
+      (filterNfe === 'Erro' && stNfe.includes('erro'));
 
-    return matchesSearch && matchesStatus;
+    return matchesSearch && matchesStatus && matchesNfe;
   });
 
   const getStatusBadge = (status: Quote['status']) => {
@@ -105,8 +129,58 @@ export default function QuoteHistoryModal({
     }
   };
 
+  /**
+   * Badge de Status da Nota Fiscal (status_nfe):
+   * "Pendente" (cinza/azul), "Emitida" (verde), "Erro" (vermelho)
+   */
+  const getNfeBadge = (quote: Quote) => {
+    const rawSt = (quote.status_nfe || 'Pendente').trim().toLowerCase();
+
+    if (rawSt === 'emitida') {
+      return (
+        <span 
+          className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1 shadow-xs"
+          title={`NF-e Nº ${quote.nfe_numero || ''} autorizada pela SEFAZ`}
+        >
+          <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+          <span>NF-e Emitida</span>
+          {quote.nfe_numero && <span className="font-mono font-extrabold text-[9px]">#{quote.nfe_numero}</span>}
+        </span>
+      );
+    }
+
+    if (rawSt.includes('erro') || rawSt.includes('rejeit')) {
+      return (
+        <span 
+          className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-300 flex items-center gap-1 shadow-xs"
+          title={quote.mensagem_erro_nfe || 'Erro retornado na transmissão da SEFAZ'}
+        >
+          <AlertCircle className="w-3 h-3 text-rose-600" />
+          <span>NF-e Erro</span>
+        </span>
+      );
+    }
+
+    if (rawSt === 'processando') {
+      return (
+        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 flex items-center gap-1 animate-pulse">
+          <Clock className="w-3 h-3 text-amber-600" />
+          <span>NF-e Processando...</span>
+        </span>
+      );
+    }
+
+    // Padrão: Pendente (cinza/azul)
+    return (
+      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-300 flex items-center gap-1">
+        <FileText className="w-3 h-3 text-slate-400" />
+        <span>NF-e Pendente</span>
+      </span>
+    );
+  };
+
   const handleExportAllQuotes = () => {
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(quotes, null, 2));
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(localQuotes, null, 2));
     const downloadAnchor = document.createElement('a');
     downloadAnchor.setAttribute("href", dataStr);
     downloadAnchor.setAttribute("download", "historico_orcamentos_usicorte.json");
@@ -115,9 +189,28 @@ export default function QuoteHistoryModal({
     downloadAnchor.remove();
   };
 
+  const handleNfeSuccess = (updatedQuote: Quote) => {
+    setLocalQuotes(prev => prev.map(q => q.id === updatedQuote.id || q.quoteNumber === updatedQuote.quoteNumber ? updatedQuote : q));
+    if (onUpdateQuote) {
+      onUpdateQuote(updatedQuote);
+    }
+  };
+
+  // Encontra cliente associado à cotação para preencher dados no modal
+  const clientForSelectedQuote = useMemo(() => {
+    if (!quoteForNfe) return null;
+    const cleanDoc = (quoteForNfe.clientDocument || '').replace(/\D/g, '');
+    const cleanId = quoteForNfe.clientId;
+    return clients.find(c => 
+      (cleanId && c.id === cleanId) ||
+      (cleanDoc && c.document.replace(/\D/g, '') === cleanDoc) ||
+      (c.name.trim().toLowerCase() === quoteForNfe.clientName.trim().toLowerCase())
+    ) || null;
+  }, [quoteForNfe, clients]);
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-xs">
-      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-4xl max-h-[85vh] flex flex-col overflow-hidden">
+      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-5xl max-h-[88vh] flex flex-col overflow-hidden">
         
         {/* Header */}
         <div className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between border-b border-slate-800 shrink-0">
@@ -126,12 +219,12 @@ export default function QuoteHistoryModal({
               <History className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-sm font-bold text-slate-100">Histórico de Orçamentos Salvos (UsiCorte)</h3>
-              <p className="text-xs text-slate-400">Consulte, reabra ou edite cotações anteriores</p>
+              <h3 className="text-sm font-bold text-slate-100">Histórico de Cotações & Emissão Fiscal (UsiCorte)</h3>
+              <p className="text-xs text-slate-400">Consulte orçamentos anteriores, reabra no PDV ou emita Nota Fiscal Eletrônica (NF-e)</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {quotes.length > 0 && (
+            {localQuotes.length > 0 && (
               <button
                 onClick={handleExportAllQuotes}
                 className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-xl flex items-center gap-1.5 border border-slate-700 transition-colors"
@@ -151,32 +244,58 @@ export default function QuoteHistoryModal({
         </div>
 
         {/* Search & Filters Bar */}
-        <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row gap-3 items-center justify-between shrink-0">
-          <div className="relative w-full sm:w-80">
+        <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-col md:flex-row gap-3 items-center justify-between shrink-0">
+          <div className="relative w-full md:w-80">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
-              placeholder="Buscar por número, cliente, item..."
+              placeholder="Buscar por número, cliente, item, NF-e..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-9 pr-4 py-2 bg-white border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-hidden transition-all"
+              className="w-full pl-9 pr-4 py-2 bg-white border border-slate-300 rounded-xl text-xs focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-hidden transition-all text-slate-800"
             />
           </div>
 
-          <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto">
-            {['ALL', 'Pendente', 'Aprovado', 'Rascunho', 'Enviado', 'Faturado'].map(status => (
-              <button
-                key={status}
-                onClick={() => setFilterStatus(status)}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
-                  filterStatus === status
-                    ? 'bg-indigo-600 text-white'
-                    : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'
-                }`}
-              >
-                {status === 'ALL' ? 'Todos' : status}
-              </button>
-            ))}
+          <div className="flex items-center gap-2 w-full md:w-auto overflow-x-auto flex-wrap">
+            {/* Filtro Status da Cotação */}
+            <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-slate-200">
+              <span className="text-[10px] text-slate-400 font-bold px-2 uppercase">Status:</span>
+              {['ALL', 'Aprovado', 'Faturado', 'Pendente', 'Rascunho'].map(status => (
+                <button
+                  key={status}
+                  onClick={() => setFilterStatus(status)}
+                  className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
+                    filterStatus === status
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  {status === 'ALL' ? 'Todos' : status}
+                </button>
+              ))}
+            </div>
+
+            {/* Filtro NF-e */}
+            <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-slate-200">
+              <span className="text-[10px] text-slate-400 font-bold px-2 uppercase">NF-e:</span>
+              {[
+                { id: 'ALL', label: 'Todas' },
+                { id: 'Emitida', label: 'Emitidas' },
+                { id: 'Pendente', label: 'Pendentes' }
+              ].map(f => (
+                <button
+                  key={f.id}
+                  onClick={() => setFilterNfe(f.id)}
+                  className={`px-2 py-1 text-xs font-semibold rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
+                    filterNfe === f.id
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : 'text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -187,97 +306,167 @@ export default function QuoteHistoryModal({
               <FileText className="w-12 h-12 text-slate-300 mx-auto stroke-1" />
               <p className="text-sm font-semibold text-slate-700">Nenhum orçamento encontrado</p>
               <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                {quotes.length === 0 
+                {localQuotes.length === 0 
                   ? 'Você ainda não salvou nenhum orçamento. Crie e salve um orçamento na tela principal para vê-lo aqui.'
                   : 'Nenhum orçamento corresponde aos filtros de busca aplicados.'}
               </p>
             </div>
           ) : (
-            filteredQuotes.map(quote => (
-              <div
-                key={quote.id}
-                className="py-4 first:pt-0 last:pb-0 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 hover:bg-slate-50/80 -mx-2 px-3 rounded-xl transition-colors"
-              >
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-mono font-bold text-indigo-700 text-sm">{quote.quoteNumber}</span>
-                    {getStatusBadge(quote.status)}
-                    <span className="text-xs text-slate-400 flex items-center gap-1 font-mono">
-                      <Calendar className="w-3 h-3" /> {formatSafeDate(quote.date || quote.createdAt)}
-                    </span>
+            filteredQuotes.map(quote => {
+              const isFinalizadoOuAprovado = 
+                quote.status === 'Aprovado' || 
+                quote.status === 'Faturado' || 
+                quote.status === 'Enviado';
+              const isNfeEmitida = (quote.status_nfe || '').toLowerCase() === 'emitida';
+
+              return (
+                <div
+                  key={quote.id}
+                  className="py-4 first:pt-0 last:pb-0 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 hover:bg-slate-50/80 -mx-2 px-3 rounded-xl transition-colors"
+                >
+                  <div className="space-y-1.5 flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-mono font-bold text-indigo-700 text-sm">{quote.quoteNumber}</span>
+                      
+                      {/* Badge de Status Comercial */}
+                      {getStatusBadge(quote.status)}
+                      
+                      {/* Badge de Status da Nota Fiscal (status_nfe) */}
+                      {getNfeBadge(quote)}
+
+                      <span className="text-xs text-slate-400 flex items-center gap-1 font-mono">
+                        <Calendar className="w-3 h-3" /> {formatSafeDate(quote.date || quote.createdAt)}
+                      </span>
+                    </div>
+
+                    <h4 className="text-sm font-bold text-slate-800 flex items-center gap-1.5 truncate">
+                      <User className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                      <span className="truncate">{quote.clientName}</span>
+                      {quote.clientDocument && <span className="text-xs text-slate-400 font-normal shrink-0">({quote.clientDocument})</span>}
+                    </h4>
+
+                    <p className="text-xs text-slate-500">
+                      <span className="font-semibold text-slate-700">{quote.items.length}</span> item(ns) discriminado(s) • Condição: {quote.paymentTerms}
+                      {quote.clientCity && <span> • {quote.clientCity}/{quote.clientState || 'SP'}</span>}
+                    </p>
                   </div>
 
-                  <h4 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
-                    <User className="w-3.5 h-3.5 text-slate-400" />
-                    {quote.clientName}
-                    {quote.clientDocument && <span className="text-xs text-slate-400 font-normal">({quote.clientDocument})</span>}
-                  </h4>
+                  <div className="flex items-center gap-4 self-end lg:self-center flex-wrap shrink-0">
+                    <div className="text-right">
+                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Total Geral</span>
+                      <span className="text-base font-extrabold text-slate-900 font-mono">
+                        {formatCurrency(quote.grandTotal)}
+                      </span>
+                    </div>
 
-                  <p className="text-xs text-slate-500">
-                    <span className="font-semibold text-slate-700">{quote.items.length}</span> item(ns) discriminado(s) • Condição: {quote.paymentTerms}
-                  </p>
-                </div>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      
+                      {/* AÇÃO 1: EMITIR NF-E (Disponível nas cotações finalizadas/aprovadas) */}
+                      {isFinalizadoOuAprovado && !isNfeEmitida && (
+                        <button
+                          onClick={() => setQuoteForNfe(quote)}
+                          className="px-3 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-sm shadow-emerald-600/30 transition-all active:scale-95 border border-emerald-400/30"
+                          title="Abrir conferência fiscal e transmitir NF-e para a SEFAZ"
+                        >
+                          <Send className="w-3.5 h-3.5" />
+                          <span>Emitir NF-e</span>
+                        </button>
+                      )}
 
-                <div className="flex items-center gap-4 self-end sm:self-center">
-                  <div className="text-right">
-                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Total Geral</span>
-                    <span className="text-base font-extrabold text-slate-900 font-mono">
-                      {formatCurrency(quote.grandTotal)}
-                    </span>
-                  </div>
+                      {/* Se já foi emitida: Botão de Visualizar / Imprimir DANFE */}
+                      {isNfeEmitida && (
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => {
+                              const resolvedClient = clients.find(c => 
+                                (quote.clientId && c.id === quote.clientId) || 
+                                (quote.clientDocument && c.document && c.document.replace(/\D/g, '') === quote.clientDocument.replace(/\D/g, '')) ||
+                                (c.name || (c as any).nome) === quote.clientName
+                              );
+                              abrirDanfeEmNovaAba(quote, resolvedClient);
+                            }}
+                            className="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+                            title="Abrir DANFE da NF-e emitida em nova aba para impressão rápida"
+                          >
+                            <Printer className="w-3.5 h-3.5" />
+                            <span>Imprimir DANFE</span>
+                          </button>
 
-                  <div className="flex items-center gap-1.5">
-                    {onDuplicateQuote && (
+                          <button
+                            onClick={() => setQuoteForNfe(quote)}
+                            className="p-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-xs font-bold cursor-pointer transition-colors"
+                            title="Ver dados fiscais e chave da NF-e"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )}
+
+                      {/* DUPLICAR */}
+                      {onDuplicateQuote && (
+                        <button
+                          onClick={() => {
+                            onDuplicateQuote(quote);
+                            onClose();
+                          }}
+                          className="px-3 py-2 bg-cyan-600 hover:bg-cyan-700 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+                          title="Duplicar este orçamento no PDV com nova numeração"
+                        >
+                          <Copy className="w-3.5 h-3.5" />
+                          Duplicar
+                        </button>
+                      )}
+
+                      {/* EDITAR / CARREGAR NO PDV */}
                       <button
                         onClick={() => {
-                          onDuplicateQuote(quote);
+                          onSelectQuote(quote);
                           onClose();
                         }}
-                        className="px-3.5 py-2 bg-cyan-600 hover:bg-cyan-700 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
-                        title="Duplicar este orçamento no PDV com nova numeração"
+                        className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+                        title="Editar / Carregar este orçamento no formulário de vendas"
                       >
-                        <Copy className="w-3.5 h-3.5" />
-                        Duplicar
+                        <Pencil className="w-3.5 h-3.5" />
+                        Editar
                       </button>
-                    )}
-
-                    <button
-                      onClick={() => {
-                        onSelectQuote(quote);
-                        onClose();
-                      }}
-                      className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
-                      title="Editar / Carregar este orçamento no formulário"
-                    >
-                      <Pencil className="w-3.5 h-3.5" />
-                      Editar
-                    </button>
-                    
-                    <button
-                      onClick={() => {
-                        if (confirm(`Deseja realmente excluir o orçamento ${quote.quoteNumber}?`)) {
-                          onDeleteQuote(quote.id);
-                        }
-                      }}
-                      className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer"
-                      title="Excluir orçamento"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                      
+                      {/* EXCLUIR */}
+                      <button
+                        onClick={() => {
+                          if (confirm(`Deseja realmente excluir o orçamento ${quote.quoteNumber}?`)) {
+                            onDeleteQuote(quote.id);
+                          }
+                        }}
+                        className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer"
+                        title="Excluir orçamento"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
 
         {/* Footer info */}
         <div className="bg-slate-50 px-6 py-3 border-t border-slate-200 text-xs text-slate-500 flex justify-between items-center shrink-0">
-          <span>Total salvo: <b>{quotes.length}</b> cotações</span>
-          <span>UsiCorte Sistema de Orçamentos</span>
+          <span>Total salvo: <b>{localQuotes.length}</b> cotações • <b>{localQuotes.filter(q => (q.status_nfe || '').toLowerCase() === 'emitida').length}</b> com NF-e emitida</span>
+          <span>UsiCorte Metais • Gestão Comercial & Fiscal</span>
         </div>
 
       </div>
+
+      {/* Modal de Conferência e Emissão de NF-e */}
+      {quoteForNfe && (
+        <EmissaoNfeModal
+          quote={quoteForNfe}
+          client={clientForSelectedQuote}
+          onSuccess={handleNfeSuccess}
+          onClose={() => setQuoteForNfe(null)}
+        />
+      )}
     </div>
   );
 }

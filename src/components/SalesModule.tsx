@@ -59,6 +59,8 @@ import {
 import { createPortal } from 'react-dom';
 import QuotePrintModal, { PrintMode } from './QuotePrintModal';
 import QuotePrintOptionsModal, { TipoImpressaoOrcamento } from './QuotePrintOptionsModal';
+import EmissaoNfeModal from './EmissaoNfeModal';
+import { abrirDanfeEmNovaAba } from '../services/nfeService';
 import { 
   ConsultaPrintDocuments, 
   TipoImpressaoConsulta,
@@ -161,7 +163,12 @@ export default function SalesModule({
         descricao: fromMaterials.descricao && fromMaterials.descricao.trim() !== '' ? fromMaterials.descricao.trim() : fromMaterials.nome,
         tipo: fromMaterials.tipo,
         k: fromMaterials.k,
-        precoKg: fromMaterials.precoKg
+        precoKg: fromMaterials.precoKg,
+        ncm: fromMaterials.ncm || '72085200',
+        cfop_interno: fromMaterials.cfop_interno || '5102',
+        cfop_externo: fromMaterials.cfop_externo || '6102',
+        unidade_medida: fromMaterials.unidade_medida || 'PC',
+        csosn: fromMaterials.csosn || '102 - Sem permissão de crédito'
       };
     }
 
@@ -177,7 +184,12 @@ export default function SalesModule({
         name: fromProfiles.name,
         tipo: fromProfiles.tipo,
         k: fromProfiles.k,
-        precoKg: fromProfiles.defaultPriceKg
+        precoKg: fromProfiles.defaultPriceKg,
+        ncm: fromProfiles.ncm || '72085200',
+        cfop_interno: fromProfiles.cfop_interno || '5102',
+        cfop_externo: fromProfiles.cfop_externo || '6102',
+        unidade_medida: fromProfiles.unidade_medida || 'PC',
+        csosn: fromProfiles.csosn || '102 - Sem permissão de crédito'
       };
     }
 
@@ -189,7 +201,12 @@ export default function SalesModule({
         name: fromMap.nome,
         tipo: fromMap.tipo,
         k: fromMap.k,
-        precoKg: fromMap.precoKg
+        precoKg: fromMap.precoKg,
+        ncm: '72085200',
+        cfop_interno: '5102',
+        cfop_externo: '6102',
+        unidade_medida: 'PC',
+        csosn: '102 - Sem permissão de crédito'
       };
     }
 
@@ -204,7 +221,12 @@ export default function SalesModule({
         name: fromPreset.name,
         tipo: fromPreset.geometryType,
         k: fromPreset.constant,
-        precoKg: fromPreset.defaultPriceKg
+        precoKg: fromPreset.defaultPriceKg,
+        ncm: '72085200',
+        cfop_interno: '5102',
+        cfop_externo: '6102',
+        unidade_medida: 'PC',
+        csosn: '102 - Sem permissão de crédito'
       };
     }
 
@@ -478,6 +500,7 @@ export default function SalesModule({
   const [printModalMode, setPrintModalMode] = useState<TipoImpressaoOrcamento>('GERAL');
   const [autoTriggerPrint, setAutoTriggerPrint] = useState<boolean>(false);
   const [lastSavedQuoteForPrint, setLastSavedQuoteForPrint] = useState<any | null>(null);
+  const [quoteForDirectNfe, setQuoteForDirectNfe] = useState<Quote | null>(null);
   const [activeDirectPrint, setActiveDirectPrint] = useState<{ quote: any; tipo: TipoImpressaoConsulta } | null>(null);
 
   // Refs para autofoco imediato na entrada de novas cotações
@@ -602,6 +625,14 @@ export default function SalesModule({
               grandTotal: Number(q.valor_total) || 0,
               createdAt: safeCreatedAt,
               updatedAt: safeUpdatedAt,
+              // Dados Fiscais da NF-e
+              status_nfe: q.status_nfe || 'Pendente',
+              nfe_chave: q.nfe_chave,
+              nfe_numero: q.nfe_numero,
+              danfe_url: q.danfe_url,
+              xml_url: q.xml_url,
+              mensagem_erro_nfe: q.mensagem_erro_nfe,
+              nfe_emitida_em: q.nfe_emitida_em,
               items: (q.cotacao_itens || []).map((it: any, idx: number) => {
                 const qty = Number(it.quantidade) || 1;
                 const medidaStr = String(it.medida || '').trim();
@@ -636,7 +667,15 @@ export default function SalesModule({
                   quantity: qty,
                   subtotal: Number(it.valor_total) || ((Number(it.valor_unitario) || 0) * qty),
                   notes: it.observacao || '',
-                  drawingImage: it.desenho_url || undefined
+                  drawingImage: it.desenho_url || undefined,
+                  // Campos Fiscais herdados
+                  ncm: it.ncm || '72085200',
+                  cfop: it.cfop,
+                  cfop_interno: it.cfop_interno || '5102',
+                  cfop_externo: it.cfop_externo || '6102',
+                  unidade_medida: it.unidade_medida || 'PC',
+                  unidadeMedida: it.unidade_medida || 'PC',
+                  csosn: it.csosn || '102 - Sem permissão de crédito'
                 };
               })
             };
@@ -686,6 +725,14 @@ export default function SalesModule({
                     grandTotal: Number(q.valor_total) || 0,
                     createdAt: safeCreatedAt,
                     updatedAt: safeUpdatedAt,
+                    // Dados Fiscais da NF-e
+                    status_nfe: q.status_nfe || 'Pendente',
+                    nfe_chave: q.nfe_chave,
+                    nfe_numero: q.nfe_numero,
+                    danfe_url: q.danfe_url,
+                    xml_url: q.xml_url,
+                    mensagem_erro_nfe: q.mensagem_erro_nfe,
+                    nfe_emitida_em: q.nfe_emitida_em,
                     items: (q.cotacao_itens || []).map((it, idx) => ({
                       id: String(it.id || idx),
                       date: safeDateIso,
@@ -700,7 +747,14 @@ export default function SalesModule({
                       quantity: Number(it.quantidade) || 1,
                       subtotal: Number(it.valor_total) || ((Number(it.valor_unitario) || 0) * (Number(it.quantidade) || 1)),
                       notes: it.observacao || '',
-                      drawingImage: it.desenho_url || undefined
+                      drawingImage: it.desenho_url || undefined,
+                      ncm: it.ncm || '72085200',
+                      cfop: it.cfop,
+                      cfop_interno: it.cfop_interno || '5102',
+                      cfop_externo: it.cfop_externo || '6102',
+                      unidade_medida: it.unidade_medida || 'PC',
+                      unidadeMedida: it.unidade_medida || 'PC',
+                      csosn: it.csosn || '102 - Sem permissão de crédito'
                     }))
                   };
                 });
@@ -1500,7 +1554,13 @@ export default function SalesModule({
         medidasFormatadas: medidasFormatadas,
         medidaFormatada: medidasFormatadas,
         drawingImage: itemDrawingImage || undefined,
-        fotoDesenho: itemDrawingImage || undefined
+        fotoDesenho: itemDrawingImage || undefined,
+        ncm: item.ncm || findProductOrMaterialData(itemMatName)?.ncm || '72085200',
+        cfop_interno: item.cfop_interno || findProductOrMaterialData(itemMatName)?.cfop_interno || '5102',
+        cfop_externo: item.cfop_externo || findProductOrMaterialData(itemMatName)?.cfop_externo || '6102',
+        unidade_medida: item.unidade_medida || findProductOrMaterialData(itemMatName)?.unidade_medida || 'PC',
+        unidadeMedida: item.unidadeMedida || findProductOrMaterialData(itemMatName)?.unidade_medida || 'PC',
+        csosn: item.csosn || findProductOrMaterialData(itemMatName)?.csosn || '102 - Sem permissão de crédito'
       } : item);
 
       setItems(updatedItemsList);
@@ -1508,6 +1568,7 @@ export default function SalesModule({
       setEditingItemId(null);
     } else {
       // Add new item
+      const fiscalData = findProductOrMaterialData(itemMatName) || findProductOrMaterialData(itemConstantSelect) || findProductOrMaterialData(selectedMaterial?.id) || findProductOrMaterialData(itemDescription);
       const newItem: QuoteItem = {
         id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
         date: quoteDate || new Date().toISOString().split('T')[0],
@@ -1550,7 +1611,14 @@ export default function SalesModule({
         medidasFormatadas: medidasFormatadas,
         medidaFormatada: medidasFormatadas,
         drawingImage: itemDrawingImage || undefined,
-        fotoDesenho: itemDrawingImage || undefined
+        fotoDesenho: itemDrawingImage || undefined,
+        // Campos fiscais herdados automaticamente do material selecionado
+        ncm: fiscalData?.ncm || '72085200',
+        cfop_interno: fiscalData?.cfop_interno || '5102',
+        cfop_externo: fiscalData?.cfop_externo || '6102',
+        unidade_medida: fiscalData?.unidade_medida || 'PC',
+        unidadeMedida: fiscalData?.unidade_medida || 'PC',
+        csosn: fiscalData?.csosn || '102 - Sem permissão de crédito'
       };
 
       updatedItemsList = [...items, newItem];
@@ -4126,9 +4194,26 @@ export default function SalesModule({
           clientName={clientName.trim() || 'Cliente Balcão'}
           itemCount={items.length}
           totalValue={grandTotal}
+          client={clients.find(c => c.id === selectedClientId || (clientDocument && c.document === clientDocument)) || null}
+          clients={clients}
+          onUpdateQuote={(updated) => {
+            setLastSavedQuoteForPrint(updated);
+            setSavedQuotes(prev => prev.map(q => q.id === updated.id || q.quoteNumber === updated.quoteNumber ? updated : q));
+          }}
           onSelectPrint={(tipo) => {
             setShowPrintOptionsModal(false);
             const quoteToPrint = lastSavedQuoteForPrint || normalizeQuoteForPrint(currentQuoteForModal);
+
+            if (tipo === 'NFE') {
+              const isNfeEmitida = (quoteToPrint.status_nfe || '').toLowerCase() === 'emitida';
+              const resolvedCl = clients.find(c => c.id === quoteToPrint.clientId || (quoteToPrint.clientDocument && c.document === quoteToPrint.clientDocument)) || null;
+              if (isNfeEmitida) {
+                abrirDanfeEmNovaAba(quoteToPrint, resolvedCl);
+              } else {
+                setQuoteForDirectNfe(quoteToPrint);
+              }
+              return;
+            }
 
             // Invocação nominal das funções de impressão conforme fluxo técnico:
             if (tipo === 'GERAL') {
@@ -4153,6 +4238,19 @@ export default function SalesModule({
         />
       )}
 
+      {/* MODAL DIRETO DE CONFERÊNCIA E EMISSÃO DE NF-E */}
+      {quoteForDirectNfe && (
+        <EmissaoNfeModal
+          quote={quoteForDirectNfe}
+          client={clients.find(c => c.id === quoteForDirectNfe.clientId || (quoteForDirectNfe.clientDocument && c.document === quoteForDirectNfe.clientDocument)) || null}
+          onSuccess={(updated) => {
+            setLastSavedQuoteForPrint(updated);
+            setSavedQuotes(prev => prev.map(q => q.id === updated.id || q.quoteNumber === updated.quoteNumber ? updated : q));
+          }}
+          onClose={() => setQuoteForDirectNfe(null)}
+        />
+      )}
+
       {/* MODAL PRINT PROPOSAL (PREVIEW COMPLETO) */}
       {showPrintModal && (
         <QuotePrintModal
@@ -4170,9 +4268,13 @@ export default function SalesModule({
       {showHistoryModal && (
         <QuoteHistoryModal
           quotes={savedQuotes}
+          clients={clients}
           onSelectQuote={handleLoadQuoteFromHistory}
           onDeleteQuote={handleDeleteSavedQuote}
           onDuplicateQuote={(q) => handleLoadQuoteForDuplication({ quote: q, originalNumber: q.quoteNumber || q.id })}
+          onUpdateQuote={(updated) => {
+            setSavedQuotes(prev => prev.map(q => q.id === updated.id || q.quoteNumber === updated.quoteNumber ? updated : q));
+          }}
           onClose={() => setShowHistoryModal(false)}
         />
       )}

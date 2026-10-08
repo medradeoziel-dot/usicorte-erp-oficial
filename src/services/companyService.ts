@@ -1,4 +1,5 @@
 import { CompanyFiscalData } from '../types';
+export type { CompanyFiscalData };
 import { db } from '../lib/db';
 
 export const DEFAULT_COMPANY_DATA: CompanyFiscalData = {

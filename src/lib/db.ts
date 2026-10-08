@@ -187,6 +187,8 @@ export interface SupabaseCliente {
   habilitado?: boolean;
   data_cadastro?: string;
   empresa?: string;
+  inscricao_estadual?: string;
+  indicador_ie?: string;
   "observações"?: string;
   observacoes?: string;
   criado_por?: string;
@@ -223,6 +225,14 @@ export interface SupabaseCotacao {
   observacoes_baixa?: string;
   lancamento_financeiro_id?: string;
   baixado_em?: string | null;
+  // Módulo Fiscal (NF-e):
+  status_nfe?: string;
+  nfe_chave?: string;
+  nfe_numero?: string;
+  danfe_url?: string;
+  xml_url?: string;
+  mensagem_erro_nfe?: string;
+  nfe_emitida_em?: string;
 }
 
 export interface SupabaseCotacaoItem {
@@ -239,6 +249,12 @@ export interface SupabaseCotacaoItem {
   valor_total: number;
   desenho_url?: string;
   cortado?: boolean;
+  ncm?: string;
+  unidade_medida?: string;
+  csosn?: string;
+  cfop?: string;
+  cfop_interno?: string;
+  cfop_externo?: string;
   created_at?: string;
   updated_at?: string;
 }
@@ -648,6 +664,12 @@ export function mapSupabaseToClient(c: any): Client {
     email: c.email || c['e-mail'] || '',
     enabled: c.habilitado !== undefined ? Boolean(c.habilitado) : (c.enabled !== undefined ? Boolean(c.enabled) : true),
     registrationDate: regDate,
+    // Campos Fiscais (NF-e)
+    inscricaoEstadual: c.inscricao_estadual || c.inscricaoEstadual || c.ie || '',
+    inscricao_estadual: c.inscricao_estadual || c.inscricaoEstadual || c.ie || '',
+    ie: c.inscricao_estadual || c.inscricaoEstadual || c.ie || '',
+    indicadorIe: c.indicador_ie ? String(c.indicador_ie) : (c.indicadorIe ? String(c.indicadorIe) : (clientType === 'CNPJ' ? '1' : '9')),
+    indicador_ie: c.indicador_ie ? String(c.indicador_ie) : (c.indicadorIe ? String(c.indicadorIe) : (clientType === 'CNPJ' ? '1' : '9')),
     // Aliases para máxima compatibilidade
     tipo: clientType,
     documento: c.documento || c.document || '',
@@ -670,9 +692,12 @@ export function mapClientToSupabase(c: any): Record<string, any> {
   const cleanCep = (c.cep || '').replace(/\D/g, '');
   const cleanPhone = (c.phone || c.telefone || '').replace(/\D/g, '');
   const rawDate = c.registrationDate || c.data_cadastro || new Date().toISOString().split('T')[0];
+  const clientType = c.type || c.tipo || (cleanDoc.length > 11 ? 'CNPJ' : 'CPF');
+  const rawIe = c.inscricao_estadual || c.inscricaoEstadual || c.ie || '';
+  const rawIndicador = c.indicador_ie || c.indicadorIe || (clientType === 'CNPJ' ? '1' : '9');
 
   return {
-    tipo: c.type || c.tipo || (cleanDoc.length > 11 ? 'CNPJ' : 'CPF'),
+    tipo: clientType,
     documento: cleanDoc,
     nome: c.name || c.nome || c.razao_social || '',
     nome_fantasia: c.fantasyName || c.nome_fantasia || c.empresa || '',
@@ -687,7 +712,9 @@ export function mapClientToSupabase(c: any): Record<string, any> {
     email: c.email || c['e-mail'] || '',
     habilitado: c.enabled !== undefined ? Boolean(c.enabled) : (c.habilitado !== undefined ? Boolean(c.habilitado) : true),
     data_cadastro: rawDate,
-    empresa: c.fantasyName || c.nome_fantasia || c.empresa || c.name || c.nome || ''
+    empresa: c.fantasyName || c.nome_fantasia || c.empresa || c.name || c.nome || '',
+    inscricao_estadual: rawIe ? String(rawIe).trim().toUpperCase() : '',
+    indicador_ie: String(rawIndicador).trim()
   };
 }
 
@@ -907,7 +934,14 @@ export async function saveCotacaoDb(quote: Quote): Promise<{ data: any; error: a
       situacao: isFaturado ? 'FATURADO' : ((quote as any).situacao || 'ATIVA'),
       observacoes: quote.observations || '',
       valor_total: quote.grandTotal || quote.subtotalTotal || 0,
-      cliente_id: quote.clientId && isUuid(quote.clientId) ? quote.clientId : undefined
+      cliente_id: quote.clientId && isUuid(quote.clientId) ? quote.clientId : undefined,
+      status_nfe: quote.status_nfe || 'Pendente',
+      nfe_chave: quote.nfe_chave,
+      nfe_numero: quote.nfe_numero,
+      danfe_url: quote.danfe_url,
+      xml_url: quote.xml_url,
+      mensagem_erro_nfe: quote.mensagem_erro_nfe,
+      nfe_emitida_em: quote.nfe_emitida_em
     };
 
     // 1. Busca se a cotação já existe no Supabase (pelo ID direto ou pelo Número)
@@ -958,13 +992,33 @@ export async function saveCotacaoDb(quote: Quote): Promise<{ data: any; error: a
       }
 
       // Executa o UPDATE no registro existente pelo seu ID
-      const { error: updateErr } = await db
+      let { error: updateErr } = await db
         .from('cotacoes')
         .update({
           ...cotacaoPayload,
           updated_at: new Date().toISOString()
         })
         .eq('id', cotacaoId);
+
+      // Fallback gracioso caso colunas fiscais de NF-e ainda não existam no schema da tabela
+      if (updateErr) {
+        const basicPayload = {
+          numero: cotacaoPayload.numero,
+          data: cotacaoPayload.data,
+          cliente_nome: cotacaoPayload.cliente_nome,
+          contato: cotacaoPayload.contato,
+          telefone: cotacaoPayload.telefone,
+          email: cotacaoPayload.email,
+          status: cotacaoPayload.status,
+          situacao: cotacaoPayload.situacao,
+          observacoes: cotacaoPayload.observacoes,
+          valor_total: cotacaoPayload.valor_total,
+          cliente_id: cotacaoPayload.cliente_id,
+          updated_at: new Date().toISOString()
+        };
+        const fbUpdate = await db.from('cotacoes').update(basicPayload).eq('id', cotacaoId);
+        updateErr = fbUpdate.error;
+      }
 
       if (updateErr) {
         console.error('UPDATE cotacoes falhou:', updateErr);
@@ -982,11 +1036,31 @@ export async function saveCotacaoDb(quote: Quote): Promise<{ data: any; error: a
       }
     } else {
       // É INSERT de novo registro
-      const { data: created, error: insertErr } = await db
+      let { data: created, error: insertErr } = await db
         .from('cotacoes')
         .insert(cotacaoPayload)
         .select()
         .single();
+
+      // Fallback sem campos de NF-e se colunas ainda não existirem no schema
+      if (insertErr) {
+        const basicPayload = {
+          numero: cotacaoPayload.numero,
+          data: cotacaoPayload.data,
+          cliente_nome: cotacaoPayload.cliente_nome,
+          contato: cotacaoPayload.contato,
+          telefone: cotacaoPayload.telefone,
+          email: cotacaoPayload.email,
+          status: cotacaoPayload.status,
+          situacao: cotacaoPayload.situacao,
+          observacoes: cotacaoPayload.observacoes,
+          valor_total: cotacaoPayload.valor_total,
+          cliente_id: cotacaoPayload.cliente_id
+        };
+        const fbInsert = await db.from('cotacoes').insert(basicPayload).select().single();
+        created = fbInsert.data;
+        insertErr = fbInsert.error;
+      }
 
       if (insertErr) {
         console.error('INSERT cotacoes falhou:', insertErr);
@@ -995,13 +1069,33 @@ export async function saveCotacaoDb(quote: Quote): Promise<{ data: any; error: a
       cotacaoId = created.id;
     }
 
-    // 2. Insere os itens atualizados da cotação
+    // 2. Insere os itens atualizados da cotação gravando campos fiscais em background
     if (cotacaoId && quote.items && quote.items.length > 0) {
+      // Carrega materiais do cache local para herança tributária automática
+      let cachedMaterialsList: any[] = [];
+      try {
+        if (typeof window !== 'undefined') {
+          const raw = localStorage.getItem('s_materiais_cadastrados');
+          if (raw) cachedMaterialsList = JSON.parse(raw);
+        }
+      } catch {}
+
       const itensPayload = quote.items.map((it, idx) => {
         const medidaCalculada = formatarMedidasLimpa(it);
         const medidaFinal = (medidaCalculada && medidaCalculada !== '-')
           ? medidaCalculada
           : '—';
+
+        const matName = String(it.material || it.constantName || it.constanteNome || '').trim().toUpperCase();
+        const foundMat = cachedMaterialsList.find((m: any) => 
+          (m.nome && m.nome.trim().toUpperCase() === matName) ||
+          (m.id && m.id === (it as any).materialProfileId)
+        );
+
+        const ncmFiscal = it.ncm || foundMat?.ncm || '72085200';
+        const unFiscal = (it.unidade_medida || it.unidadeMedida || foundMat?.unidade_medida || 'PC').toUpperCase();
+        const csosnFiscal = it.csosn || foundMat?.csosn || '102 - Sem permissão de crédito';
+        const cfopFiscal = it.cfop || it.cfop_interno || foundMat?.cfop_interno || '5102';
 
         return {
           cotacao_id: cotacaoId,
@@ -1015,7 +1109,12 @@ export async function saveCotacaoDb(quote: Quote): Promise<{ data: any; error: a
           valor_unitario: Number(it.unitPrice || it.valorUnitario || 0),
           valor_total: Number(it.subtotal || ((it.unitPrice || 0) * (it.quantity || 1))),
           desenho_url: it.drawingImage || it.fotoDesenho || '',
-          cortado: false
+          cortado: false,
+          // Campos fiscais herdados automaticamente em background
+          ncm: ncmFiscal,
+          unidade_medida: unFiscal,
+          csosn: csosnFiscal,
+          cfop: cfopFiscal
         };
       });
 
@@ -1027,8 +1126,28 @@ export async function saveCotacaoDb(quote: Quote): Promise<{ data: any; error: a
 
       let { error: itensErr } = await db.from('cotacao_itens').insert(itensPayloadWithWeight);
       if (itensErr) {
+        // Fallback 1: tenta sem peso
         const fallbackRes = await db.from('cotacao_itens').insert(itensPayload);
         itensErr = fallbackRes.error;
+      }
+      if (itensErr) {
+        // Fallback 2: colunas básicas sem campos fiscais
+        const basicItens = quote.items.map((it, idx) => ({
+          cotacao_id: cotacaoId,
+          ordem: idx,
+          produto: it.constantName || it.constanteNome || it.material || 'MATERIAL',
+          material: it.material || it.constantName || '',
+          medida: formatarMedidasLimpa(it) || '—',
+          descricao: it.description || it.descricao || 'Item industrial',
+          observacao: it.notes || it.observacao || it.info || '',
+          quantidade: Number(it.quantity || it.qtd || 1),
+          valor_unitario: Number(it.unitPrice || it.valorUnitario || 0),
+          valor_total: Number(it.subtotal || ((it.unitPrice || 0) * (it.quantity || 1))),
+          desenho_url: it.drawingImage || it.fotoDesenho || '',
+          cortado: false
+        }));
+        const fb2 = await db.from('cotacao_itens').insert(basicItens);
+        itensErr = fb2.error;
       }
       if (itensErr) {
         console.warn("Erro ao inserir itens da cotação no Supabase:", itensErr);
@@ -1039,6 +1158,55 @@ export async function saveCotacaoDb(quote: Quote): Promise<{ data: any; error: a
     return { data: { id: cotacaoId, ...cotacaoPayload }, error: null };
   } catch (err) {
     return { data: null, error: err };
+  }
+}
+
+/**
+ * Atualiza status e metadados fiscais da NF-e na tabela 'cotacoes' do Supabase
+ */
+export async function updateCotacaoNfeStatusDb(
+  cotacaoIdOrNumber: string,
+  payload: {
+    status_nfe: 'Pendente' | 'Processando' | 'Emitida' | 'Erro' | string;
+    nfe_chave?: string;
+    nfe_numero?: string;
+    danfe_url?: string;
+    xml_url?: string;
+    mensagem_erro_nfe?: string | null;
+    nfe_emitida_em?: string;
+  }
+): Promise<{ success: boolean; error: any }> {
+  try {
+    if (!cotacaoIdOrNumber) return { success: false, error: 'Identificador não fornecido' };
+
+    const updateObj: any = {
+      status_nfe: payload.status_nfe,
+      updated_at: new Date().toISOString()
+    };
+    if (payload.nfe_chave !== undefined) updateObj.nfe_chave = payload.nfe_chave;
+    if (payload.nfe_numero !== undefined) updateObj.nfe_numero = payload.nfe_numero;
+    if (payload.danfe_url !== undefined) updateObj.danfe_url = payload.danfe_url;
+    if (payload.xml_url !== undefined) updateObj.xml_url = payload.xml_url;
+    if (payload.mensagem_erro_nfe !== undefined) updateObj.mensagem_erro_nfe = payload.mensagem_erro_nfe;
+    if (payload.nfe_emitida_em !== undefined) updateObj.nfe_emitida_em = payload.nfe_emitida_em;
+
+    const isIdUuid = isUuid(cotacaoIdOrNumber);
+    let query = db.from('cotacoes').update(updateObj);
+
+    if (isIdUuid) {
+      query = query.eq('id', cotacaoIdOrNumber);
+    } else {
+      query = query.or(`id.eq.${cotacaoIdOrNumber},numero.eq.${cotacaoIdOrNumber}`);
+    }
+
+    const { error } = await query;
+    if (error) {
+      console.warn('Aviso ao atualizar status_nfe no Supabase:', error.message);
+      return { success: false, error };
+    }
+    return { success: true, error: null };
+  } catch (err) {
+    return { success: false, error: err };
   }
 }
 

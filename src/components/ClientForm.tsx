@@ -50,6 +50,8 @@ export default function ClientForm({ activeClient, onSave, onDelete, onClear, is
   const [email, setEmail] = useState('');
   const [enabled, setEnabled] = useState(true);
   const [registrationDate, setRegistrationDate] = useState('');
+  const [inscricaoEstadual, setInscricaoEstadual] = useState('');
+  const [indicadorIe, setIndicadorIe] = useState('1');
 
   // Status message state
   const [status, setStatus] = useState<{ message: string; type: 'success' | 'error' | 'info' | null }>({
@@ -85,6 +87,8 @@ export default function ClientForm({ activeClient, onSave, onDelete, onClear, is
       setPhone(formatPhone(activeClient.phone || activeClient.telefone || ''));
       setEmail(activeClient.email || '');
       setEnabled(activeClient.enabled !== undefined ? activeClient.enabled : (activeClient.habilitado !== undefined ? activeClient.habilitado : true));
+      setInscricaoEstadual(activeClient.inscricao_estadual || activeClient.inscricaoEstadual || activeClient.ie || '');
+      setIndicadorIe(activeClient.indicador_ie || activeClient.indicadorIe || (resolvedType === 'CNPJ' ? '1' : '9'));
       
       const rawRegDate = activeClient.registrationDate || activeClient.data_cadastro;
       if (rawRegDate) {
@@ -242,6 +246,12 @@ export default function ClientForm({ activeClient, onSave, onDelete, onClear, is
       email: email.trim(),
       enabled,
       registrationDate: registrationDate || new Date().toISOString().split('T')[0],
+      // Campos Fiscais (NF-e)
+      inscricaoEstadual: inscricaoEstadual.trim().toUpperCase(),
+      inscricao_estadual: inscricaoEstadual.trim().toUpperCase(),
+      ie: inscricaoEstadual.trim().toUpperCase(),
+      indicadorIe: indicadorIe,
+      indicador_ie: indicadorIe,
       // Aliases em português para persistência direta
       tipo: type,
       documento: cleanDoc,
@@ -292,6 +302,8 @@ export default function ClientForm({ activeClient, onSave, onDelete, onClear, is
     setEmail('');
     setEnabled(true);
     setRegistrationDate(new Date().toISOString().split('T')[0]);
+    setInscricaoEstadual('');
+    setIndicadorIe('1');
     onClear();
   };
 
@@ -459,6 +471,41 @@ export default function ClientForm({ activeClient, onSave, onDelete, onClear, is
                 placeholder="ATIVA, INATIVA, BAIXADA"
                 className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200/80 rounded-xl text-sm outline-none hover:border-slate-300 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 focus:bg-white transition-all font-semibold text-emerald-600 uppercase"
               />
+            </div>
+          </div>
+
+          {/* Row 2.5: Informações Fiscais (Inscrição Estadual e Indicador de IE) */}
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-4 bg-slate-50/60 p-3.5 rounded-xl border border-slate-200/70">
+            {/* Inscrição Estadual */}
+            <div className="md:col-span-6 flex flex-col gap-1.5">
+              <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
+                <span>Inscrição Estadual (IE)</span>
+                <span className="text-[10px] text-indigo-600 font-medium">Obrigatório p/ contribuintes</span>
+              </label>
+              <input
+                type="text"
+                value={inscricaoEstadual}
+                onChange={(e) => setInscricaoEstadual(e.target.value.toUpperCase())}
+                placeholder="Ex: 209.632.131.114 ou ISENTO"
+                className="w-full px-3.5 py-2.5 bg-white border border-slate-200/90 rounded-xl text-sm outline-none hover:border-slate-300 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all text-slate-800 font-mono"
+              />
+            </div>
+
+            {/* Indicador de IE */}
+            <div className="md:col-span-6 flex flex-col gap-1.5">
+              <label className="text-xs font-bold text-slate-700 flex items-center justify-between">
+                <span>Indicador de IE (SEFAZ)</span>
+                <span className="text-[10px] text-slate-500 font-normal">Enquadramento fiscal</span>
+              </label>
+              <select
+                value={indicadorIe}
+                onChange={(e) => setIndicadorIe(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-white border border-slate-200/90 rounded-xl text-sm outline-none hover:border-slate-300 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all text-slate-800 cursor-pointer font-medium"
+              >
+                <option value="1">1 - Contribuinte ICMS (Possui Inscrição Estadual)</option>
+                <option value="2">2 - Contribuinte Isento de Inscrição</option>
+                <option value="9">9 - Não Contribuinte (Pessoa Física ou Consumidor Final)</option>
+              </select>
             </div>
           </div>
 
