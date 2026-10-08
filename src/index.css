@@ -23,13 +23,16 @@
   #container-impressao,
   #container-impressao *,
   #container-impressao-vendas,
-  #container-impressao-vendas * {
+  #container-impressao-vendas *,
+  #container-impressao-danfe,
+  #container-impressao-danfe * {
     visibility: visible;
   }
 
   #print-area,
   #container-impressao,
-  #container-impressao-vendas {
+  #container-impressao-vendas,
+  #container-impressao-danfe {
     position: absolute !important;
     left: 0 !important;
     top: 0 !important;

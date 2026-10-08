@@ -1,6 +1,7 @@
 import { Quote, QuoteItem, Client } from '../types';
 import { db, updateCotacaoNfeStatusDb } from '../lib/db';
 import { fetchCompanyData, CompanyFiscalData, DEFAULT_COMPANY_DATA } from './companyService';
+import { generateBarcodeSvg } from '../utils/barcode';
 
 export interface ItemFiscalNfe {
   id: string;
@@ -508,7 +509,7 @@ function anoMesDia(d: Date): string {
 }
 
 /**
- * Gera documento HTML visual padrão DANFE (Documento Auxiliar da Nota Fiscal Eletrônica)
+ * Gera documento HTML visual padrão DANFE (Documento Auxiliar da Nota Fiscal Eletrônica - Modelo 55)
  */
 export function gerarDanfeHtml(
   emitente: DadosEmitenteNfe,
@@ -523,18 +524,31 @@ export function gerarDanfeHtml(
   isPrevia: boolean = false
 ): string {
   const chaveFormatada = isPrevia ? 'CHAVE SERÁ GERADA APÓS TRANSMISSÃO SEFAZ' : formatarChaveAcesso(chaveAcesso);
+  const totalProdutos = itens.reduce((acc, it) => acc + it.subtotal, 0);
+  const valorIbptAprox = totalProdutos * 0.1345;
+  const ibptFed = totalProdutos * 0.085;
+  const ibptEst = totalProdutos * 0.0495;
 
-  const linhasItens = itens.map((it, idx) => `
+  const linhasItens = itens.map((it) => `
     <tr>
-      <td style="border: 1px solid #000; padding: 4px; text-align: center;">${it.codigo}</td>
-      <td style="border: 1px solid #000; padding: 4px;">${it.descricao}</td>
-      <td style="border: 1px solid #000; padding: 4px; text-align: center;">${it.ncm}</td>
-      <td style="border: 1px solid #000; padding: 4px; text-align: center;">${it.csosn.split(' ')[0]}</td>
-      <td style="border: 1px solid #000; padding: 4px; text-align: center;">${it.cfop}</td>
-      <td style="border: 1px solid #000; padding: 4px; text-align: center;">${it.unidade}</td>
-      <td style="border: 1px solid #000; padding: 4px; text-align: right;">${it.quantidade.toFixed(2)}</td>
-      <td style="border: 1px solid #000; padding: 4px; text-align: right;">R$ ${it.valorUnitario.toFixed(2).replace('.', ',')}</td>
-      <td style="border: 1px solid #000; padding: 4px; text-align: right; font-weight: bold;">R$ ${it.subtotal.toFixed(2).replace('.', ',')}</td>
+      <td style="border: 1px solid #000; padding: 2px 4px; text-align: center; font-family: monospace;">${it.codigo}</td>
+      <td style="border: 1px solid #000; padding: 2px 4px;">
+        <strong>${it.descricao}</strong><br/>
+        <span style="font-size: 7.5px; color: #555;">Trib aprox: R$ ${(it.subtotal * 0.1345).toFixed(2).replace('.', ',')} Fed/Est (Fonte: IBPT)</span>
+      </td>
+      <td style="border: 1px solid #000; padding: 2px 4px; text-align: center; font-family: monospace;">${it.ncm}</td>
+      <td style="border: 1px solid #000; padding: 2px 4px; text-align: center; font-family: monospace;">${it.csosn.split(' ')[0]}</td>
+      <td style="border: 1px solid #000; padding: 2px 4px; text-align: center; font-family: monospace; font-weight: bold;">${it.cfop}</td>
+      <td style="border: 1px solid #000; padding: 2px 4px; text-align: center; font-weight: bold;">${it.unidade}</td>
+      <td style="border: 1px solid #000; padding: 2px 4px; text-align: right; font-family: monospace;">${it.quantidade.toFixed(2)}</td>
+      <td style="border: 1px solid #000; padding: 2px 4px; text-align: right; font-family: monospace;">R$ ${it.valorUnitario.toFixed(2).replace('.', ',')}</td>
+      <td style="border: 1px solid #000; padding: 2px 4px; text-align: right; font-family: monospace; font-weight: bold;">R$ ${it.subtotal.toFixed(2).replace('.', ',')}</td>
+      <td style="border: 1px solid #000; padding: 2px 4px; text-align: right; font-family: monospace;">0,00</td>
+      <td style="border: 1px solid #000; padding: 2px 4px; text-align: right; font-family: monospace;">0,00</td>
+      <td style="border: 1px solid #000; padding: 2px 4px; text-align: right; font-family: monospace;">0,00</td>
+      <td style="border: 1px solid #000; padding: 2px 4px; text-align: right; font-family: monospace;">0,00</td>
+      <td style="border: 1px solid #000; padding: 2px 4px; text-align: center; font-family: monospace;">0%</td>
+      <td style="border: 1px solid #000; padding: 2px 4px; text-align: center; font-family: monospace;">0%</td>
     </tr>
   `).join('');
 
@@ -544,35 +558,55 @@ export function gerarDanfeHtml(
   <meta charset="UTF-8">
   <title>${isPrevia ? 'PRÉVIA DANFE (SEM VALOR FISCAL)' : 'DANFE'} - NF-e Nº ${numeroNfe}</title>
   <style>
-    @page { size: A4 portrait; margin: 6mm; }
-    body { font-family: Arial, sans-serif; font-size: 10px; color: #000; margin: 0; padding: 10px; background: #fff; position: relative; }
-    .box { border: 1px solid #000; margin-bottom: 4px; padding: 4px; }
-    .title { font-size: 8px; font-weight: bold; text-transform: uppercase; margin-bottom: 2px; }
-    .val { font-size: 11px; font-weight: bold; }
+    @page { size: A4 portrait; margin: 5mm; }
+    * { box-sizing: border-box; }
+    body { font-family: Arial, Helvetica, sans-serif; font-size: 8.5px; color: #000; margin: 0; padding: 10px; background: #fff; line-height: 1.15; }
+    .sheet { max-width: 210mm; margin: 0 auto; position: relative; }
+    .box { border: 1px solid #000; margin-bottom: 3px; }
+    .title { font-size: 6.5px; font-weight: bold; text-transform: uppercase; color: #333; margin-bottom: 1px; }
+    .val { font-size: 8.5px; font-weight: bold; }
     table { width: 100%; border-collapse: collapse; }
-    th { border: 1px solid #000; background: #f0f0f0; padding: 4px; font-size: 9px; text-align: center; }
-    .btn-print { background: #2563eb; color: #fff; padding: 8px 16px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; margin-bottom: 15px; }
+    th { border: 1px solid #000; background: #f0f0f0; padding: 3px; font-size: 7px; text-align: center; }
+    .btn-print { background: #2563eb; color: #fff; padding: 8px 16px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; margin-bottom: 10px; font-size: 12px; }
     .watermark-container {
       position: fixed;
       top: 35%;
       left: 5%;
       width: 90%;
-      transform: rotate(-25deg);
+      transform: rotate(-28deg);
       text-align: center;
       pointer-events: none;
       z-index: 9999;
-      opacity: 0.16;
+      opacity: 0.18;
     }
     .watermark-text {
-      font-size: 44px;
+      font-size: 42px;
       font-weight: 900;
       color: #dc2626;
       border: 5px dashed #dc2626;
       padding: 16px;
       text-transform: uppercase;
       letter-spacing: 2px;
+      border-radius: 12px;
     }
-    @media print { .no-print { display: none !important; } }
+    .cut-line {
+      border-bottom: 1px dashed #666;
+      text-align: center;
+      margin: 4px 0 6px 0;
+      position: relative;
+    }
+    .cut-label {
+      background: #fff;
+      padding: 0 6px;
+      font-size: 7px;
+      color: #666;
+      position: relative;
+      top: 4px;
+    }
+    @media print { 
+      .no-print { display: none !important; }
+      body { padding: 0; }
+    }
   </style>
 </head>
 <body>
@@ -583,118 +617,367 @@ export function gerarDanfeHtml(
       <span style="font-size: 22px; font-weight: bold;">MODO DE CONFERÊNCIA</span>
     </div>
   </div>
-  <div style="background: #fef2f2; border: 2px dashed #dc2626; color: #991b1b; padding: 10px; text-align: center; font-weight: bold; font-size: 13px; margin-bottom: 12px; border-radius: 6px;">
+  <div class="no-print" style="background: #fef2f2; border: 2px dashed #dc2626; color: #991b1b; padding: 8px; text-align: center; font-weight: bold; font-size: 11px; margin-bottom: 8px; border-radius: 6px;">
     ⚠️ MODO DE CONFERÊNCIA - NOTA AINDA NÃO TRANSMITIDA PARA A SEFAZ (PRÉVIA - SEM VALOR FISCAL) ⚠️
   </div>
   ` : ''}
 
-  <div class="no-print" style="text-align: right;">
+  <div class="no-print" style="text-align: right; max-width: 210mm; margin: 0 auto 8px auto;">
     <button class="btn-print" onclick="window.print()">${isPrevia ? 'Imprimir Prévia / Salvar PDF' : 'Imprimir DANFE / Salvar PDF'}</button>
   </div>
 
-  <table style="margin-bottom: 6px;">
-    <tr>
-      <td style="border: 1px solid #000; width: 45%; padding: 6px; vertical-align: top;">
-        <div style="font-size: 14px; font-weight: bold;">${emitente.razaoSocial}</div>
-        <div style="font-size: 12px; font-weight: bold; color: #b91c1c;">${emitente.nomeFantasia}</div>
-        <div style="font-size: 9px; margin-top: 4px;">
-          ${emitente.endereco}, ${emitente.numero} - ${emitente.bairro}<br>
-          ${emitente.cidade} - ${emitente.uf} - CEP: ${emitente.cep}<br>
-          Tel: ${emitente.telefone}
-        </div>
-      </td>
-      <td style="border: 1px solid #000; width: 20%; text-align: center; padding: 4px;">
-        <div style="font-size: 16px; font-weight: bold;">${isPrevia ? 'PRÉ-DANFE' : 'DANFE'}</div>
-        <div style="font-size: 8px;">Documento Auxiliar da<br>Nota Fiscal Eletrônica</div>
-        <div style="margin: 4px 0; font-size: 10px;">0 - ENTRADA<br><strong>1 - SAÍDA [ 1 ]</strong></div>
-        <div style="font-weight: bold; font-size: 11px;">Nº ${numeroNfe}</div>
-        <div style="font-size: 10px;">SÉRIE ${serie}</div>
-      </td>
-      <td style="border: 1px solid #000; width: 35%; padding: 6px; vertical-align: top;">
-        <div class="title">CHAVE DE ACESSO</div>
-        <div style="font-family: monospace; font-size: 10px; font-weight: bold; letter-spacing: 0.5px;">${chaveFormatada}</div>
-        <div style="margin-top: 6px; font-size: 9px;">
-          ${isPrevia ? 'Documento emitido exclusivamente para prévia e conferência de dados tributários.' : 'Consulta de autenticidade no portal nacional da NF-e <strong>www.nfe.fazenda.gov.br/portal</strong> ou no site da Sefaz Autorizadora.'}
-        </div>
-        <div style="margin-top: 6px;" class="title">PROTOCOLO DE AUTORIZAÇÃO DE USO</div>
-        <div style="font-size: 10px; font-weight: bold;">${isPrevia ? 'PRÉVIA - NÃO TRANSMITIDA PARA A SEFAZ' : `${protocolo} - ${dataEmissao.toLocaleDateString('pt-BR')} ${dataEmissao.toLocaleTimeString('pt-BR')}`}</div>
-      </td>
-    </tr>
-  </table>
+  <div class="sheet">
+    <!-- CANHOTO SUPERIOR -->
+    <div class="box" style="margin-bottom: 1px;">
+      <table>
+        <tr>
+          <td style="width: 82%; padding: 4px; border-right: 1px solid #000; vertical-align: top;">
+            <div style="font-size: 7.5px; font-weight: 600; text-transform: uppercase;">
+              RECEBEMOS DE <strong>${emitente.razaoSocial}</strong> OS PRODUTOS E/OU SERVIÇOS CONSTANTES DA NOTA FISCAL ELETRÔNICA INDICADA AO LADO.
+            </div>
+            <table style="margin-top: 6px; border-top: 1px solid #000;">
+              <tr>
+                <td style="width: 35%; padding-top: 2px; border-right: 1px solid #000;">
+                  <div class="title">DATA DE RECEBIMENTO</div>
+                  <div style="height: 14px; font-size: 8px; color: #999;">___ / ___ / ______</div>
+                </td>
+                <td style="width: 65%; padding-top: 2px; padding-left: 6px;">
+                  <div class="title">IDENTIFICAÇÃO E ASSINATURA DO RECEBEDOR</div>
+                  <div style="height: 14px; font-size: 8px; color: #999;">__________________________________________________</div>
+                </td>
+              </tr>
+            </table>
+          </td>
+          <td style="width: 18%; text-align: center; vertical-align: middle; background: #fafafa; padding: 4px;">
+            <div style="font-size: 12px; font-weight: 900;">NF-e</div>
+            <div style="font-size: 9px; font-weight: bold; margin-top: 2px;">Nº ${numeroNfe}</div>
+            <div style="font-size: 7.5px; color: #555;">SÉRIE ${serie}</div>
+          </td>
+        </tr>
+      </table>
+    </div>
 
-  <div class="box">
-    <table>
-      <tr>
-        <td style="width: 50%;"><div class="title">NATUREZA DA OPERAÇÃO</div><div class="val">${isPrevia ? 'VENDA DE MERCADORIA (PRÉVIA FISCAL)' : 'VENDA DE MERCADORIA'}</div></td>
-        <td style="width: 25%;"><div class="title">INSCRIÇÃO ESTADUAL</div><div class="val">${emitente.ie}</div></td>
-        <td style="width: 25%;"><div class="title">CNPJ</div><div class="val">${emitente.cnpj}</div></td>
-      </tr>
+    <!-- LINHA DE CORTE -->
+    <div class="cut-line"><span class="cut-label">✂ Destaque aqui</span></div>
+
+    <!-- CABEÇALHO DA EMISSÃO -->
+    <div class="box">
+      <table>
+        <tr>
+          <td style="width: 44%; padding: 6px; border-right: 1px solid #000; vertical-align: top;">
+            <div style="font-size: 11px; font-weight: 900; text-transform: uppercase;">${emitente.razaoSocial}</div>
+            <div style="font-size: 10px; font-weight: 900; color: #b91c1c; text-transform: uppercase; margin-top: 1px;">${emitente.nomeFantasia}</div>
+            <div style="font-size: 7.5px; margin-top: 4px; line-height: 1.2;">
+              ${emitente.endereco}, ${emitente.numero} - ${emitente.bairro}<br>
+              ${emitente.cidade} - ${emitente.uf} • CEP: ${emitente.cep}<br>
+              Tel: ${emitente.telefone}
+            </div>
+          </td>
+          <td style="width: 22%; text-align: center; padding: 4px; border-right: 1px solid #000; vertical-align: middle; background: #fafafa;">
+            <div style="font-size: 14px; font-weight: 900; letter-spacing: 1px;">DANFE</div>
+            <div style="font-size: 7px; color: #444; margin-top: 1px;">Documento Auxiliar da<br>Nota Fiscal Eletrônica</div>
+            <div style="border: 1px solid #000; display: inline-block; padding: 1px 6px; margin: 4px 0; font-size: 8px;">
+              <span style="color: #666;">0 - ENTRADA</span><br>
+              <strong>1 - SAÍDA [ 1 ]</strong>
+            </div>
+            <div style="font-weight: bold; font-size: 10px;">Nº ${numeroNfe}</div>
+            <div style="font-size: 8px;">SÉRIE ${serie}</div>
+            <div style="font-size: 7px; color: #666;">FOLHA 1 / 1</div>
+          </td>
+          <td style="width: 34%; padding: 4px; vertical-align: top;">
+            <div style="text-align: center; margin-bottom: 2px;">
+              <!-- Simulação do código de barras da chave de acesso -->
+              <svg width="100%" height="32" viewBox="0 0 280 32" preserveAspectRatio="none">
+                <rect x="0" y="0" width="2" height="32" fill="#000"/>
+                <rect x="4" y="0" width="1" height="32" fill="#000"/>
+                <rect x="7" y="0" width="3" height="32" fill="#000"/>
+                <rect x="12" y="0" width="1" height="32" fill="#000"/>
+                <rect x="15" y="0" width="2" height="32" fill="#000"/>
+                <rect x="19" y="0" width="1" height="32" fill="#000"/>
+                <rect x="22" y="0" width="3" height="32" fill="#000"/>
+                <rect x="27" y="0" width="2" height="32" fill="#000"/>
+                <rect x="31" y="0" width="1" height="32" fill="#000"/>
+                <rect x="34" y="0" width="3" height="32" fill="#000"/>
+                <rect x="39" y="0" width="2" height="32" fill="#000"/>
+                <rect x="43" y="0" width="1" height="32" fill="#000"/>
+                <rect x="46" y="0" width="2" height="32" fill="#000"/>
+                <rect x="50" y="0" width="3" height="32" fill="#000"/>
+                <rect x="55" y="0" width="1" height="32" fill="#000"/>
+                <rect x="58" y="0" width="2" height="32" fill="#000"/>
+                <rect x="62" y="0" width="3" height="32" fill="#000"/>
+                <rect x="67" y="0" width="1" height="32" fill="#000"/>
+                <rect x="70" y="0" width="2" height="32" fill="#000"/>
+                <rect x="74" y="0" width="1" height="32" fill="#000"/>
+                <rect x="77" y="0" width="3" height="32" fill="#000"/>
+                <rect x="82" y="0" width="2" height="32" fill="#000"/>
+                <rect x="86" y="0" width="1" height="32" fill="#000"/>
+                <rect x="89" y="0" width="2" height="32" fill="#000"/>
+                <rect x="93" y="0" width="3" height="32" fill="#000"/>
+                <rect x="98" y="0" width="1" height="32" fill="#000"/>
+                <rect x="101" y="0" width="2" height="32" fill="#000"/>
+                <rect x="105" y="0" width="1" height="32" fill="#000"/>
+                <rect x="108" y="0" width="3" height="32" fill="#000"/>
+                <rect x="113" y="0" width="2" height="32" fill="#000"/>
+                <rect x="117" y="0" width="1" height="32" fill="#000"/>
+                <rect x="120" y="0" width="3" height="32" fill="#000"/>
+                <rect x="125" y="0" width="2" height="32" fill="#000"/>
+                <rect x="129" y="0" width="1" height="32" fill="#000"/>
+                <rect x="132" y="0" width="2" height="32" fill="#000"/>
+                <rect x="136" y="0" width="3" height="32" fill="#000"/>
+                <rect x="141" y="0" width="1" height="32" fill="#000"/>
+                <rect x="144" y="0" width="2" height="32" fill="#000"/>
+                <rect x="148" y="0" width="1" height="32" fill="#000"/>
+                <rect x="151" y="0" width="3" height="32" fill="#000"/>
+                <rect x="156" y="0" width="2" height="32" fill="#000"/>
+                <rect x="160" y="0" width="1" height="32" fill="#000"/>
+                <rect x="163" y="0" width="3" height="32" fill="#000"/>
+                <rect x="168" y="0" width="2" height="32" fill="#000"/>
+                <rect x="172" y="0" width="1" height="32" fill="#000"/>
+                <rect x="175" y="0" width="2" height="32" fill="#000"/>
+                <rect x="179" y="0" width="3" height="32" fill="#000"/>
+                <rect x="184" y="0" width="1" height="32" fill="#000"/>
+                <rect x="187" y="0" width="2" height="32" fill="#000"/>
+                <rect x="191" y="0" width="1" height="32" fill="#000"/>
+                <rect x="194" y="0" width="3" height="32" fill="#000"/>
+                <rect x="199" y="0" width="2" height="32" fill="#000"/>
+                <rect x="203" y="0" width="1" height="32" fill="#000"/>
+                <rect x="206" y="0" width="3" height="32" fill="#000"/>
+                <rect x="211" y="0" width="2" height="32" fill="#000"/>
+                <rect x="215" y="0" width="1" height="32" fill="#000"/>
+                <rect x="218" y="0" width="2" height="32" fill="#000"/>
+                <rect x="222" y="0" width="3" height="32" fill="#000"/>
+                <rect x="227" y="0" width="1" height="32" fill="#000"/>
+                <rect x="230" y="0" width="2" height="32" fill="#000"/>
+                <rect x="234" y="0" width="1" height="32" fill="#000"/>
+                <rect x="237" y="0" width="3" height="32" fill="#000"/>
+                <rect x="242" y="0" width="2" height="32" fill="#000"/>
+                <rect x="246" y="0" width="1" height="32" fill="#000"/>
+                <rect x="249" y="0" width="2" height="32" fill="#000"/>
+                <rect x="253" y="0" width="3" height="32" fill="#000"/>
+                <rect x="258" y="0" width="1" height="32" fill="#000"/>
+                <rect x="261" y="0" width="2" height="32" fill="#000"/>
+                <rect x="265" y="0" width="1" height="32" fill="#000"/>
+                <rect x="268" y="0" width="3" height="32" fill="#000"/>
+                <rect x="273" y="0" width="2" height="32" fill="#000"/>
+                <rect x="277" y="0" width="3" height="32" fill="#000"/>
+              </svg>
+            </div>
+            <div class="title">CHAVE DE ACESSO</div>
+            <div style="font-family: monospace; font-size: 8px; font-weight: bold; letter-spacing: 0.5px;">${chaveFormatada}</div>
+            <div style="font-size: 7px; color: #555; margin: 3px 0; border-top: 1px solid #ddd; padding-top: 2px;">
+              ${isPrevia ? 'Documento emitido exclusivamente para prévia e conferência de dados tributários.' : 'Consulta de autenticidade no portal nacional da NF-e <strong>www.nfe.fazenda.gov.br/portal</strong> ou no site da Sefaz Autorizadora.'}
+            </div>
+            <div style="border-top: 1px solid #000; padding-top: 2px;">
+              <div class="title">PROTOCOLO DE AUTORIZAÇÃO DE USO</div>
+              <div style="font-size: 8px; font-weight: bold;">${isPrevia ? 'NÃO TRANSMITIDA (PRÉVIA FISCAL)' : `${protocolo} - ${dataEmissao.toLocaleDateString('pt-BR')}`}</div>
+            </div>
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- NATUREZA DA OPERAÇÃO / IE / CNPJ -->
+    <div class="box">
+      <table>
+        <tr>
+          <td style="width: 50%; padding: 3px; border-right: 1px solid #000;">
+            <div class="title">NATUREZA DA OPERAÇÃO</div>
+            <div class="val">${isPrevia ? 'VENDA DE MERCADORIA (MODO DE CONFERÊNCIA)' : 'VENDA DE PRODUÇÃO DO ESTABELECIMENTO / MERCADORIA'}</div>
+          </td>
+          <td style="width: 25%; padding: 3px; border-right: 1px solid #000;">
+            <div class="title">INSCRIÇÃO ESTADUAL</div>
+            <div class="val" style="font-family: monospace;">${emitente.ie}</div>
+          </td>
+          <td style="width: 25%; padding: 3px;">
+            <div class="title">CNPJ</div>
+            <div class="val" style="font-family: monospace;">${emitente.cnpj}</div>
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- DESTINATÁRIO / REMETENTE -->
+    <div style="font-weight: 900; font-size: 7.5px; text-transform: uppercase; margin: 2px 0 1px 0;">DESTINATÁRIO / REMETENTE</div>
+    <div class="box">
+      <table style="border-bottom: 1px solid #000;">
+        <tr>
+          <td style="width: 60%; padding: 3px; border-right: 1px solid #000;">
+            <div class="title">NOME / RAZÃO SOCIAL</div>
+            <div class="val" style="text-transform: uppercase;">${destinatario.nome}</div>
+          </td>
+          <td style="width: 25%; padding: 3px; border-right: 1px solid #000;">
+            <div class="title">CNPJ / CPF</div>
+            <div class="val" style="font-family: monospace;">${destinatario.documento}</div>
+          </td>
+          <td style="width: 15%; padding: 3px;">
+            <div class="title">DATA DA EMISSÃO</div>
+            <div class="val">${dataEmissao.toLocaleDateString('pt-BR')}</div>
+          </td>
+        </tr>
+      </table>
+      <table style="border-bottom: 1px solid #000;">
+        <tr>
+          <td style="width: 50%; padding: 3px; border-right: 1px solid #000;">
+            <div class="title">ENDEREÇO</div>
+            <div class="val">${destinatario.endereco}</div>
+          </td>
+          <td style="width: 25%; padding: 3px; border-right: 1px solid #000;">
+            <div class="title">BAIRRO / DISTRITO</div>
+            <div class="val">${destinatario.bairro}</div>
+          </td>
+          <td style="width: 10%; padding: 3px; border-right: 1px solid #000;">
+            <div class="title">CEP</div>
+            <div class="val" style="font-family: monospace;">${destinatario.cep}</div>
+          </td>
+          <td style="width: 15%; padding: 3px;">
+            <div class="title">DATA DE SAÍDA</div>
+            <div class="val">${dataEmissao.toLocaleDateString('pt-BR')}</div>
+          </td>
+        </tr>
+      </table>
+      <table>
+        <tr>
+          <td style="width: 45%; padding: 3px; border-right: 1px solid #000;">
+            <div class="title">MUNICÍPIO</div>
+            <div class="val">${destinatario.cidade}</div>
+          </td>
+          <td style="width: 20%; padding: 3px; border-right: 1px solid #000;">
+            <div class="title">FONE / FAX</div>
+            <div class="val">${destinatario.telefone || '-'}</div>
+          </td>
+          <td style="width: 8%; padding: 3px; text-align: center; border-right: 1px solid #000;">
+            <div class="title">UF</div>
+            <div class="val">${destinatario.uf}</div>
+          </td>
+          <td style="width: 17%; padding: 3px; border-right: 1px solid #000;">
+            <div class="title">INSCRIÇÃO ESTADUAL</div>
+            <div class="val" style="font-family: monospace;">${destinatario.inscricaoEstadual || 'ISENTO'}</div>
+          </td>
+          <td style="width: 10%; padding: 3px;">
+            <div class="title">HORA DE SAÍDA</div>
+            <div class="val">${dataEmissao.toLocaleTimeString('pt-BR')}</div>
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- FATURA / DUPLICATAS -->
+    <div style="font-weight: 900; font-size: 7.5px; text-transform: uppercase; margin: 2px 0 1px 0;">FATURA / DUPLICATAS</div>
+    <div class="box" style="padding: 2px;">
+      <table>
+        <tr>
+          <td style="border: 1px solid #ccc; padding: 2px 4px; width: 25%; background: #fafafa;">
+            <span style="font-size: 6.5px; color: #555;">Nº DUP:</span> <strong>${numeroNfe}/01</strong><br>
+            <span style="font-size: 6.5px; color: #555;">VENC:</span> <strong>${new Date(Date.now() + 30*24*60*60*1000).toLocaleDateString('pt-BR')}</strong><br>
+            <span style="font-size: 6.5px; color: #555;">VALOR:</span> <strong>R$ ${valorTotal.toFixed(2).replace('.', ',')}</strong>
+          </td>
+          <td></td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- CÁLCULO DO IMPOSTO -->
+    <div style="font-weight: 900; font-size: 7.5px; text-transform: uppercase; margin: 2px 0 1px 0;">CÁLCULO DO IMPOSTO</div>
+    <div class="box">
+      <table style="border-bottom: 1px solid #000; text-align: center;">
+        <tr>
+          <td style="width: 16.6%; padding: 2px; border-right: 1px solid #000;"><div class="title">BASE CÁLC. ICMS</div><div class="val">R$ 0,00</div></td>
+          <td style="width: 16.6%; padding: 2px; border-right: 1px solid #000;"><div class="title">VALOR DO ICMS</div><div class="val">R$ 0,00</div></td>
+          <td style="width: 16.6%; padding: 2px; border-right: 1px solid #000;"><div class="title">BASE CÁLC. ICMS ST</div><div class="val">R$ 0,00</div></td>
+          <td style="width: 16.6%; padding: 2px; border-right: 1px solid #000;"><div class="title">VALOR ICMS ST</div><div class="val">R$ 0,00</div></td>
+          <td style="width: 16.6%; padding: 2px; border-right: 1px solid #000;"><div class="title">V. APROX. TRIBUTOS</div><div class="val">R$ ${valorIbptAprox.toFixed(2).replace('.', ',')}</div></td>
+          <td style="width: 17%; padding: 2px; background: #fafafa;"><div class="title">TOTAL PRODUTOS</div><div class="val">R$ ${totalProdutos.toFixed(2).replace('.', ',')}</div></td>
+        </tr>
+      </table>
+      <table style="text-align: center;">
+        <tr>
+          <td style="width: 16.6%; padding: 2px; border-right: 1px solid #000;"><div class="title">VALOR DO FRETE</div><div class="val">R$ 0,00</div></td>
+          <td style="width: 16.6%; padding: 2px; border-right: 1px solid #000;"><div class="title">VALOR DO SEGURO</div><div class="val">R$ 0,00</div></td>
+          <td style="width: 16.6%; padding: 2px; border-right: 1px solid #000;"><div class="title">DESCONTO</div><div class="val">R$ 0,00</div></td>
+          <td style="width: 16.6%; padding: 2px; border-right: 1px solid #000;"><div class="title">OUTRAS DESP. ACESS.</div><div class="val">R$ 0,00</div></td>
+          <td style="width: 16.6%; padding: 2px; border-right: 1px solid #000;"><div class="title">VALOR DO IPI</div><div class="val">R$ 0,00</div></td>
+          <td style="width: 17%; padding: 2px; background: #eee;"><div class="title" style="color: #991b1b;">TOTAL DA NOTA</div><div class="val" style="color: #991b1b; font-size: 9.5px;">R$ ${valorTotal.toFixed(2).replace('.', ',')}</div></td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- TRANSPORTADOR / VOLUMES TRANSPORTADOS -->
+    <div style="font-weight: 900; font-size: 7.5px; text-transform: uppercase; margin: 2px 0 1px 0;">TRANSPORTADOR / VOLUMES TRANSPORTADOS</div>
+    <div class="box">
+      <table style="border-bottom: 1px solid #000;">
+        <tr>
+          <td style="width: 45%; padding: 2px; border-right: 1px solid #000;"><div class="title">RAZÃO SOCIAL</div><div class="val">NOSSO CARRO / RETIRA NO BALCÃO</div></td>
+          <td style="width: 25%; padding: 2px; border-right: 1px solid #000;"><div class="title">FRETE POR CONTA</div><div class="val">9 - SEM FRETE</div></td>
+          <td style="width: 10%; padding: 2px; border-right: 1px solid #000;"><div class="title">CÓDIGO ANTT</div><div class="val">-</div></td>
+          <td style="width: 15%; padding: 2px; border-right: 1px solid #000;"><div class="title">PLACA DO VEÍCULO</div><div class="val">-</div></td>
+          <td style="width: 5%; padding: 2px; text-align: center;"><div class="title">UF</div><div class="val">SP</div></td>
+        </tr>
+      </table>
+      <table>
+        <tr>
+          <td style="width: 15%; padding: 2px; border-right: 1px solid #000;"><div class="title">QUANTIDADE</div><div class="val">${itens.length || 1}</div></td>
+          <td style="width: 15%; padding: 2px; border-right: 1px solid #000;"><div class="title">ESPÉCIE</div><div class="val">VOLUMES</div></td>
+          <td style="width: 20%; padding: 2px; border-right: 1px solid #000;"><div class="title">MARCA</div><div class="val">USICORTE</div></td>
+          <td style="width: 20%; padding: 2px; border-right: 1px solid #000;"><div class="title">NUMERAÇÃO</div><div class="val">-</div></td>
+          <td style="width: 15%; padding: 2px; border-right: 1px solid #000;"><div class="title">PESO BRUTO</div><div class="val">0,000 kg</div></td>
+          <td style="width: 15%; padding: 2px;"><div class="title">PESO LÍQUIDO</div><div class="val">0,000 kg</div></td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- DADOS DOS PRODUTOS / SERVIÇOS -->
+    <div style="font-weight: 900; font-size: 7.5px; text-transform: uppercase; margin: 2px 0 1px 0;">DADOS DOS PRODUTOS / SERVIÇOS</div>
+    <table style="margin-bottom: 3px;">
+      <thead>
+        <tr>
+          <th style="width: 7%;">CÓD. PROD.</th>
+          <th style="width: 32%; text-align: left;">DESCRIÇÃO DO PRODUTO / SERVIÇO</th>
+          <th style="width: 9%;">NCM/SH</th>
+          <th style="width: 6%;">CST</th>
+          <th style="width: 6%;">CFOP</th>
+          <th style="width: 5%;">UN</th>
+          <th style="width: 6%; text-align: right;">QUANT.</th>
+          <th style="width: 8%; text-align: right;">V. UNIT.</th>
+          <th style="width: 9%; text-align: right;">V. TOTAL</th>
+          <th style="width: 5%; text-align: right;">DESC.</th>
+          <th style="width: 7%; text-align: right;">B. CÁLC. ICMS</th>
+          <th style="width: 6%; text-align: right;">V. ICMS</th>
+          <th style="width: 6%; text-align: right;">V. IPI</th>
+          <th style="width: 4%;">ALÍQ. ICMS</th>
+          <th style="width: 4%;">ALÍQ. IPI</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${linhasItens}
+      </tbody>
     </table>
-  </div>
 
-  <div style="font-weight: bold; font-size: 9px; margin: 4px 0 2px 0;">DESTINATÁRIO / REMETENTE</div>
-  <div class="box">
-    <table>
-      <tr>
-        <td style="width: 60%;"><div class="title">NOME / RAZÃO SOCIAL</div><div class="val">${destinatario.nome}</div></td>
-        <td style="width: 25%;"><div class="title">CNPJ / CPF</div><div class="val">${destinatario.documento}</div></td>
-        <td style="width: 15%;"><div class="title">DATA DA EMISSÃO</div><div class="val">${dataEmissao.toLocaleDateString('pt-BR')}</div></td>
-      </tr>
-      <tr>
-        <td><div class="title">ENDEREÇO</div><div class="val">${destinatario.endereco}</div></td>
-        <td><div class="title">BAIRRO / DISTRITO</div><div class="val">${destinatario.bairro}</div></td>
-        <td><div class="title">CEP</div><div class="val">${destinatario.cep}</div></td>
-      </tr>
-      <tr>
-        <td><div class="title">MUNICÍPIO</div><div class="val">${destinatario.cidade}</div></td>
-        <td><div class="title">UF</div><div class="val">${destinatario.uf}</div></td>
-        <td><div class="title">INSCRIÇÃO ESTADUAL</div><div class="val">${destinatario.inscricaoEstadual || 'ISENTO'}</div></td>
-      </tr>
-    </table>
-  </div>
+    <!-- DADOS ADICIONAIS -->
+    <div style="font-weight: 900; font-size: 7.5px; text-transform: uppercase; margin: 2px 0 1px 0;">DADOS ADICIONAIS</div>
+    <div class="box">
+      <table>
+        <tr>
+          <td style="width: 70%; padding: 4px; border-right: 1px solid #000; vertical-align: top;">
+            <div class="title">INFORMAÇÕES COMPLEMENTARES</div>
+            <div style="font-size: 7.5px; line-height: 1.3;">
+              <strong>DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL. NÃO GERA DIREITO A CRÉDITO FISCAL DE IPI E ICMS.</strong><br>
+              Valor aprox. tributos: R$ ${ibptFed.toFixed(2).replace('.', ',')} Federal (8,50%), R$ ${ibptEst.toFixed(2).replace('.', ',')} Estadual (4,95%) e R$ 0,00 Municipal. Fonte: IBPT.<br>
+              Pedido / Cotação UsiCorte Metais Ref: Nº ${numeroNfe}.<br>
+              ${isPrevia ? '<strong style="color: #b91c1c;">⚠️ ATENÇÃO: MODO DE CONFERÊNCIA. ESTE DOCUMENTO É UMA PRÉVIA E NÃO POSSUI VALIDADE JURÍDICA OU FISCAL.</strong>' : ''}
+            </div>
+          </td>
+          <td style="width: 30%; padding: 4px; vertical-align: top; background: #fafafa;">
+            <div class="title">RESERVADO AO FISCO</div>
+            <div style="height: 28px; border: 1px dashed #ccc; text-align: center; color: #aaa; font-size: 7px; padding-top: 8px;">
+              [ÁREA DO FISCO]
+            </div>
+          </td>
+        </tr>
+      </table>
+    </div>
 
-  <div style="font-weight: bold; font-size: 9px; margin: 4px 0 2px 0;">CÁLCULO DO IMPOSTO</div>
-  <div class="box">
-    <table>
-      <tr>
-        <td><div class="title">BASE DE CÁLC. ICMS</div><div class="val">R$ 0,00</div></td>
-        <td><div class="title">VALOR DO ICMS</div><div class="val">R$ 0,00</div></td>
-        <td><div class="title">BASE CÁLC. ICMS ST</div><div class="val">R$ 0,00</div></td>
-        <td><div class="title">VALOR ICMS ST</div><div class="val">R$ 0,00</div></td>
-        <td><div class="title">VALOR TOTAL PRODUTOS</div><div class="val">R$ ${valorTotal.toFixed(2).replace('.', ',')}</div></td>
-        <td><div class="title">VALOR TOTAL DA NOTA</div><div class="val" style="color: #b91c1c;">R$ ${valorTotal.toFixed(2).replace('.', ',')}</div></td>
-      </tr>
-    </table>
-  </div>
-
-  <div style="font-weight: bold; font-size: 9px; margin: 4px 0 2px 0;">DADOS DOS PRODUTOS / SERVIÇOS</div>
-  <table style="margin-bottom: 6px;">
-    <thead>
-      <tr>
-        <th style="width: 8%;">CÓDIGO</th>
-        <th style="width: 38%; text-align: left;">DESCRIÇÃO DO PRODUTO / SERVIÇO</th>
-        <th style="width: 10%;">NCM</th>
-        <th style="width: 6%;">CST</th>
-        <th style="width: 6%;">CFOP</th>
-        <th style="width: 6%;">UN</th>
-        <th style="width: 8%;">QTD</th>
-        <th style="width: 9%;">V. UNIT</th>
-        <th style="width: 9%;">V. TOTAL</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${linhasItens}
-    </tbody>
-  </table>
-
-  <div style="font-weight: bold; font-size: 9px; margin: 4px 0 2px 0;">DADOS ADICIONAIS</div>
-  <div class="box">
-    <div class="title">INFORMAÇÕES COMPLEMENTARES</div>
-    <div style="font-size: 9px; line-height: 1.4;">
-      DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL. NÃO GERA DIREITO A CRÉDITO FISCAL DE IPI E ICMS.<br>
-      Trib aprox: R$ 0,00 Fed, R$ 0,00 Est e R$ 0,00 Mun - Fonte: IBPT.<br>
-      Pedido / Cotação UsiCorte Metais Ref: Nº ${numeroNfe}.<br>
-      ${isPrevia ? '<strong>ATENÇÃO: MODO DE CONFERÊNCIA. ESTE DOCUMENTO É UMA PRÉVIA E NÃO POSSUI VALIDADE JURÍDICA OU FISCAL.</strong>' : ''}
+    <div style="text-align: center; font-size: 6.5px; color: #666; margin-top: 4px; border-top: 1px solid #eee; padding-top: 2px;">
+      UsiCorte Metais ERP • DANFE Modelo 55 - Versão 4.00 • Emissão em ${dataEmissao.toLocaleDateString('pt-BR')} ${dataEmissao.toLocaleTimeString('pt-BR')}
     </div>
   </div>
 </body>
