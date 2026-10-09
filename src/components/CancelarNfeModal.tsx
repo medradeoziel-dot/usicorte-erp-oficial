@@ -49,7 +49,25 @@ export default function CancelarNfeModal({
   const [resultado, setResultado] = useState<NfeCancellationResult | null>(null);
   const [hasConfirmedCheckbox, setHasConfirmedCheckbox] = useState<boolean>(true);
 
-  const chaveAcesso = (quote.nfe_chave || quote.chave_acesso || '').replace(/\D/g, '');
+  // Chave de acesso oficial (44 dígitos) com resolução resiliente
+  const chaveDireta = (quote.nfe_chave || quote.chave_acesso || '').replace(/\D/g, '');
+  let chaveAcesso = chaveDireta;
+  if (!chaveAcesso || chaveAcesso.length !== 44) {
+    try {
+      const localStr = localStorage.getItem('usicorte_notas_fiscais');
+      if (localStr) {
+        const list = JSON.parse(localStr);
+        const match = list.find((it: any) =>
+          (it.cotacao_id && (it.cotacao_id === quote.id || it.cotacao_id === quote.quoteNumber)) ||
+          (it.numero_nfe && quote.nfe_numero && String(it.numero_nfe) === String(quote.nfe_numero))
+        );
+        if (match && match.chave_acesso) {
+          chaveAcesso = String(match.chave_acesso).replace(/\D/g, '');
+        }
+      }
+    } catch {}
+  }
+
   const numeroNfe = quote.nfe_numero || '—';
   const serie = quote.serie_nfe || '1';
   const protocoloAutorizacao = quote.protocolo_autorizacao || quote.protocolo_nfe || '135260000000001';
@@ -118,7 +136,7 @@ export default function CancelarNfeModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs animate-in fade-in duration-200">
       <div 
         className="w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
         role="dialog"

@@ -2344,3 +2344,203 @@ export async function fetchFechamentoPorMesDb(mesAno: string): Promise<Fechament
   return null;
 }
 
+// =========================================================================
+// INTEGRAÇÃO COM A TABELA 'NOTAS_FISCAIS' NO SUPABASE
+// =========================================================================
+
+export interface NotaFiscalDb {
+  id?: string;
+  cotacao_id?: string | null;
+  cliente_id?: string | null;
+  numero_nfe: number | string;
+  serie_nfe?: number | string;
+  chave_acesso: string;
+  protocolo?: string | null;
+  status: 'AUTORIZADA' | 'CANCELADA' | string;
+  xml_conteudo?: string | null;
+  valor_total: number;
+  created_at?: string;
+  updated_at?: string;
+  cliente_nome?: string;
+  cotacao_numero?: string;
+}
+
+/**
+ * Insere um registro oficial de NF-e na tabela 'notas_fiscais' do Supabase
+ * logo após retorno de "AUTORIZADA" (Status 100) da SEFAZ.
+ */
+export async function inserirNotaFiscalDb(nota: {
+  cotacao_id?: string | null;
+  cliente_id?: string | null;
+  numero_nfe: number | string;
+  serie_nfe?: number | string;
+  chave_acesso: string;
+  protocolo?: string | null;
+  status: string;
+  xml_conteudo?: string | null;
+  valor_total: number;
+}): Promise<{ data: any; error: any }> {
+  try {
+    const numLimpo = parseInt(String(nota.numero_nfe || '').replace(/\D/g, ''), 10) || 1;
+    const serieLimpa = parseInt(String(nota.serie_nfe || '1').replace(/\D/g, ''), 10) || 1;
+    const chaveLimpa = (nota.chave_acesso || '').replace(/\D/g, '') || nota.chave_acesso;
+
+    const payload: any = {
+      cotacao_id: nota.cotacao_id || null,
+      cliente_id: nota.cliente_id || null,
+      numero_nfe: numLimpo,
+      serie_nfe: serieLimpa,
+      chave_acesso: chaveLimpa,
+      protocolo: nota.protocolo || null,
+      status: nota.status || 'AUTORIZADA',
+      xml_conteudo: nota.xml_conteudo || null,
+      valor_total: Number(nota.valor_total) || 0,
+      created_at: new Date().toISOString()
+    };
+
+    // 1. Gravação no LocalStorage como redundância imediata e cache
+    try {
+      const existingStr = localStorage.getItem('usicorte_notas_fiscais');
+      const list: any[] = existingStr ? JSON.parse(existingStr) : [];
+      const filtered = list.filter(
+        item => item.chave_acesso !== chaveLimpa && item.numero_nfe !== numLimpo
+      );
+      filtered.unshift({ ...payload, id: `nf_${Date.now()}` });
+      localStorage.setItem('usicorte_notas_fiscais', JSON.stringify(filtered.slice(0, 300)));
+      
+      if (nota.xml_conteudo && chaveLimpa) {
+        localStorage.setItem(`usicorte_nfe_xml_${chaveLimpa}`, nota.xml_conteudo);
+      }
+    } catch (localErr) {
+      console.warn('Aviso ao persistir nota fiscal no localStorage:', localErr);
+    }
+
+    // 2. Inserção na tabela notas_fiscais do Supabase
+    let { data, error } = await db.from('notas_fiscais').insert(payload).select().maybeSingle();
+
+    // Fallback: se houver violação de chave única (já existe), faz update
+    if (error && (error.code === '23505' || error.message?.includes('duplicate key') || error.message?.includes('unique'))) {
+      const updateRes = await db
+        .from('notas_fiscais')
+        .update(payload)
+        .eq('chave_acesso', chaveLimpa)
+        .select()
+        .maybeSingle();
+      data = updateRes.data;
+      error = updateRes.error;
+    }
+
+    // Fallback: se o banco exigir que cotacao_id/cliente_id sejam UUIDs estritos e receber string não-UUID
+    if (error && (error.code === '22P02' || error.message?.includes('uuid'))) {
+      const safePayload = {
+        ...payload,
+        cotacao_id: isUuid(payload.cotacao_id) ? payload.cotacao_id : null,
+        cliente_id: isUuid(payload.cliente_id) ? payload.cliente_id : null
+      };
+      const retry = await db.from('notas_fiscais').insert(safePayload).select().maybeSingle();
+      data = retry.data;
+      error = retry.error;
+    }
+
+    // Fallback: se a coluna numero_nfe esperar string em vez de inteiro
+    if (error && (error.code === '42804' || error.message?.includes('type'))) {
+      const stringPayload = {
+        ...payload,
+        numero_nfe: String(numLimpo),
+        serie_nfe: String(serieLimpa)
+      };
+      const retry = await db.from('notas_fiscais').insert(stringPayload).select().maybeSingle();
+      data = retry.data;
+      error = retry.error;
+    }
+
+    // Fallback: se a coluna created_at não existir no schema
+    if (error && (error.code === '42703' || error.message?.includes('created_at'))) {
+      const payloadNoDate = { ...payload };
+      delete payloadNoDate.created_at;
+      const retry = await db.from('notas_fiscais').insert(payloadNoDate).select().maybeSingle();
+      data = retry.data;
+      error = retry.error;
+    }
+
+    // Fallback: se RLS permitir insert mas não select()
+    if (error && (error.code === '42501' || error.message?.includes('policy') || error.message?.includes('permission'))) {
+      const retryWithoutSelect = await db.from('notas_fiscais').insert(payload);
+      if (!retryWithoutSelect.error) {
+        return { data: payload, error: null };
+      }
+    }
+
+    if (error) {
+      console.warn('Aviso ao inserir na tabela notas_fiscais do Supabase (mantido no cache local):', error.message);
+      return { data: payload, error };
+    }
+
+    return { data, error: null };
+  } catch (err: any) {
+    console.warn('Exceção ao inserir nota fiscal:', err);
+    return { data: null, error: err };
+  }
+}
+
+/**
+ * Consulta a lista de notas fiscais diretamente da tabela 'notas_fiscais' do Supabase
+ * com fallback e mesclagem transparente do cache local.
+ */
+export async function fetchNotasFiscaisDb(): Promise<{ data: NotaFiscalDb[]; error: any }> {
+  let dbNotas: any[] = [];
+  let dbError: any = null;
+
+  try {
+    const res = await db.from('notas_fiscais').select('*').order('created_at', { ascending: false });
+    if (res.data) {
+      dbNotas = res.data;
+    }
+    if (res.error) {
+      dbError = res.error;
+      // Fallback: se a ordenação por created_at falhar por coluna inexistente, busca sem ordenação
+      if (res.error.code === '42703' || res.error.message?.includes('created_at')) {
+        const retryRes = await db.from('notas_fiscais').select('*');
+        if (retryRes.data) {
+          dbNotas = retryRes.data;
+          dbError = null;
+        }
+      }
+    }
+  } catch (err) {
+    dbError = err;
+  }
+
+  // Mescla com cache do localStorage para resiliência offline e visualização instantânea
+  try {
+    const localStr = localStorage.getItem('usicorte_notas_fiscais');
+    if (localStr) {
+      const localList: any[] = JSON.parse(localStr);
+      const seenChaves = new Set(dbNotas.map(n => String(n.chave_acesso || '').trim()));
+      const seenNumeros = new Set(dbNotas.map(n => String(n.numero_nfe || '').trim()));
+
+      localList.forEach(ln => {
+        const chave = String(ln.chave_acesso || '').trim();
+        const num = String(ln.numero_nfe || '').trim();
+        if ((chave && !seenChaves.has(chave)) && (!num || !seenNumeros.has(num))) {
+          dbNotas.push(ln);
+          if (chave) seenChaves.add(chave);
+        }
+      });
+    }
+  } catch {}
+
+  // Ordenação decrescente por numero_nfe ou created_at
+  dbNotas.sort((a, b) => {
+    const numA = Number(a.numero_nfe) || 0;
+    const numB = Number(b.numero_nfe) || 0;
+    if (numB !== numA) return numB - numA;
+    const dateA = new Date(a.created_at || 0).getTime();
+    const dateB = new Date(b.created_at || 0).getTime();
+    return dateB - dateA;
+  });
+
+  return { data: dbNotas, error: dbError };
+}
+
+

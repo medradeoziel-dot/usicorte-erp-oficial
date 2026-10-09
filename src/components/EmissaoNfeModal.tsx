@@ -18,6 +18,7 @@ import {
   abrirDanfeEmNovaAba
 } from '../services/nfeService';
 import CancelarNfeModal from './CancelarNfeModal';
+import DanfeEspelhoA4Modal from './DanfeEspelhoA4Modal';
 import { updateCotacaoNfeStatusDb } from '../lib/db';
 import { fetchCompanyData, CompanyFiscalData, DEFAULT_COMPANY_DATA } from '../services/companyService';
 import { formatCurrency } from '../utils/calculator';
@@ -67,6 +68,8 @@ export default function EmissaoNfeModal({
   const [isDownloadingXml, setIsDownloadingXml] = useState<boolean>(false);
   const [currentQuoteState, setCurrentQuoteState] = useState<Quote>(quote);
   const [showCancelarModal, setShowCancelarModal] = useState<boolean>(false);
+  const [showDanfeOficialModal, setShowDanfeOficialModal] = useState<boolean>(false);
+  const [autoPrintDanfe, setAutoPrintDanfe] = useState<boolean>(false);
 
   useEffect(() => {
     setCurrentQuoteState(quote);
@@ -175,10 +178,18 @@ export default function EmissaoNfeModal({
           nfe_numero: res.nfeNumero,
           danfe_url: res.danfeUrl,
           xml_url: res.xmlUrl,
+          xml_conteudo: res.xmlConteudo,
           mensagem_erro_nfe: undefined,
           nfe_emitida_em: res.dataEmissao
         };
+        setCurrentQuoteState(updatedQuote);
         onSuccess(updatedQuote);
+
+        // 1. AÇÃO AUTOMÁTICA PÓS-AUTORIZAÇÃO (STATUS 100):
+        // Dispara imediatamente o Modal/Visualizador do DANFE em PDF
+        // e aciona a impressão automática / salvar como PDF do sistema
+        setShowDanfeOficialModal(true);
+        setAutoPrintDanfe(true);
       } else {
         // 4. Rejeição/Erro: Salva o erro em mensagem_erro_nfe e exibe o alerta explicativo na tela
         const msg = res.mensagemErro || 'Rejeição desconhecida pela SEFAZ.';
@@ -217,13 +228,8 @@ export default function EmissaoNfeModal({
   };
 
   const handleOpenDanfe = () => {
-    if (transmissionResult?.danfeUrl) {
-      window.open(transmissionResult.danfeUrl, '_blank');
-    } else if (quote.danfe_url) {
-      window.open(quote.danfe_url, '_blank');
-    } else {
-      setShowPreDanfeModal(true);
-    }
+    setShowDanfeOficialModal(true);
+    setAutoPrintDanfe(false);
   };
 
   const handleDownloadXml = async () => {
@@ -982,6 +988,26 @@ export default function EmissaoNfeModal({
             setShowCancelarModal(false);
           }}
           onClose={() => setShowCancelarModal(false)}
+        />
+      )}
+
+      {/* MODAL / VISUALIZADOR OFICIAL DA DANFE (A4) COM DISPARO AUTOMÁTICO DE IMPRESSÃO */}
+      {showDanfeOficialModal && (
+        <DanfeEspelhoA4Modal
+          isOpen={showDanfeOficialModal}
+          onClose={() => {
+            setShowDanfeOficialModal(false);
+            setAutoPrintDanfe(false);
+          }}
+          quote={currentQuoteState}
+          client={client}
+          company={company}
+          isPrevia={false}
+          autoPrint={autoPrintDanfe}
+          onQuoteUpdated={(updated) => {
+            setCurrentQuoteState(updated);
+            onSuccess(updated);
+          }}
         />
       )}
     </>

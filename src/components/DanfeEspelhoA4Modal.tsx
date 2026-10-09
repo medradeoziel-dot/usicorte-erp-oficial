@@ -15,7 +15,8 @@ import {
   enviarEmailNfe,
   isNfeAutorizada,
   isNfeCancelada,
-  downloadXmlCancelamento
+  downloadXmlCancelamento,
+  obterNomePadraoDanfePdf
 } from '../services/nfeService';
 import CancelarNfeModal from './CancelarNfeModal';
 import { formatCurrency, formatSafeDate } from '../utils/calculator';
@@ -51,6 +52,7 @@ interface DanfeEspelhoA4ModalProps {
   onQuoteUpdated?: (updatedQuote: Quote) => void;
   onTransmit?: () => void;
   isTransmitting?: boolean;
+  autoPrint?: boolean;
 }
 
 export default function DanfeEspelhoA4Modal({
@@ -60,8 +62,10 @@ export default function DanfeEspelhoA4Modal({
   client,
   company: initialCompany,
   isPrevia: isPreviaProp,
+  onQuoteUpdated,
   onTransmit,
-  isTransmitting = false
+  isTransmitting = false,
+  autoPrint = false
 }: DanfeEspelhoA4ModalProps) {
   const [company, setCompany] = useState<CompanyFiscalData>(initialCompany || getLocalCompanyData());
   const [isPrinting, setIsPrinting] = useState<boolean>(false);
@@ -212,14 +216,34 @@ export default function DanfeEspelhoA4Modal({
   const handlePrint = () => {
     setIsPrinting(true);
     document.body.classList.add('print-danfe');
+    const originalTitle = document.title;
+    const num = currentQuoteState.nfe_numero || currentQuoteState.quoteNumber;
+    const chave = currentQuoteState.nfe_chave || currentQuoteState.chave_acesso;
+    const tituloPadrao = isPrevia 
+      ? `PREVIA_DANFE_NFe_${String(num || '000001').padStart(6, '0')}`
+      : obterNomePadraoDanfePdf(num, chave);
+
+    document.title = tituloPadrao;
+
     setTimeout(() => {
       window.print();
       setTimeout(() => {
         document.body.classList.remove('print-danfe');
+        document.title = originalTitle;
         setIsPrinting(false);
       }, 500);
-    }, 150);
+    }, 200);
   };
+
+  // Disparo automático do diálogo de impressão do navegador quando solicitado após emissão
+  useEffect(() => {
+    if (isOpen && autoPrint && isAutorizada) {
+      const timer = setTimeout(() => {
+        handlePrint();
+      }, 450);
+      return () => clearTimeout(timer);
+    }
+  }, [isOpen, autoPrint, isAutorizada]);
 
   const handleDownloadXml = async () => {
     setIsDownloadingXml(true);
@@ -263,7 +287,7 @@ export default function DanfeEspelhoA4Modal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/85 backdrop-blur-xs">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-2 sm:p-4 bg-slate-950/85 backdrop-blur-xs">
       <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl max-w-5xl w-full max-h-[96vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         
         {/* Modal Header */}
@@ -361,11 +385,11 @@ export default function DanfeEspelhoA4Modal({
               type="button"
               onClick={handlePrint}
               disabled={isPrinting}
-              className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 font-semibold text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
-              title="Imprimir documento em formato A4"
+              className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-md shadow-emerald-600/30"
+              title="Imprimir DANFE ou Salvar como PDF"
             >
-              <Printer className="w-4 h-4 text-cyan-400" />
-              <span>Imprimir / PDF</span>
+              <Printer className="w-4 h-4" />
+              <span>Imprimir DANFE</span>
             </button>
 
             <button
@@ -650,6 +674,17 @@ export default function DanfeEspelhoA4Modal({
 
                 <button
                   type="button"
+                  onClick={handleDownloadXml}
+                  disabled={isDownloadingXml}
+                  className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-sm disabled:opacity-50"
+                  title="Baixar arquivo XML da NF-e autorizado pela SEFAZ"
+                >
+                  <Download className="w-4 h-4 text-emerald-400" />
+                  <span>{isDownloadingXml ? 'Baixando...' : 'Baixar XML'}</span>
+                </button>
+
+                <button
+                  type="button"
                   onClick={handleEnviarEmail}
                   className="px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-indigo-500/30 font-semibold text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
                   title="Enviar DANFE e chave da NF-e por e-mail para o cliente"
@@ -664,10 +699,11 @@ export default function DanfeEspelhoA4Modal({
               type="button"
               onClick={handlePrint}
               disabled={isPrinting}
-              className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 font-semibold text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+              className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl transition-all flex items-center gap-2 cursor-pointer shadow-lg shadow-emerald-600/30"
+              title="Imprimir DANFE oficial ou Salvar como PDF"
             >
-              <Printer className="w-4 h-4 text-cyan-400" />
-              <span>Imprimir</span>
+              <Printer className="w-4 h-4" />
+              <span>Imprimir DANFE</span>
             </button>
 
             {isPrevia && onTransmit && (

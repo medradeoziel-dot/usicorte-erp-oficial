@@ -16,7 +16,8 @@ import {
   buscarInscricaoEstadual,
   obterOuBaixarXmlNfe,
   isNfeAutorizada,
-  isNfeCancelada
+  isNfeCancelada,
+  obterNomePadraoDanfePdf
 } from '../services/nfeService';
 export { buscarInscricaoEstadual };
 import { formatCurrency, formatNumberBR, formatSafeDate } from '../utils/calculator';
@@ -325,7 +326,17 @@ export default function DanfeEspelhoA4({
   };
 
   const handlePrint = () => {
+    const originalTitle = document.title;
+    const num = numeroNfe || quote.nfe_numero || quote.quoteNumber;
+    const chave = chaveAcessoRaw || quote.nfe_chave || quote.chave_acesso;
+    const tituloPadrao = isPrevia
+      ? `PREVIA_DANFE_NFe_${formatarNumeroDanfe(num)}`
+      : obterNomePadraoDanfePdf(num, chave);
+    document.title = tituloPadrao;
     window.print();
+    setTimeout(() => {
+      document.title = originalTitle;
+    }, 500);
   };
 
   return (
@@ -409,7 +420,7 @@ export default function DanfeEspelhoA4({
             title="Imprimir DANFE na folha A4 oficial"
           >
             <Printer className="w-4 h-4" />
-            <span>{isCancelada ? 'Imprimir Cancelada' : 'Imprimir A4'}</span>
+            <span>{isCancelada ? 'Imprimir Cancelada' : 'Imprimir DANFE'}</span>
           </button>
 
           {isPrevia && !isCancelada && onTransmitir && (

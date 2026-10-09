@@ -1,5 +1,5 @@
 import { Quote, QuoteItem, Client } from '../types';
-import { db, updateCotacaoNfeStatusDb, isUuid } from '../lib/db';
+import { db, updateCotacaoNfeStatusDb, isUuid, inserirNotaFiscalDb, fetchNotasFiscaisDb, NotaFiscalDb } from '../lib/db';
 import { fetchCompanyData, CompanyFiscalData, DEFAULT_COMPANY_DATA, incrementEmitenteUltimoNumeroNfe, getLocalCompanyData } from './companyService';
 import { generateBarcodeSvg } from '../utils/barcode';
 
@@ -516,7 +516,7 @@ export function downloadXmlNfe(xmlContent: string, chaveAcesso: string): void {
 export function isNfeAutorizada(status?: string | null): boolean {
   if (!status) return false;
   const s = String(status).trim().toUpperCase();
-  return s === 'AUTORIZADA' || s === 'EMITIDA';
+  return s === 'AUTORIZADA' || s === 'EMITIDA' || s === 'EMITIDO' || s === 'AUTORIZADO';
 }
 
 /**
@@ -525,7 +525,7 @@ export function isNfeAutorizada(status?: string | null): boolean {
 export function isNfeCancelada(status?: string | null): boolean {
   if (!status) return false;
   const s = String(status).trim().toUpperCase();
-  return s === 'CANCELADA';
+  return s === 'CANCELADA' || s === 'CANCELADO';
 }
 
 export interface NfeCancellationResult {
@@ -692,11 +692,47 @@ export async function transmitirCancelamentoNfeSefaz(
     }
   }
 
+  // Atualiza o registro também na tabela oficial 'notas_fiscais' do Supabase
+  try {
+    const cleanChave = chaveAcesso.replace(/\D/g, '');
+    if (cleanChave) {
+      await db
+        .from('notas_fiscais')
+        .update({
+          status: 'CANCELADA',
+          protocolo: protocoloCancelamento,
+          updated_at: dataEvento.toISOString()
+        })
+        .eq('chave_acesso', cleanChave);
+    }
+  } catch (nfUpdateErr) {
+    console.warn('Aviso ao atualizar cancelamento na tabela notas_fiscais:', nfUpdateErr);
+  }
+
   // Grava também no LocalStorage
   try {
     localStorage.setItem(`usicorte_nfe_status_${chaveAcesso}`, 'CANCELADA');
     localStorage.setItem(`usicorte_nfe_cancel_xml_${chaveAcesso}`, xmlCancelamento);
     localStorage.setItem(`usicorte_nfe_cancel_prot_${chaveAcesso}`, protocoloCancelamento);
+
+    const existingStr = localStorage.getItem('usicorte_notas_fiscais');
+    if (existingStr) {
+      const list: any[] = JSON.parse(existingStr);
+      const cleanChave = chaveAcesso.replace(/\D/g, '');
+      const updatedList = list.map(item => {
+        if (item.chave_acesso === cleanChave) {
+          return {
+            ...item,
+            status: 'CANCELADA',
+            protocolo: protocoloCancelamento,
+            xml_cancelamento: xmlCancelamento,
+            motivo_cancelamento: just
+          };
+        }
+        return item;
+      });
+      localStorage.setItem('usicorte_notas_fiscais', JSON.stringify(updatedList));
+    }
   } catch {}
 
   return {
@@ -756,6 +792,29 @@ export async function obterOuBaixarXmlNfe(
         }
       } catch (dbErr) {
         console.warn('Aviso ao consultar XML gravado no Supabase:', dbErr);
+      }
+    }
+
+    // 2.1 Busca na nova tabela 'notas_fiscais' do Supabase por chave_acesso, cotacao_id ou numero_nfe
+    if (!xml && (chave || idOrNum || quote.nfe_numero)) {
+      try {
+        let nfQuery = db.from('notas_fiscais').select('xml_conteudo, chave_acesso, protocolo, numero_nfe, serie_nfe, status');
+        if (chave) {
+          nfQuery = nfQuery.eq('chave_acesso', chave.replace(/\D/g, ''));
+        } else if (idOrNum) {
+          nfQuery = nfQuery.eq('cotacao_id', String(idOrNum));
+        } else if (quote.nfe_numero) {
+          const numSeq = parseInt(String(quote.nfe_numero).replace(/\D/g, ''), 10);
+          if (numSeq) nfQuery = nfQuery.eq('numero_nfe', numSeq);
+        }
+        const { data: nfData } = await nfQuery.maybeSingle();
+        if (nfData) {
+          if (nfData.xml_conteudo) xml = nfData.xml_conteudo;
+          if (!chave && nfData.chave_acesso) chave = nfData.chave_acesso;
+          if (!protocolo && nfData.protocolo) protocolo = nfData.protocolo;
+        }
+      } catch (nfErr) {
+        console.warn('Aviso ao consultar XML na tabela notas_fiscais:', nfErr);
       }
     }
 
@@ -1369,6 +1428,27 @@ export async function transmitirNfeSefaz(
       nfe_emitida_em: dataEmissao.toISOString()
     });
 
+    // Inserção do registro completo na nova tabela 'notas_fiscais' do Supabase
+    try {
+      const numSeq = parseInt(String(numeroNfe).replace(/\D/g, ''), 10) || proximoNumeroNfe;
+      const serieSeq = parseInt(String(serie).replace(/\D/g, ''), 10) || 1;
+      const chaveLimpa = chaveAcesso.replace(/\D/g, '') || chaveAcesso;
+
+      await inserirNotaFiscalDb({
+        cotacao_id: quote.id || quote.quoteNumber || null,
+        cliente_id: client?.id || quote.clientId || null,
+        numero_nfe: numSeq,
+        serie_nfe: serieSeq,
+        chave_acesso: chaveLimpa,
+        protocolo: protocolo,
+        status: 'AUTORIZADA',
+        xml_conteudo: xmlConteudo,
+        valor_total: Number(valorTotal) || 0
+      });
+    } catch (nfErr) {
+      console.warn('Aviso ao inserir registro na tabela notas_fiscais:', nfErr);
+    }
+
     // Atualiza ultimo_numero_nfe (+1) na tabela emitente
     try {
       await incrementEmitenteUltimoNumeroNfe(proximoNumeroNfe);
@@ -1405,6 +1485,18 @@ function anoMesDia(d: Date): string {
 }
 
 /**
+ * Retorna o nome padronizado para sugestão de salvamento do PDF do DANFE.
+ * Padrão com número da nota e chave de acesso: DANFE_NFe_[numero]_[chave] ou DANFE_NFe_[numero]
+ * Exemplo: DANFE_NFe_000001.pdf
+ */
+export function obterNomePadraoDanfePdf(numeroNfe?: string | number, chaveAcesso?: string): string {
+  const numLimpo = String(numeroNfe || '').replace(/\D/g, '');
+  const numFormatado = numLimpo ? numLimpo.padStart(6, '0') : '000001';
+  const chaveLimpa = (chaveAcesso || '').replace(/\D/g, '');
+  return chaveLimpa ? `DANFE_NFe_${numFormatado}_${chaveLimpa}` : `DANFE_NFe_${numFormatado}`;
+}
+
+/**
  * Gera documento HTML visual padrão DANFE (Documento Auxiliar da Nota Fiscal Eletrônica - Modelo 55)
  */
 export function gerarDanfeHtml(
@@ -1424,7 +1516,8 @@ export function gerarDanfeHtml(
   xmlConteudo?: string,
   isCancelada: boolean = false,
   protocoloCancelamento?: string,
-  motivoCancelamento?: string
+  motivoCancelamento?: string,
+  autoPrint: boolean = false
 ): string {
   const chaveFormatada = isPrevia ? 'CHAVE SERÁ GERADA APÓS TRANSMISSÃO SEFAZ' : formatarChaveAcesso(chaveAcesso);
   const totalProdutos = itens.reduce((acc, it) => acc + it.subtotal, 0);
@@ -1433,6 +1526,11 @@ export function gerarDanfeHtml(
   const ibptEst = totalProdutos * 0.0495;
 
   const resolvedXml = xmlConteudo || (!isPrevia ? gerarXmlNfe(emitente, destinatario, itens, numeroNfe, serie, chaveAcesso, valorTotal, dataEmissao, protocolo) : '');
+
+  const nomeArquivoPdf = obterNomePadraoDanfePdf(numeroNfe, chaveAcesso);
+  const tituloPagina = isPrevia 
+    ? `PREVIA_DANFE_NFe_${String(numeroNfe || '000001').padStart(6, '0')}` 
+    : nomeArquivoPdf;
 
   const linhasItens = itens.map((it) => `
     <tr>
@@ -1461,7 +1559,7 @@ export function gerarDanfeHtml(
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <title>${isPrevia ? 'PRÉVIA DANFE (SEM VALOR FISCAL)' : 'DANFE'} - NF-e Nº ${numeroNfe}</title>
+  <title>${tituloPagina}</title>
   <style>
     @page { size: A4 portrait; margin: 5mm; }
     * { box-sizing: border-box; }
@@ -1941,6 +2039,16 @@ export function gerarDanfeHtml(
     }
   </script>
   ` : ''}
+
+  ${autoPrint ? `
+  <script>
+    window.addEventListener('load', function() {
+      setTimeout(function() {
+        window.print();
+      }, 400);
+    });
+  </script>
+  ` : ''}
 </body>
 </html>`;
 }
@@ -1954,19 +2062,20 @@ export async function abrirDanfeEmNovaAba(
   quote: Quote, 
   client?: Client | null,
   duplicatas?: DuplicataDanfe[],
-  isAVista?: boolean
+  isAVista?: boolean,
+  autoPrint: boolean = false
 ): Promise<void> {
   const isCancelada = isNfeCancelada(quote.status_nfe);
   const isAVistaFinal = isAVista !== undefined ? isAVista : (detectarFormaPagamentoInicial(quote) === 'A_VISTA');
 
-  // Se a danfe_url for um link externo ou data URI e não houver customização de duplicatas e NÃO for cancelada
-  if (!isCancelada && quote.danfe_url && !quote.danfe_url.startsWith('blob:') && !duplicatas && isAVista === undefined) {
+  // Se a danfe_url for um link externo ou data URI e não for solicitada impressão automática nem alteração de duplicatas
+  if (!isCancelada && quote.danfe_url && !quote.danfe_url.startsWith('blob:') && !duplicatas && isAVista === undefined && !autoPrint) {
     window.open(quote.danfe_url, '_blank');
     return;
   }
 
-  // Tenta abrir a URL se for blob válido ativo sem alteração de duplicatas e NÃO for cancelada
-  if (!isCancelada && quote.danfe_url && quote.danfe_url.startsWith('blob:') && !duplicatas && isAVista === undefined) {
+  // Tenta abrir a URL se for blob válido ativo sem alteração de duplicatas e NÃO for solicitada autoPrint
+  if (!isCancelada && quote.danfe_url && quote.danfe_url.startsWith('blob:') && !duplicatas && isAVista === undefined && !autoPrint) {
     try {
       const resp = await fetch(quote.danfe_url, { method: 'HEAD' });
       if (resp.ok) {
@@ -2008,7 +2117,7 @@ export async function abrirDanfeEmNovaAba(
       : 0;
     const numeroNfe = quote.nfe_numero || String(emitenteUltimo + 1).padStart(6, '0');
     const serie = String(quote.serie_nfe || emitente.serie_nfe || '1');
-    const chaveAcesso = quote.nfe_chave || gerarChaveAcessoNfe(emitente.uf || 'SP', new Date(), emitente.cnpj, serie, numeroNfe);
+    const chaveAcesso = quote.nfe_chave || quote.chave_acesso || gerarChaveAcessoNfe(emitente.uf || 'SP', new Date(), emitente.cnpj, serie, numeroNfe);
     const protocolo = quote.protocolo_nfe || '135260000000001 (Autorizado o uso da NF-e)';
     const dataEmissao = quote.nfe_emitida_em ? new Date(quote.nfe_emitida_em) : new Date();
 
@@ -2016,7 +2125,13 @@ export async function abrirDanfeEmNovaAba(
       ? [] 
       : (duplicatas || gerarDuplicatasProporcionais(valorTotal, 1, numeroNfe));
 
-    const xmlConteudo = quote.xml_conteudo;
+    let xmlConteudo = quote.xml_conteudo;
+    if (!xmlConteudo && chaveAcesso) {
+      const cleanChave = chaveAcesso.replace(/\D/g, '');
+      if (cleanChave) {
+        xmlConteudo = localStorage.getItem(`usicorte_nfe_xml_${cleanChave}`) || undefined;
+      }
+    }
 
     const danfeHtml = gerarDanfeHtml(
       emitente as any,
@@ -2035,7 +2150,8 @@ export async function abrirDanfeEmNovaAba(
       xmlConteudo,
       isCancelada,
       quote.protocolo_cancelamento,
-      quote.motivo_cancelamento
+      quote.motivo_cancelamento,
+      autoPrint
     );
 
     const blob = new Blob([danfeHtml], { type: 'text/html' });
@@ -2133,5 +2249,7 @@ export async function abrirPreDanfeEmNovaAba(
     console.error('Erro ao abrir Pré-DANFE em nova aba:', err);
   }
 }
+
+export { inserirNotaFiscalDb, fetchNotasFiscaisDb, type NotaFiscalDb } from '../lib/db';
 
 

@@ -76,7 +76,7 @@ import EmissaoNfeModal from './EmissaoNfeModal';
 import CancelarNfeModal from './CancelarNfeModal';
 import DanfeEspelhoA4Modal from './DanfeEspelhoA4Modal';
 import OrdemCorte80mm, { imprimirCupom80mm } from './OrdemCorte80mm';
-import { obterOuBaixarXmlNfe, isNfeAutorizada, isNfeCancelada, downloadXmlCancelamento } from '../services/nfeService';
+import { obterOuBaixarXmlNfe, isNfeAutorizada, isNfeCancelada, downloadXmlCancelamento, fetchNotasFiscaisDb } from '../services/nfeService';
 import { 
   ContaReceberParcela,
   fetchBoletosDb,
@@ -130,6 +130,9 @@ export function normalizeStatus(rawStatus?: string): string {
 }
 
 export function getStatusOption(rawStatus?: string): StatusOptionConfig {
+  if (rawStatus === 'nfe_emitida') {
+    return { value: 'nfe_emitida', label: 'Notas Fiscais Emitidas (SEFAZ)', dotClass: 'bg-emerald-500' };
+  }
   if (rawStatus === 'ativas') {
     return { value: 'ativas', label: 'Em Aberto / Ativas', dotClass: 'bg-sky-500' };
   }
@@ -653,6 +656,7 @@ export default function ReportsModule({
   // Estados para Emissão, Visualização e Cancelamento de Nota Fiscal Eletrônica (NF-e / DANFE)
   const [quoteForNfeModal, setQuoteForNfeModal] = useState<Quote | null>(null);
   const [quoteForDanfeModal, setQuoteForDanfeModal] = useState<Quote | null>(null);
+  const [autoPrintDanfeModal, setAutoPrintDanfeModal] = useState<boolean>(false);
   const [quoteForCancelNfeModal, setQuoteForCancelNfeModal] = useState<Quote | null>(null);
   const [isLoadingNfeQuote, setIsLoadingNfeQuote] = useState<boolean>(false);
 
@@ -1088,13 +1092,13 @@ export default function ReportsModule({
         quoteObj = {
           id: item.cotacaoId || item.cotacao || `COT-${Date.now()}`,
           quoteNumber: item.cotacao || 'COT-TEMP',
-          clientId: item.clienteId,
-          cliente_id: item.clienteId,
+          clientId: (item as any).clienteId || item.clienteId,
+          cliente_id: (item as any).clienteId || item.clienteId,
           cliente_nome: item.empresa,
           date: item.data || new Date().toISOString().slice(0, 10),
           clientName: item.empresa || 'Cliente Balcão',
           contactPerson: item.contato !== '-' ? item.contato : '',
-          status: item.status === 'aprovado' ? 'Aprovado' : item.status === 'pendente' ? 'Enviado' : 'Rascunho',
+          status: item.status === 'aprovado' ? 'Aprovado' : item.status === 'pendente' ? 'Enviado' : 'Faturado',
           validityDays: 10,
           paymentTerms: 'À Vista / Pix',
           observations: item.observacao || '',
@@ -1106,14 +1110,22 @@ export default function ReportsModule({
           totalWeightKg: 0,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
-          status_nfe: item.status_nfe,
+          status_nfe: item.status_nfe || 'AUTORIZADA',
           nfe_numero: item.nfe_numero,
           nfe_chave: item.nfe_chave,
           chave_acesso: item.nfe_chave,
           danfe_url: item.danfe_url,
           xml_url: (item as any).xml_url,
-          xml_conteudo: (item as any).xml_conteudo
+          xml_conteudo: (item as any).xml_conteudo,
+          protocolo_nfe: (item as any).protocolo_nfe
         };
+      } else if (quoteObj && item.nfe_chave) {
+        quoteObj.status_nfe = item.status_nfe || quoteObj.status_nfe || 'AUTORIZADA';
+        quoteObj.nfe_numero = item.nfe_numero || quoteObj.nfe_numero;
+        quoteObj.nfe_chave = item.nfe_chave || quoteObj.nfe_chave;
+        quoteObj.chave_acesso = item.nfe_chave || quoteObj.chave_acesso;
+        quoteObj.protocolo_nfe = (item as any).protocolo_nfe || quoteObj.protocolo_nfe;
+        quoteObj.xml_conteudo = (item as any).xml_conteudo || quoteObj.xml_conteudo;
       }
       return quoteObj;
     } finally {
@@ -1249,8 +1261,12 @@ export default function ReportsModule({
 
   // Disparo de cancelamento de NF-e a partir da barra superior
   const handleCancelarNfeTopBar = async () => {
-    const selectedItem = filteredConsultaItems.find(it => selectedIds.includes(it.idVer)) || 
-      (selectedIds.length === 0 && filteredConsultaItems.length === 1 ? filteredConsultaItems[0] : null);
+    const selectedItem = (selectedIds.length > 0
+      ? (filteredConsultaItems.find(it => selectedIds.includes(it.idVer) && (isNfeAutorizada(it.status_nfe) || (Boolean(it.nfe_chave || it.nfe_numero) && !isNfeCancelada(it.status_nfe)))) ||
+         allConsultaItems.find(it => selectedIds.includes(it.idVer) && (isNfeAutorizada(it.status_nfe) || (Boolean(it.nfe_chave || it.nfe_numero) && !isNfeCancelada(it.status_nfe)))) ||
+         filteredConsultaItems.find(it => selectedIds.includes(it.idVer)) ||
+         allConsultaItems.find(it => selectedIds.includes(it.idVer)))
+      : (filteredConsultaItems.length === 1 ? filteredConsultaItems[0] : null));
 
     if (!selectedItem) {
       setDeleteFeedback({
@@ -1260,7 +1276,7 @@ export default function ReportsModule({
       return;
     }
 
-    if (!isNfeAutorizada(selectedItem.status_nfe)) {
+    if (!isNfeAutorizada(selectedItem.status_nfe) && (!selectedItem.nfe_chave || isNfeCancelada(selectedItem.status_nfe))) {
       setDeleteFeedback({
         message: `Esta nota não está com status AUTORIZADA (Status atual: ${selectedItem.status_nfe || 'Pendente'}). Somente NF-e autorizada pode ser cancelada na SEFAZ.`,
         type: 'error'
@@ -1554,6 +1570,69 @@ export default function ReportsModule({
             console.warn('Aviso ao sincronizar emergência em ReportsModule:', err);
           });
         }
+      }
+
+      // 2. Integração oficial com a tabela 'notas_fiscais' do Supabase
+      try {
+        const { data: notasDb } = await fetchNotasFiscaisDb();
+        if (notasDb && notasDb.length > 0) {
+          const matchedChaves = new Set<string>();
+
+          // A) Hidrata itens existentes com dados oficiais de notas_fiscais
+          itemsList.forEach(item => {
+            const nf = notasDb.find(n => 
+              (n.cotacao_id && (n.cotacao_id === item.cotacaoId || n.cotacao_id === item.cotacao)) ||
+              (item.nfe_chave && n.chave_acesso && item.nfe_chave === n.chave_acesso) ||
+              (item.nfe_numero && n.numero_nfe && String(item.nfe_numero) === String(n.numero_nfe))
+            );
+            if (nf) {
+              item.status_nfe = nf.status || 'AUTORIZADA';
+              item.nfe_numero = String(nf.numero_nfe);
+              item.nfe_chave = nf.chave_acesso;
+              (item as any).protocolo_nfe = nf.protocolo;
+              (item as any).xml_conteudo = nf.xml_conteudo;
+              matchedChaves.add(nf.chave_acesso);
+            }
+          });
+
+          // B) Insere notas fiscais emitidas da tabela notas_fiscais que não possuam itens correspondentes
+          notasDb.forEach((nf, nfIdx) => {
+            if (nf.chave_acesso && !matchedChaves.has(nf.chave_acesso)) {
+              matchedChaves.add(nf.chave_acesso);
+              const clientFound = (clients || []).find(c => c.id === nf.cliente_id);
+              const cliNome = clientFound?.name || (clientFound as any)?.nome || nf.cliente_nome || 'Cliente NF-e';
+
+              itemsList.push({
+                idVer: 80000 + nfIdx,
+                data: formatSafeDate(nf.created_at || new Date().toISOString()),
+                empresa: cliNome,
+                contato: '-',
+                produto: `NF-e Nº ${String(nf.numero_nfe).padStart(6, '0')}`,
+                medida: '—',
+                descricao: `Nota Fiscal Eletrônica Emitida e Autorizada na SEFAZ (Série ${nf.serie_nfe || 1})`,
+                valor: formatCurrency(Number(nf.valor_total) || 0),
+                qtd: 1,
+                unitario: Number(nf.valor_total) || 0,
+                valorGeral: Number(nf.valor_total) || 0,
+                cotacao: nf.cotacao_id || `NFE-${nf.numero_nfe}`,
+                cotacaoId: nf.cotacao_id || undefined,
+                clienteId: nf.cliente_id || undefined,
+                itemId: `nf_${nf.numero_nfe}`,
+                observacao: `Chave de Acesso: ${nf.chave_acesso}`,
+                obs: `Chave de Acesso: ${nf.chave_acesso}`,
+                status: 'faturado' as StatusProposta,
+                status_nfe: nf.status || 'AUTORIZADA',
+                nfe_numero: String(nf.numero_nfe),
+                nfe_chave: nf.chave_acesso,
+                danfe_url: undefined,
+                xml_conteudo: nf.xml_conteudo || undefined,
+                protocolo_nfe: nf.protocolo || undefined
+              } as any);
+            }
+          });
+        }
+      } catch (nfeErr) {
+        console.warn('Aviso ao sincronizar notas_fiscais em loadAllConsultaData:', nfeErr);
       }
 
       setIsInitialRecentOnly(Boolean(limit && limit > 0));
@@ -1976,7 +2055,12 @@ export default function ReportsModule({
 
       // 1.b) Filtro por situação da proposta
       const normStatus = normalizeStatus(item.status);
-      if (statusFiltro === 'ativas') {
+      if (statusFiltro === 'nfe_emitida') {
+        // "Notas Fiscais Emitidas (SEFAZ)" (lista apenas pedidos/itens com NF-e autorizada na tabela notas_fiscais)
+        if (!isNfeAutorizada(item.status_nfe)) {
+          return false;
+        }
+      } else if (statusFiltro === 'ativas') {
         // "Em Aberto / Ativas" (Padrão ao abrir a tela: exibe apenas Pendente, Aprovado, Rascunho)
         // Cotações marcadas como FATURADO saem automaticamente da listagem principal
         if (normStatus !== 'pendente' && normStatus !== 'aprovado' && normStatus !== 'rascunho') {
@@ -2000,7 +2084,11 @@ export default function ReportsModule({
         case 'cliente':
           return normalizar(item.empresa).includes(term);
         case 'cotacao':
-          return normalizar(item.cotacao).includes(term);
+          return (
+            normalizar(item.cotacao).includes(term) ||
+            (item.nfe_numero && normalizar(item.nfe_numero).includes(term)) ||
+            (item.nfe_chave && normalizar(item.nfe_chave).includes(term))
+          );
         case 'contato':
           return normalizar(item.contato).includes(term);
         case 'produto':
@@ -3770,14 +3858,18 @@ export default function ReportsModule({
                 BAIXAR XML
               </button>
               {(() => {
-                const selectedItem = filteredConsultaItems.find(it => selectedIds.includes(it.idVer)) || 
-                  (selectedIds.length === 0 && filteredConsultaItems.length === 1 ? filteredConsultaItems[0] : null);
-                const isAutorizada = selectedItem && isNfeAutorizada(selectedItem.status_nfe);
+                const selectedItem = (selectedIds.length > 0
+                  ? (filteredConsultaItems.find(it => selectedIds.includes(it.idVer) && (isNfeAutorizada(it.status_nfe) || (Boolean(it.nfe_chave || it.nfe_numero) && !isNfeCancelada(it.status_nfe)))) ||
+                     allConsultaItems.find(it => selectedIds.includes(it.idVer) && (isNfeAutorizada(it.status_nfe) || (Boolean(it.nfe_chave || it.nfe_numero) && !isNfeCancelada(it.status_nfe)))) ||
+                     filteredConsultaItems.find(it => selectedIds.includes(it.idVer)) ||
+                     allConsultaItems.find(it => selectedIds.includes(it.idVer)))
+                  : (filteredConsultaItems.length === 1 ? filteredConsultaItems[0] : null));
+                const isAutorizada = Boolean(selectedItem && (isNfeAutorizada(selectedItem.status_nfe) || (Boolean(selectedItem.nfe_chave || selectedItem.nfe_numero) && !isNfeCancelada(selectedItem.status_nfe))));
                 if (!isAutorizada) return null;
                 return (
                   <button
                     type="button"
-                    className="btn-print w-full min-w-0 cursor-pointer border transition-all bg-rose-700 hover:bg-rose-600 text-white border-rose-500 shadow-md shadow-rose-700/30"
+                    className="btn-print w-full min-w-0 cursor-pointer border transition-all bg-rose-700 hover:bg-rose-600 text-white border-rose-500 shadow-md shadow-rose-700/30 font-bold animate-in fade-in zoom-in-95 duration-150"
                     onClick={handleCancelarNfeTopBar}
                     disabled={isLoadingNfeQuote}
                     title={`Cancelar NF-e Homologada (Nº ${selectedItem?.nfe_numero || ''}) perante a SEFAZ`}
@@ -3972,6 +4064,24 @@ export default function ReportsModule({
                         <span className="text-blue-600">Em Aberto / Ativas</span>
                       </div>
                       {statusFiltro === 'ativas' && <Check className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />}
+                    </button>
+
+                    {/* 1.b Notas Fiscais Emitidas (SEFAZ) */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStatusFiltro('nfe_emitida');
+                        setOpenStatusDropdownId(null);
+                      }}
+                      className={`w-full flex items-center justify-between px-3 py-1.5 text-left text-xs transition-colors hover:bg-emerald-50 cursor-pointer ${
+                        statusFiltro === 'nfe_emitida' ? 'bg-emerald-50/80 font-bold' : 'font-medium'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
+                        <span className="text-emerald-700">🧾 Notas Fiscais (SEFAZ)</span>
+                      </div>
+                      {statusFiltro === 'nfe_emitida' && <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0 ml-1" />}
                     </button>
 
                     {/* 2. Faturado (Para consultar apenas orçamentos baixados/faturados) */}
@@ -4285,18 +4395,26 @@ export default function ReportsModule({
                                 <Download className="w-3.5 h-3.5 text-emerald-400" />
                               </button>
                             )}
-                            {isNfeAutorizada(item.status_nfe) && (
+                            {(isNfeAutorizada(item.status_nfe) || (Boolean(item.nfe_chave || item.nfe_numero) && !isNfeCancelada(item.status_nfe))) && (
                               <button
                                 type="button"
                                 onClick={async (e) => {
                                   e.stopPropagation();
                                   await handleAbrirCancelamentoNfe(item);
                                 }}
-                                className="p-1.5 bg-rose-600/20 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-500/40 rounded-md transition-all cursor-pointer flex items-center justify-center shadow-xs"
-                                title={`Cancelar NF-e Homologada (Nº ${item.nfe_numero || ''}) na SEFAZ`}
+                                className="p-1.5 bg-rose-600/25 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-500/60 rounded-md transition-all cursor-pointer flex items-center justify-center shadow-xs group"
+                                title={`Cancelar NF-e Homologada (Nº ${item.nfe_numero || ''}) na SEFAZ (Status 101)`}
                               >
                                 <Ban className="w-3.5 h-3.5 text-rose-400 group-hover:text-white" />
                               </button>
+                            )}
+                            {isNfeCancelada(item.status_nfe) && (
+                              <span
+                                className="p-1.5 bg-rose-950/40 text-rose-400/80 border border-rose-900/50 rounded-md flex items-center justify-center shadow-xs cursor-default"
+                                title={`NF-e já Cancelada perante a SEFAZ (Status 101). Prot: ${item.protocolo_cancelamento || '-'}`}
+                              >
+                                <Ban className="w-3.5 h-3.5 text-rose-400/70" />
+                              </span>
                             )}
                             <button
                               type="button"
@@ -4930,6 +5048,8 @@ export default function ReportsModule({
               onSuccess={(updated) => {
                 handleNfeSuccess(updated);
                 setQuoteForNfeModal(null);
+                setQuoteForDanfeModal(updated);
+                setAutoPrintDanfeModal(true);
               }}
               onClose={() => setQuoteForNfeModal(null)}
             />
@@ -4941,13 +5061,18 @@ export default function ReportsModule({
           {quoteForDanfeModal && (
             <DanfeEspelhoA4Modal
               isOpen={Boolean(quoteForDanfeModal)}
-              onClose={() => setQuoteForDanfeModal(null)}
+              onClose={() => {
+                setQuoteForDanfeModal(null);
+                setAutoPrintDanfeModal(false);
+              }}
               quote={quoteForDanfeModal}
               client={resolveClientForQuote(quoteForDanfeModal)}
-              isPrevia={quoteForDanfeModal.status_nfe !== 'Emitida'}
+              isPrevia={!isNfeAutorizada(quoteForDanfeModal.status_nfe)}
+              autoPrint={autoPrintDanfeModal}
               onTransmit={() => {
                 const q = quoteForDanfeModal;
                 setQuoteForDanfeModal(null);
+                setAutoPrintDanfeModal(false);
                 if (q) setQuoteForNfeModal(q);
               }}
             />

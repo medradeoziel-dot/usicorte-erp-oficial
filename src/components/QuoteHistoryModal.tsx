@@ -3,6 +3,7 @@ import { Quote, Client } from '../types';
 import { formatCurrency, formatSafeDate } from '../utils/calculator';
 import EmissaoNfeModal from './EmissaoNfeModal';
 import { abrirDanfeEmNovaAba, obterOuBaixarXmlNfe, isNfeAutorizada, isNfeCancelada, downloadXmlCancelamento } from '../services/nfeService';
+import { fetchNotasFiscaisDb } from '../lib/db';
 import CancelarNfeModal from './CancelarNfeModal';
 import { 
   History, 
@@ -52,10 +53,98 @@ export default function QuoteHistoryModal({
   const [quoteForCancelNfe, setQuoteForCancelNfe] = useState<Quote | null>(null);
   const [localQuotes, setLocalQuotes] = useState<Quote[]>(quotes);
 
-  // Mantém localQuotes em sincronia quando a prop quotes atualizar
+  // Mantém localQuotes em sincronia quando a prop quotes atualizar e hidrata da tabela notas_fiscais
   React.useEffect(() => {
-    setLocalQuotes(quotes);
-  }, [quotes]);
+    let isMounted = true;
+
+    async function carregarEHarmonizarNotas() {
+      try {
+        const { data: notasDb } = await fetchNotasFiscaisDb();
+        if (!isMounted) return;
+
+        setLocalQuotes(prev => {
+          const base = [...quotes];
+          const matchedChaves = new Set<string>();
+
+          // 1. Atualiza e hidrata cotações existentes com a tabela notas_fiscais
+          base.forEach(q => {
+            const match = (notasDb || []).find(nf => 
+              (nf.cotacao_id && (nf.cotacao_id === q.id || nf.cotacao_id === q.quoteNumber)) ||
+              (q.nfe_chave && nf.chave_acesso && q.nfe_chave === nf.chave_acesso) ||
+              (q.nfe_numero && nf.numero_nfe && String(q.nfe_numero) === String(nf.numero_nfe))
+            );
+            if (match) {
+              q.status_nfe = match.status || 'AUTORIZADA';
+              q.nfe_numero = String(match.numero_nfe);
+              q.nfe_chave = match.chave_acesso;
+              q.chave_acesso = match.chave_acesso;
+              q.protocolo_nfe = match.protocolo || q.protocolo_nfe;
+              q.xml_conteudo = match.xml_conteudo || q.xml_conteudo;
+              matchedChaves.add(match.chave_acesso);
+            }
+          });
+
+          // 2. Insere notas fiscais emitidas da tabela que não existam como cotação local
+          (notasDb || []).forEach(nf => {
+            const chave = nf.chave_acesso;
+            if (chave && !matchedChaves.has(chave)) {
+              matchedChaves.add(chave);
+              const clientFound = clients.find(c => c.id === nf.cliente_id);
+              const cliNome = clientFound?.name || clientFound?.nome || nf.cliente_nome || 'Cliente NF-e';
+
+              const syntheticQuote: Quote = {
+                id: nf.cotacao_id || `nf_${nf.numero_nfe}`,
+                quoteNumber: nf.cotacao_id || `NF-${String(nf.numero_nfe).padStart(6, '0')}`,
+                clientId: nf.cliente_id || undefined,
+                clientName: cliNome,
+                date: nf.created_at ? nf.created_at.slice(0, 10) : new Date().toISOString().slice(0, 10),
+                status: 'Faturado',
+                status_nfe: nf.status || 'AUTORIZADA',
+                nfe_numero: String(nf.numero_nfe),
+                serie_nfe: String(nf.serie_nfe || '1'),
+                nfe_chave: nf.chave_acesso,
+                chave_acesso: nf.chave_acesso,
+                protocolo_nfe: nf.protocolo || undefined,
+                xml_conteudo: nf.xml_conteudo || undefined,
+                grandTotal: Number(nf.valor_total) || 0,
+                subtotalTotal: Number(nf.valor_total) || 0,
+                validityDays: 10,
+                paymentTerms: 'Faturado / NF-e',
+                discount: 0,
+                shipping: 0,
+                items: [
+                  {
+                    id: '1',
+                    date: nf.created_at ? nf.created_at.slice(0, 10) : new Date().toISOString().slice(0, 10),
+                    companyName: cliNome,
+                    constant: '1.0',
+                    diameter: '',
+                    description: `Faturamento NF-e Nº ${String(nf.numero_nfe).padStart(6, '0')}`,
+                    material: 'Material Industrial',
+                    measure: 'Peça',
+                    widthLength: '',
+                    quantity: 1,
+                    unitPrice: Number(nf.valor_total) || 0,
+                    subtotal: Number(nf.valor_total) || 0
+                  }
+                ],
+                createdAt: nf.created_at,
+                updatedAt: nf.updated_at || nf.created_at
+              };
+              base.unshift(syntheticQuote);
+            }
+          });
+
+          return base;
+        });
+      } catch (err) {
+        console.warn('Aviso ao sincronizar notas_fiscais no histórico:', err);
+      }
+    }
+
+    carregarEHarmonizarNotas();
+    return () => { isMounted = false; };
+  }, [quotes, clients]);
 
   // Deduplicação preventiva por id / quoteNumber
   const uniqueQuotes = useMemo(() => {
@@ -82,13 +171,15 @@ export default function QuoteHistoryModal({
       cName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       cPerson.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (q.items || []).some(i => (i.description || i.descricao || '').toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (q.nfe_numero && q.nfe_numero.includes(searchTerm));
+      (q.nfe_numero && q.nfe_numero.includes(searchTerm)) ||
+      (q.nfe_chave && q.nfe_chave.includes(searchTerm)) ||
+      (q.chave_acesso && q.chave_acesso.includes(searchTerm));
 
     const matchesStatus = filterStatus === 'ALL' || q.status === filterStatus;
     
     const stNfe = (q.status_nfe || 'Pendente').toLowerCase();
     const matchesNfe = filterNfe === 'ALL' || 
-      (filterNfe === 'Emitida' && stNfe === 'emitida') ||
+      (filterNfe === 'Emitida' && (stNfe === 'emitida' || stNfe === 'autorizada')) ||
       (filterNfe === 'Pendente' && (stNfe === 'pendente' || !q.status_nfe)) ||
       (filterNfe === 'Erro' && stNfe.includes('erro'));
 
@@ -333,8 +424,8 @@ export default function QuoteHistoryModal({
                 quote.status === 'Aprovado' || 
                 quote.status === 'Faturado' || 
                 quote.status === 'Enviado';
-              const isAutorizada = isNfeAutorizada(quote.status_nfe);
               const isCancelada = isNfeCancelada(quote.status_nfe);
+              const isAutorizada = isNfeAutorizada(quote.status_nfe) || (Boolean(quote.nfe_chave || quote.chave_acesso) && !isCancelada);
 
               return (
                 <div

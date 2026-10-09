@@ -215,6 +215,30 @@
     display: none !important;
   }
 
+  /* Modo DANFE A4 Oficial */
+  body.print-danfe {
+    background: #fff !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+  body.print-danfe #container-impressao-danfe,
+  body.print-danfe #container-impressao-danfe * {
+    visibility: visible !important;
+  }
+  body.print-danfe #container-impressao-danfe {
+    display: block !important;
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    max-width: 210mm !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+    background: #fff !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+
   /* Modo Fechamento & Extrato de Cotações (Isolado) */
   body.print-fechamento .secao-etiqueta,
   body.print-fechamento .secao-pedido,
