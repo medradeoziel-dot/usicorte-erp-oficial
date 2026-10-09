@@ -78,6 +78,87 @@ export function resolverFormaItem(item: any): string {
 }
 
 /**
+ * Remove prefixos como '#COT-', 'COT-', '#' deixando apenas o número da cotação
+ * Exemplo: '#COT-2026-000509' -> '2026-000509'
+ */
+export function formatarNumeroCotacaoSemPrefixo(valor: any): string {
+  if (valor === null || valor === undefined) return 'S/N';
+  let str = String(valor).trim();
+  str = str.replace(/^(#?COT-?|#?ORC-?|#)/i, '').trim();
+  return str || 'S/N';
+}
+
+/**
+ * Monta a linha 2 do item: Medidas (item.medidas) seguidas da Descrição/Forma (item.descricao / item.forma)
+ * Exemplo: 2" X 66 MM - RETÂNGULO ou 2" X 66 MM - CONF DESENHO
+ */
+export function resolverMedidasDescricaoForma(item: any): string {
+  const medBruta = (
+    item?.medidas ||
+    item?.medida ||
+    item?.medidaFormatada ||
+    item?.medidasFormatadas ||
+    item?.dimensions ||
+    formatarMedidasLimpa(item) ||
+    ''
+  ).toString().trim();
+
+  const descBruta = (
+    item?.descricao ||
+    item?.description ||
+    item?.forma ||
+    ''
+  ).toString().trim();
+
+  const formaResolvida = resolverFormaItem(item) || 'RETÂNGULO';
+
+  let descFinal = '';
+  if (descBruta && descBruta.toUpperCase() !== 'ITEM INDUSTRIAL' && descBruta.toUpperCase() !== 'MATERIAL') {
+    descFinal = descBruta.toUpperCase();
+  } else if (formaResolvida) {
+    descFinal = formaResolvida.toUpperCase();
+  }
+
+  const medLimpa = (medBruta === '—' || medBruta === '-') ? '' : medBruta;
+
+  if (!medLimpa) {
+    return descFinal || formaResolvida || '-';
+  }
+
+  if (descFinal && !medLimpa.toUpperCase().includes(descFinal) && !descFinal.includes(medLimpa.toUpperCase())) {
+    return `${medLimpa} - ${descFinal}`;
+  }
+
+  if (!medLimpa.toUpperCase().includes(formaResolvida.toUpperCase())) {
+    return `${medLimpa} - ${formaResolvida}`;
+  }
+
+  return medLimpa;
+}
+
+/**
+ * Obtém SOMENTE o conteúdo do campo Observação (item.observacao).
+ * Não junte nem repita o campo Descrição aqui.
+ * Se vazio, retorna string vazia para não renderizar linha em branco.
+ */
+export function resolverObservacaoItem(item: any): string {
+  const raw = item?.observacao ?? item?.obs ?? item?.notes ?? getObservacaoEspecificaItem(item) ?? item?.informacoes ?? item?.observacoes ?? '';
+  if (!raw || typeof raw !== 'string') return '';
+  const trimmed = raw.trim();
+  if (
+    !trimmed ||
+    trimmed === '-' ||
+    trimmed === '—' ||
+    trimmed.toLowerCase() === 'n/a' ||
+    trimmed.toLowerCase().includes('preços com impostos') ||
+    trimmed.toLowerCase().includes('material sujeito a conferência')
+  ) {
+    return '';
+  }
+  return trimmed.toUpperCase();
+}
+
+/**
  * Gera o código HTML completo da Ordem de Corte 80mm
  * Ocupando 100% da largura útil da bobina de 80mm com alto contraste
  */
@@ -89,6 +170,7 @@ export function gerarHtmlCupom80mm(dadosOrdem: any): string {
     dadosOrdem?.clientName ||
     dadosOrdem?.client?.name ||
     dadosOrdem?.empresa ||
+    dadosOrdem?.cliente_nome ||
     'CLIENTE BALCÃO'
   ).toString().trim().toUpperCase();
 
@@ -115,66 +197,67 @@ export function gerarHtmlCupom80mm(dadosOrdem: any): string {
         NENHUM ITEM PARA CORTE
       </div>
     `
-    : listaItens.map((item: any, idx: number) => {
-        const numItem = idx + 1;
+    : listaItens.map((item: any, _idx: number) => {
         const qtd = Number(item?.qtd ?? item?.quantity) || 1;
 
-        // Cotação específica do item ou cotação geral da ordem
+        // Cotação específica do item ou cotação geral da ordem (sem prefixo #COT-)
         const itemCotacao = (
           item?.quoteNumber ||
           item?.numeroPedido ||
           item?.cotacao ||
+          item?.numero ||
           numCotacao ||
           'S/N'
         ).toString().trim();
-        const cotacaoFormatada = itemCotacao.startsWith('#') ? itemCotacao : `#${itemCotacao}`;
+        const numCotacaoLimpo = formatarNumeroCotacaoSemPrefixo(itemCotacao);
 
         // Cliente específico do item ou cliente geral da ordem
         const clienteItem = (
+          item?.cliente_nome ||
           item?.cliente?.nome ||
           item?.cliente ||
           item?.clientName ||
           item?.client?.name ||
           item?.empresa ||
+          dadosOrdem?.cliente_nome ||
+          dadosOrdem?.cliente?.nome ||
+          dadosOrdem?.cliente ||
+          dadosOrdem?.clientName ||
+          dadosOrdem?.client?.name ||
+          dadosOrdem?.empresa ||
           nomeCliente ||
           'CLIENTE BALCÃO'
         ).toString().trim().toUpperCase();
 
-        const medidasLimpa = (formatarMedidasLimpa(item) || item?.medida || item?.dimensions || item?.medidas || '').trim();
-        const forma = resolverFormaItem(item);
-        const medidasForma = medidasLimpa && medidasLimpa !== '—'
-          ? `${medidasLimpa} - ${forma}`
-          : forma;
-
-        const obsEspecifica = getObservacaoEspecificaItem(item);
-        const baseObs = obsEspecifica || item?.observacao || item?.notes || item?.descricao || item?.description || item?.codigo || item?.code || '';
-        const material = (item?.material || item?.constanteNome || item?.constantName || item?.produto || '').trim();
-        const descInf = baseObs
-          ? (material && material !== 'MATERIAL' && !baseObs.toUpperCase().includes(material.toUpperCase()) ? `${material} - ${baseObs}` : baseObs)
-          : (material && material !== 'MATERIAL' ? material : '-');
+        const medidasDescForma = resolverMedidasDescricaoForma(item);
+        const obsItem = resolverObservacaoItem(item);
 
         return `
           <div class="card-item">
-            <!-- TOPO DO QUADRADO DO ITEM COM A COTAÇÃO -->
-            <div class="flex-between" style="border-bottom: 2px solid #000; padding-bottom: 4px; margin-bottom: 6px; font-weight: 900; font-size: 12px; line-height: 1.2;">
-              <span style="font-size: 12px; font-weight: 900; font-family: monospace;">COTAÇÃO: ${escapeHtml(cotacaoFormatada)}</span>
-              <span style="font-size: 12px; font-weight: 900; text-transform: uppercase;">${totalTiposItens > 1 ? `ITEM #${numItem} | ` : ''}QTD: ${qtd} PÇS</span>
+            <!-- CABEÇALHO DO QUADRADO (LINHA SUPERIOR): COTAÇÃO À ESQUERDA E QTD À DIREITA -->
+            <div class="flex-between" style="border-bottom: 2px solid #000; padding-bottom: 4px; margin-bottom: 6px; font-weight: 900; font-size: 13px; line-height: 1.2;">
+              <span style="font-size: 13px; font-weight: 900; font-family: monospace;">${escapeHtml(numCotacaoLimpo)}</span>
+              <span style="font-size: 13px; font-weight: 900; text-transform: uppercase;">QTD: ${qtd} PÇS</span>
             </div>
 
-            <!-- CAMPOS INTERNOS DO QUADRADO DO ITEM (ALINHADOS À ESQUERDA SEM ESPAÇAMENTO EXCESSIVO) -->
-            <div style="display: flex; flex-direction: column; gap: 3px; width: 100%;">
-              <div class="row-field">
-                <span class="field-label">CLIENTE:</span>
-                <span class="field-value">${escapeHtml(clienteItem)}</span>
+            <!-- DADOS DENTRO DO QUADRADO (SEM RÓTULOS, DIRETO E EM ALTO CONTRASTE) -->
+            <div style="display: flex; flex-direction: column; gap: 4px; width: 100%; text-align: left;">
+              <!-- LINHA 1 (Cliente) -->
+              <div style="font-size: 13px; font-weight: 900; text-transform: uppercase; word-break: break-word; color: #000000; line-height: 1.25;">
+                ${escapeHtml(clienteItem)}
               </div>
-              <div class="row-field">
-                <span class="field-label">MEDIDAS:</span>
-                <span class="field-value" style="font-family: monospace;">${escapeHtml(medidasForma)}</span>
+
+              <!-- LINHA 2 (Medidas - Descrição/Forma) -->
+              <div style="font-size: 13px; font-weight: 900; font-family: monospace; text-transform: uppercase; word-break: break-word; color: #000000; line-height: 1.25;">
+                ${escapeHtml(medidasDescForma)}
               </div>
-              <div class="row-field">
-                <span class="field-label">DESC / INF:</span>
-                <span class="field-value">${escapeHtml(descInf)}</span>
+
+              <!-- LINHA 3 (Observação - exibida apenas se preenchida) -->
+              ${obsItem ? `
+              <div style="font-size: 12.5px; font-weight: 900; text-transform: uppercase; word-break: break-word; color: #000000; line-height: 1.25;">
+                ${escapeHtml(obsItem)}
               </div>
+              ` : ''}
             </div>
           </div>
         `;
@@ -590,42 +673,35 @@ export default function OrdemCorte80mm({
           </div>
         ) : (
           listaItens.map((item: any, idx: number) => {
-            const numItem = idx + 1;
             const qtd = Number(item?.qtd ?? item?.quantity) || 1;
 
-            // Cotação específica do item ou cotação geral da ordem
+            // Cotação específica do item ou cotação geral da ordem (sem prefixo #COT-)
             const itemCotacao = (
               item?.quoteNumber ||
               item?.numeroPedido ||
               item?.cotacao ||
+              item?.numero ||
               numCotacao ||
               'S/N'
             ).toString().trim();
-            const cotacaoFormatada = itemCotacao.startsWith('#') ? itemCotacao : `#${itemCotacao}`;
+            const numCotacaoLimpo = formatarNumeroCotacaoSemPrefixo(itemCotacao);
 
             // Cliente específico do item ou cliente geral da ordem
             const clienteItem = (
+              item?.cliente_nome ||
               item?.cliente?.nome ||
               item?.cliente ||
               item?.clientName ||
               item?.client?.name ||
               item?.empresa ||
+              cliente ||
+              clientName ||
               nomeCliente ||
               'CLIENTE BALCÃO'
             ).toString().trim().toUpperCase();
 
-            const medidasLimpa = (formatarMedidasLimpa(item) || item?.medida || item?.dimensions || item?.medidas || '').trim();
-            const forma = resolverFormaItem(item);
-            const medidasForma = medidasLimpa && medidasLimpa !== '—'
-              ? `${medidasLimpa} - ${forma}`
-              : forma;
-
-            const obsEspecifica = getObservacaoEspecificaItem(item);
-            const baseObs = obsEspecifica || item?.observacao || item?.notes || item?.descricao || item?.description || item?.codigo || item?.code || '';
-            const material = (item?.material || item?.constanteNome || item?.constantName || item?.produto || '').trim();
-            const descInf = baseObs
-              ? (material && material !== 'MATERIAL' && !baseObs.toUpperCase().includes(material.toUpperCase()) ? `${material} - ${baseObs}` : baseObs)
-              : (material && material !== 'MATERIAL' ? material : '-');
+            const medidasDescForma = resolverMedidasDescricaoForma(item);
+            const obsItem = resolverObservacaoItem(item);
 
             return (
               <section
@@ -641,68 +717,58 @@ export default function OrdemCorte80mm({
                 }}
               >
                 {/* ┌────────────────────────────────────────────────────────┐
-                    │ COTAÇÃO: #COT-2026-000538                  QTD: 1 PÇS  │
+                    │ 2026-000509                                QTD: 5 PÇS  │
                     └────────────────────────────────────────────────────────┘ */}
                 <div 
                   className="flex justify-between items-center w-full pb-1.5 font-black leading-tight"
                   style={{
                     borderBottom: '2px solid #000000',
                     color: '#000000',
-                    fontSize: '12px'
+                    fontSize: '13px'
                   }}
                 >
-                  <span style={{ fontSize: '12px', fontWeight: 900, fontFamily: 'monospace' }}>
-                    COTAÇÃO: {cotacaoFormatada}
+                  <span style={{ fontSize: '13px', fontWeight: 900, fontFamily: 'monospace' }}>
+                    {numCotacaoLimpo}
                   </span>
-                  <span className="font-black uppercase text-right" style={{ fontSize: '12px', fontWeight: 900 }}>
-                    {totalTiposItens > 1 ? `ITEM #${numItem} | ` : ''}QTD: {qtd} PÇS
+                  <span className="font-black uppercase text-right" style={{ fontSize: '13px', fontWeight: 900 }}>
+                    QTD: {qtd} PÇS
                   </span>
                 </div>
 
                 {/* ┌────────────────────────────────────────────────────────┐
-                    │ CLIENTE: MM SERVICE                                    │
-                    │ MEDIDAS: 1.3/4 X 70 MM - RETÂNGULO                     │
-                    │ DESC / INF: TM 23 BRONZE - BRONZE                      │
+                    │ INDEL BAURU INDUSTRIA ELETROMETALURGICA LTDA           │
+                    │ 2" X 66 MM - RETÂNGULO                                 │
+                    │ 1045 AÇO REDONDO - TREFILADO SAE 1045                  │
                     └────────────────────────────────────────────────────────┘ */}
                 <div 
-                  className="w-full pt-1.5 space-y-0.5 leading-snug bg-white text-left"
+                  className="w-full pt-1.5 space-y-1 leading-snug bg-white text-left"
                   style={{ color: '#000000' }}
                 >
-                  <div className="flex justify-start items-baseline gap-1.5 w-full py-0.5 text-left">
-                    <span className="font-bold shrink-0 text-black whitespace-nowrap" style={{ fontSize: '12.5px' }}>
-                      CLIENTE:
-                    </span>
-                    <span 
-                      className="font-black uppercase break-words text-left flex-1 text-black" 
-                      style={{ fontSize: '13px', fontWeight: 900 }}
-                    >
-                      {clienteItem}
-                    </span>
+                  {/* LINHA 1 (Cliente) */}
+                  <div 
+                    className="font-black uppercase break-words text-left w-full text-black" 
+                    style={{ fontSize: '13px', fontWeight: 900 }}
+                  >
+                    {clienteItem}
                   </div>
 
-                  <div className="flex justify-start items-baseline gap-1.5 w-full py-0.5 text-left">
-                    <span className="font-bold shrink-0 text-black whitespace-nowrap" style={{ fontSize: '12.5px' }}>
-                      MEDIDAS:
-                    </span>
-                    <span 
-                      className="font-black uppercase font-mono break-words text-left flex-1 text-black" 
-                      style={{ fontSize: '13px', fontWeight: 900 }}
-                    >
-                      {medidasForma}
-                    </span>
+                  {/* LINHA 2 (Medidas - Descrição/Forma) */}
+                  <div 
+                    className="font-black uppercase font-mono break-words text-left w-full text-black" 
+                    style={{ fontSize: '13px', fontWeight: 900 }}
+                  >
+                    {medidasDescForma}
                   </div>
 
-                  <div className="flex justify-start items-baseline gap-1.5 w-full py-0.5 text-left">
-                    <span className="font-bold shrink-0 text-black whitespace-nowrap" style={{ fontSize: '12.5px' }}>
-                      DESC / INF:
-                    </span>
-                    <span 
-                      className="font-black uppercase break-words text-left flex-1 text-black" 
-                      style={{ fontSize: '13px', fontWeight: 900 }}
+                  {/* LINHA 3 (Observação - exibida apenas se preenchida) */}
+                  {obsItem && (
+                    <div 
+                      className="font-black uppercase break-words text-left w-full text-black" 
+                      style={{ fontSize: '12.5px', fontWeight: 900 }}
                     >
-                      {descInf}
-                    </span>
-                  </div>
+                      {obsItem}
+                    </div>
+                  )}
                 </div>
               </section>
             );
