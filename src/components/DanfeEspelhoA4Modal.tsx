@@ -12,8 +12,12 @@ import {
   detectarFormaPagamentoInicial,
   buscarInscricaoEstadual,
   obterOuBaixarXmlNfe,
-  enviarEmailNfe
+  enviarEmailNfe,
+  isNfeAutorizada,
+  isNfeCancelada,
+  downloadXmlCancelamento
 } from '../services/nfeService';
+import CancelarNfeModal from './CancelarNfeModal';
 import { formatCurrency, formatSafeDate } from '../utils/calculator';
 import { 
   X, 
@@ -33,7 +37,8 @@ import {
   Building,
   UserCheck,
   Download,
-  Mail
+  Mail,
+  Ban
 } from 'lucide-react';
 
 interface DanfeEspelhoA4ModalProps {
@@ -43,6 +48,7 @@ interface DanfeEspelhoA4ModalProps {
   client?: Client | null;
   company?: CompanyFiscalData;
   isPrevia?: boolean;
+  onQuoteUpdated?: (updatedQuote: Quote) => void;
   onTransmit?: () => void;
   isTransmitting?: boolean;
 }
@@ -192,7 +198,16 @@ export default function DanfeEspelhoA4Modal({
 
   if (!isOpen || !quote) return null;
 
-  const isPrevia = isPreviaProp !== undefined ? isPreviaProp : (quote.status_nfe !== 'Emitida');
+  const [currentQuoteState, setCurrentQuoteState] = useState<Quote>(quote);
+  const [showCancelarModal, setShowCancelarModal] = useState<boolean>(false);
+
+  useEffect(() => {
+    setCurrentQuoteState(quote);
+  }, [quote]);
+
+  const isCancelada = isNfeCancelada(currentQuoteState.status_nfe);
+  const isAutorizada = isNfeAutorizada(currentQuoteState.status_nfe);
+  const isPrevia = isPreviaProp !== undefined ? isPreviaProp : (!isAutorizada && !isCancelada);
 
   const handlePrint = () => {
     setIsPrinting(true);
@@ -209,7 +224,7 @@ export default function DanfeEspelhoA4Modal({
   const handleDownloadXml = async () => {
     setIsDownloadingXml(true);
     try {
-      await obterOuBaixarXmlNfe(quote, client, company);
+      await obterOuBaixarXmlNfe(currentQuoteState, client, company);
     } catch (err) {
       console.error('Erro ao baixar XML:', err);
     } finally {
@@ -217,8 +232,14 @@ export default function DanfeEspelhoA4Modal({
     }
   };
 
+  const handleDownloadXmlCancelamento = () => {
+    if (currentQuoteState.xml_cancelamento) {
+      downloadXmlCancelamento(currentQuoteState.xml_cancelamento, currentQuoteState.nfe_chave || currentQuoteState.chave_acesso || '');
+    }
+  };
+
   const handleEnviarEmail = () => {
-    const res = enviarEmailNfe(quote, client, company);
+    const res = enviarEmailNfe(currentQuoteState, client, company);
     if (res.emailDestinatario) {
       setEmailFeedback(`Cliente: ${res.emailDestinatario}`);
     } else {
@@ -232,9 +253,9 @@ export default function DanfeEspelhoA4Modal({
     try {
       const isAVista = formaPagamento === 'A_VISTA';
       if (isPrevia) {
-        await abrirPreDanfeEmNovaAba(quote, client, duplicatas, isAVista);
+        await abrirPreDanfeEmNovaAba(currentQuoteState, client, duplicatas, isAVista);
       } else {
-        await abrirDanfeEmNovaAba(quote, client, duplicatas, isAVista);
+        await abrirDanfeEmNovaAba(currentQuoteState, client, duplicatas, isAVista);
       }
     } finally {
       setIsOpeningTab(false);
@@ -248,28 +269,46 @@ export default function DanfeEspelhoA4Modal({
         {/* Modal Header */}
         <div className="p-4 bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 border-b border-slate-700 flex items-center justify-between shrink-0 no-print">
           <div className="flex items-center gap-3">
-            <div className={`p-2 rounded-xl border ${isPrevia ? 'bg-amber-500/20 text-amber-400 border-amber-500/30' : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'}`}>
-              <FileText className="w-5 h-5" />
+            <div className={`p-2 rounded-xl border ${
+              isCancelada 
+                ? 'bg-rose-500/20 text-rose-400 border-rose-500/30' 
+                : isPrevia 
+                  ? 'bg-amber-500/20 text-amber-400 border-amber-500/30' 
+                  : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+            }`}>
+              {isCancelada ? <Ban className="w-5 h-5 text-rose-400" /> : <FileText className="w-5 h-5" />}
             </div>
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="font-bold text-slate-100 text-base">
-                  {isPrevia ? 'Pré-Visualização da DANFE (Espelho Fiscal Modelo 55)' : 'DANFE Oficial - Modelo 55'}
+                  {isCancelada 
+                    ? 'DANFE de NF-e Cancelada (Sem Valor Fiscal)' 
+                    : isPrevia 
+                      ? 'Pré-Visualização da DANFE (Espelho Fiscal Modelo 55)' 
+                      : 'DANFE Oficial - Modelo 55'}
                 </h3>
-                <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold border ${isPrevia ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'}`}>
-                  {isPrevia ? 'PRÉVIA / CONFERÊNCIA' : 'EMITIDA'}
+                <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold border ${
+                  isCancelada
+                    ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                    : isPrevia 
+                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' 
+                      : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                }`}>
+                  {isCancelada ? 'CANCELADA (STATUS 101)' : isPrevia ? 'PRÉVIA / CONFERÊNCIA' : 'AUTORIZADA'}
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                {isPrevia 
-                  ? 'Verifique os dados tributários e do destinatário antes da transmissão definitiva' 
-                  : `Documento Auxiliar da NF-e nº ${quote.nfe_numero || '—'}`}
+                {isCancelada
+                  ? 'Nota fiscal cancelada perante a SEFAZ. Este documento não possui validade jurídica ou fiscal.'
+                  : isPrevia 
+                    ? 'Verifique os dados tributários e do destinatário antes da transmissão definitiva' 
+                    : `Documento Auxiliar da NF-e nº ${currentQuoteState.nfe_numero || '—'}`}
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            {!isPrevia && (
+            {!isPrevia && !isCancelada && (
               <>
                 <button
                   type="button"
@@ -282,6 +321,18 @@ export default function DanfeEspelhoA4Modal({
                   <span>{isDownloadingXml ? 'Baixando...' : 'Baixar XML'}</span>
                 </button>
 
+                {isAutorizada && (
+                  <button
+                    type="button"
+                    onClick={() => setShowCancelarModal(true)}
+                    className="px-3.5 py-2 bg-rose-700 hover:bg-rose-600 text-white font-semibold text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+                    title="Cancelar NF-e Homologada na SEFAZ (Status 101)"
+                  >
+                    <Ban className="w-4 h-4" />
+                    <span>CANCELAR NF-E</span>
+                  </button>
+                )}
+
                 <button
                   type="button"
                   onClick={handleEnviarEmail}
@@ -292,6 +343,18 @@ export default function DanfeEspelhoA4Modal({
                   <span className="hidden sm:inline">E-mail</span>
                 </button>
               </>
+            )}
+
+            {isCancelada && currentQuoteState.xml_cancelamento && (
+              <button
+                type="button"
+                onClick={handleDownloadXmlCancelamento}
+                className="px-3.5 py-2 bg-rose-800 hover:bg-rose-700 text-white font-semibold text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+                title="Baixar XML do evento de cancelamento da NF-e"
+              >
+                <Download className="w-4 h-4" />
+                <span>XML Cancelamento</span>
+              </button>
             )}
 
             <button
@@ -560,7 +623,7 @@ export default function DanfeEspelhoA4Modal({
               </span>
             )}
 
-            {!isPrevia && (
+            {!isPrevia && !isCancelada && (
               <>
                 <button
                   type="button"
@@ -572,6 +635,18 @@ export default function DanfeEspelhoA4Modal({
                   <Download className="w-4 h-4" />
                   <span>{isDownloadingXml ? 'Baixando...' : 'Baixar XML'}</span>
                 </button>
+
+                {isAutorizada && (
+                  <button
+                    type="button"
+                    onClick={() => setShowCancelarModal(true)}
+                    className="px-4 py-2.5 bg-rose-700 hover:bg-rose-600 text-white font-semibold text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+                    title="Cancelar NF-e Homologada na SEFAZ (Status 101)"
+                  >
+                    <Ban className="w-4 h-4" />
+                    <span>CANCELAR NF-E</span>
+                  </button>
+                )}
 
                 <button
                   type="button"
@@ -613,6 +688,20 @@ export default function DanfeEspelhoA4Modal({
         </div>
 
       </div>
+
+      {showCancelarModal && (
+        <CancelarNfeModal
+          quote={currentQuoteState}
+          client={client}
+          onSuccess={(updated) => {
+            setCurrentQuoteState(updated);
+            if (onQuoteUpdated) {
+              onQuoteUpdated(updated);
+            }
+          }}
+          onClose={() => setShowCancelarModal(false)}
+        />
+      )}
     </div>
   );
 }

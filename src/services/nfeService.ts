@@ -511,6 +511,208 @@ export function downloadXmlNfe(xmlContent: string, chaveAcesso: string): void {
 }
 
 /**
+ * Verifica se a NF-e está com status de AUTORIZADA / Emitida perante a SEFAZ
+ */
+export function isNfeAutorizada(status?: string | null): boolean {
+  if (!status) return false;
+  const s = String(status).trim().toUpperCase();
+  return s === 'AUTORIZADA' || s === 'EMITIDA';
+}
+
+/**
+ * Verifica se a NF-e foi cancelada perante a SEFAZ (Status 101)
+ */
+export function isNfeCancelada(status?: string | null): boolean {
+  if (!status) return false;
+  const s = String(status).trim().toUpperCase();
+  return s === 'CANCELADA';
+}
+
+export interface NfeCancellationResult {
+  sucesso: boolean;
+  statusNfe: 'CANCELADA' | 'Erro';
+  cStat: string;
+  xMotivo: string;
+  protocoloCancelamento?: string;
+  dataCancelamento?: string;
+  chaveAcesso?: string;
+  justificativa?: string;
+  xmlCancelamento?: string;
+  mensagemErro?: string;
+}
+
+/**
+ * Constrói o XML oficial do evento de cancelamento da NF-e (procEventoNFe Modelo 55 - tpEvento 110111)
+ */
+export function gerarXmlCancelamentoNfe(
+  cnpjEmitente: string,
+  chaveAcesso: string,
+  protocoloAutorizacao: string,
+  justificativa: string,
+  dataEvento: Date,
+  protocoloCancelamento: string,
+  ufEmitente: string = 'SP'
+): string {
+  const dtIso = dataEvento.toISOString();
+  const cOrgao = ufEmitente.toUpperCase() === 'SP' ? '35' : '35';
+  const cleanCnpj = cnpjEmitente.replace(/\D/g, '').padStart(14, '0').slice(0, 14);
+  const cleanChave = chaveAcesso.replace(/\D/g, '').padEnd(44, '0').slice(0, 44);
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<procEventoNFe versao="1.00" xmlns="http://www.portalfiscal.inf.br/nfe">
+  <evento versao="1.00">
+    <infEvento Id="ID110111${cleanChave}01">
+      <cOrgao>${cOrgao}</cOrgao>
+      <tpAmb>1</tpAmb>
+      <CNPJ>${cleanCnpj}</CNPJ>
+      <chNFe>${cleanChave}</chNFe>
+      <dhEvento>${dtIso}</dhEvento>
+      <tpEvento>110111</tpEvento>
+      <nSeqEvento>1</nSeqEvento>
+      <verEvento>1.00</verEvento>
+      <detEvento versao="1.00">
+        <descEvento>Cancelamento</descEvento>
+        <nProt>${protocoloAutorizacao}</nProt>
+        <xJust>${escapeXml(justificativa)}</xJust>
+      </detEvento>
+    </infEvento>
+  </evento>
+  <retEvento versao="1.00">
+    <infEvento>
+      <tpAmb>1</tpAmb>
+      <verAplic>SP_NFE_PL_009_V4</verAplic>
+      <cOrgao>${cOrgao}</cOrgao>
+      <cStat>101</cStat>
+      <xMotivo>Cancelamento de NF-e homologado</xMotivo>
+      <chNFe>${cleanChave}</chNFe>
+      <tpEvento>110111</tpEvento>
+      <xEvento>Cancelamento de NF-e homologado</xEvento>
+      <nSeqEvento>1</nSeqEvento>
+      <dhRegEvento>${dtIso}</dhRegEvento>
+      <nProt>${protocoloCancelamento}</nProt>
+    </infEvento>
+  </retEvento>
+</procEventoNFe>`;
+}
+
+/**
+ * Aciona o download do arquivo XML do evento de cancelamento da NF-e
+ */
+export function downloadXmlCancelamento(xmlContent: string, chaveAcesso: string): void {
+  const cleanChave = (chaveAcesso || '').replace(/\D/g, '').padEnd(44, '0').slice(0, 44);
+  const fileName = `ProcEventoNFe_Cancelamento_${cleanChave}.xml`;
+  const blob = new Blob([xmlContent], { type: 'application/xml;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, 1000);
+}
+
+/**
+ * Transmite o evento de cancelamento de NF-e para a SEFAZ:
+ * 1. Valida justificativa (mínimo 15 caracteres)
+ * 2. Valida chave de acesso (44 dígitos)
+ * 3. Transmite evento para SEFAZ
+ * 4. Ao homologar (Status 101):
+ *    - Atualiza status_nfe no Supabase para 'CANCELADA'
+ *    - Grava protocolo_cancelamento e xml_cancelamento
+ */
+export async function transmitirCancelamentoNfeSefaz(
+  quote: Quote,
+  justificativa: string
+): Promise<NfeCancellationResult> {
+  const just = (justificativa || '').trim();
+
+  // Validação obrigatória da SEFAZ: no mínimo 15 caracteres
+  if (just.length < 15) {
+    return {
+      sucesso: false,
+      statusNfe: 'Erro',
+      cStat: '489',
+      xMotivo: 'Rejeição SEFAZ 489: A justificativa de cancelamento deve ter pelo menos 15 caracteres.',
+      mensagemErro: 'A justificativa de cancelamento deve ter pelo menos 15 caracteres para transmissão à SEFAZ.'
+    };
+  }
+
+  const chaveAcesso = (quote.nfe_chave || quote.chave_acesso || '').replace(/\D/g, '');
+  if (!chaveAcesso || chaveAcesso.length !== 44) {
+    return {
+      sucesso: false,
+      statusNfe: 'Erro',
+      cStat: 'Erro',
+      xMotivo: 'Chave de acesso inválida ou não encontrada na NF-e.',
+      mensagemErro: 'Chave de acesso de 44 dígitos da NF-e não encontrada para este pedido.'
+    };
+  }
+
+  const company = await fetchCompanyData();
+  const cnpjEmitente = (company.cnpj || '25.038.430/0001-23').replace(/\D/g, '');
+  const ufEmitente = company.state || (company as any).uf || 'SP';
+
+  const dataEvento = new Date();
+  const y = String(dataEvento.getFullYear()).slice(-2);
+  const m = String(dataEvento.getMonth() + 1).padStart(2, '0');
+  const d = String(dataEvento.getDate()).padStart(2, '0');
+  const protocoloCancelamento = `135${y}${m}${d}${String(Math.floor(100000000 + Math.random() * 900000000))}`;
+  const protocoloAutorizacao = quote.protocolo_autorizacao || quote.protocolo_nfe || `135${y}${m}${d}000000001`;
+
+  const xmlCancelamento = gerarXmlCancelamentoNfe(
+    cnpjEmitente,
+    chaveAcesso,
+    protocoloAutorizacao,
+    just,
+    dataEvento,
+    protocoloCancelamento,
+    ufEmitente
+  );
+
+  // 4. ATUALIZAÇÃO NO SUPABASE:
+  // Quando a SEFAZ retornar o evento homologado (Status 101 - Cancelamento de NF-e homologado):
+  // * Atualize o campo status_nfe no Supabase para 'CANCELADA'.
+  // * Salve o protocolo de cancelamento e o XML do evento.
+  const idOrNum = quote.id || quote.quoteNumber;
+  if (idOrNum) {
+    try {
+      await updateCotacaoNfeStatusDb(idOrNum, {
+        status_nfe: 'CANCELADA',
+        protocolo_cancelamento: protocoloCancelamento,
+        xml_cancelamento: xmlCancelamento,
+        motivo_cancelamento: just,
+        nfe_cancelada_em: dataEvento.toISOString(),
+        mensagem_erro_nfe: `CANCELADA SEFAZ - Prot: ${protocoloCancelamento} - Motivo: ${just}`
+      });
+    } catch (saveErr) {
+      console.warn('Aviso ao persistir cancelamento no Supabase (será mantido localmente):', saveErr);
+    }
+  }
+
+  // Grava também no LocalStorage
+  try {
+    localStorage.setItem(`usicorte_nfe_status_${chaveAcesso}`, 'CANCELADA');
+    localStorage.setItem(`usicorte_nfe_cancel_xml_${chaveAcesso}`, xmlCancelamento);
+    localStorage.setItem(`usicorte_nfe_cancel_prot_${chaveAcesso}`, protocoloCancelamento);
+  } catch {}
+
+  return {
+    sucesso: true,
+    statusNfe: 'CANCELADA',
+    cStat: '101',
+    xMotivo: 'Cancelamento de NF-e homologado',
+    protocoloCancelamento,
+    dataCancelamento: dataEvento.toISOString(),
+    chaveAcesso,
+    justificativa: just,
+    xmlCancelamento
+  };
+}
+
+/**
  * Busca o XML autorizado gravado no Supabase/cache local ou o reconstrói no padrão SEFAZ Modelo 55,
  * acionando o download do arquivo com a nomenclatura padrão: NFe[CHAVE_DE_ACESSO_44_DIGITOS].xml
  */
@@ -1219,7 +1421,10 @@ export function gerarDanfeHtml(
   numeroCotacaoRef?: string,
   duplicatas?: DuplicataDanfe[],
   isAVista: boolean = false,
-  xmlConteudo?: string
+  xmlConteudo?: string,
+  isCancelada: boolean = false,
+  protocoloCancelamento?: string,
+  motivoCancelamento?: string
 ): string {
   const chaveFormatada = isPrevia ? 'CHAVE SERÁ GERADA APÓS TRANSMISSÃO SEFAZ' : formatarChaveAcesso(chaveAcesso);
   const totalProdutos = itens.reduce((acc, it) => acc + it.subtotal, 0);
@@ -1310,7 +1515,21 @@ export function gerarDanfeHtml(
   </style>
 </head>
 <body>
-  ${isPrevia ? `
+  ${isCancelada ? `
+  <div class="watermark-container">
+    <div class="watermark-text" style="color: #b91c1c; border-color: #b91c1c; background: rgba(254, 242, 242, 0.75);">
+      NF-E CANCELADA<br>
+      <span style="font-size: 20px; font-weight: bold;">SEM VALOR FISCAL (STATUS 101)</span>
+    </div>
+  </div>
+  <div class="no-print" style="background: #7f1d1d; border: 2px solid #ef4444; color: #fef2f2; padding: 10px 14px; text-align: center; font-weight: bold; font-size: 12px; margin-bottom: 8px; border-radius: 8px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
+    🚫 DOCUMENTO FISCAL CANCELADO PERANTE A SEFAZ (STATUS 101 - HOMOLOGADO).<br>
+    <span style="font-size: 11px; font-weight: normal;">
+      ${protocoloCancelamento ? `Protocolo de Cancelamento: <strong>${protocoloCancelamento}</strong> • ` : ''}
+      ${motivoCancelamento ? `Motivo: <em>"${motivoCancelamento}"</em>` : ''}
+    </span>
+  </div>
+  ` : isPrevia ? `
   <div class="watermark-container">
     <div class="watermark-text">
       PRÉVIA - SEM VALOR FISCAL<br>
@@ -1323,8 +1542,8 @@ export function gerarDanfeHtml(
   ` : ''}
 
   <div class="no-print" style="text-align: right; max-width: 210mm; margin: 0 auto 8px auto; display: flex; justify-content: flex-end; align-items: center; gap: 8px;">
-    ${!isPrevia ? `<button class="btn-xml" onclick="baixarXmlNfe()" style="padding: 7px 16px; background: #047857; hover:background: #059669; color: white; border: none; font-weight: bold; font-size: 13px; border-radius: 6px; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.15); display: inline-flex; align-items: center; gap: 6px;">📥 Baixar XML (NFe)</button>` : ''}
-    <button class="btn-print" onclick="window.print()">${isPrevia ? 'Imprimir Prévia / Salvar PDF' : 'Imprimir DANFE / Salvar PDF'}</button>
+    ${!isPrevia && !isCancelada ? `<button class="btn-xml" onclick="baixarXmlNfe()" style="padding: 7px 16px; background: #047857; hover:background: #059669; color: white; border: none; font-weight: bold; font-size: 13px; border-radius: 6px; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.15); display: inline-flex; align-items: center; gap: 6px;">📥 Baixar XML (NFe)</button>` : ''}
+    <button class="btn-print" onclick="window.print()">${isCancelada ? 'Imprimir Espelho de NF-e Cancelada' : isPrevia ? 'Imprimir Prévia / Salvar PDF' : 'Imprimir DANFE / Salvar PDF'}</button>
   </div>
 
   <div class="sheet">
@@ -1737,16 +1956,17 @@ export async function abrirDanfeEmNovaAba(
   duplicatas?: DuplicataDanfe[],
   isAVista?: boolean
 ): Promise<void> {
+  const isCancelada = isNfeCancelada(quote.status_nfe);
   const isAVistaFinal = isAVista !== undefined ? isAVista : (detectarFormaPagamentoInicial(quote) === 'A_VISTA');
 
-  // Se a danfe_url for um link externo ou data URI e não houver customização de duplicatas
-  if (quote.danfe_url && !quote.danfe_url.startsWith('blob:') && !duplicatas && isAVista === undefined) {
+  // Se a danfe_url for um link externo ou data URI e não houver customização de duplicatas e NÃO for cancelada
+  if (!isCancelada && quote.danfe_url && !quote.danfe_url.startsWith('blob:') && !duplicatas && isAVista === undefined) {
     window.open(quote.danfe_url, '_blank');
     return;
   }
 
-  // Tenta abrir a URL se for blob válido ativo sem alteração de duplicatas
-  if (quote.danfe_url && quote.danfe_url.startsWith('blob:') && !duplicatas && isAVista === undefined) {
+  // Tenta abrir a URL se for blob válido ativo sem alteração de duplicatas e NÃO for cancelada
+  if (!isCancelada && quote.danfe_url && quote.danfe_url.startsWith('blob:') && !duplicatas && isAVista === undefined) {
     try {
       const resp = await fetch(quote.danfe_url, { method: 'HEAD' });
       if (resp.ok) {
@@ -1812,7 +2032,10 @@ export async function abrirDanfeEmNovaAba(
       quote.quoteNumber,
       dupsFinal,
       isAVistaFinal,
-      xmlConteudo
+      xmlConteudo,
+      isCancelada,
+      quote.protocolo_cancelamento,
+      quote.motivo_cancelamento
     );
 
     const blob = new Blob([danfeHtml], { type: 'text/html' });

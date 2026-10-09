@@ -2,7 +2,8 @@ import React, { useState, useMemo } from 'react';
 import { Quote, Client } from '../types';
 import { formatCurrency, formatSafeDate } from '../utils/calculator';
 import EmissaoNfeModal from './EmissaoNfeModal';
-import { abrirDanfeEmNovaAba, obterOuBaixarXmlNfe } from '../services/nfeService';
+import { abrirDanfeEmNovaAba, obterOuBaixarXmlNfe, isNfeAutorizada, isNfeCancelada, downloadXmlCancelamento } from '../services/nfeService';
+import CancelarNfeModal from './CancelarNfeModal';
 import { 
   History, 
   Search, 
@@ -21,7 +22,8 @@ import {
   Copy,
   Printer,
   Send,
-  ExternalLink
+  ExternalLink,
+  Ban
 } from 'lucide-react';
 
 interface QuoteHistoryModalProps {
@@ -47,6 +49,7 @@ export default function QuoteHistoryModal({
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
   const [filterNfe, setFilterNfe] = useState<string>('ALL');
   const [quoteForNfe, setQuoteForNfe] = useState<Quote | null>(null);
+  const [quoteForCancelNfe, setQuoteForCancelNfe] = useState<Quote | null>(null);
   const [localQuotes, setLocalQuotes] = useState<Quote[]>(quotes);
 
   // Mantém localQuotes em sincronia quando a prop quotes atualizar
@@ -131,19 +134,32 @@ export default function QuoteHistoryModal({
 
   /**
    * Badge de Status da Nota Fiscal (status_nfe):
-   * "Pendente" (cinza/azul), "Emitida" (verde), "Erro" (vermelho)
+   * "Pendente", "Emitida" / "AUTORIZADA", "CANCELADA", "Erro"
    */
   const getNfeBadge = (quote: Quote) => {
     const rawSt = (quote.status_nfe || 'Pendente').trim().toLowerCase();
 
-    if (rawSt === 'emitida') {
+    if (rawSt === 'cancelada') {
+      return (
+        <span 
+          className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-300 flex items-center gap-1 shadow-xs"
+          title={quote.motivo_cancelamento ? `NF-e CANCELADA (Status 101): ${quote.motivo_cancelamento}` : 'NF-e Cancelada perante a SEFAZ (Status 101)'}
+        >
+          <Ban className="w-3 h-3 text-rose-600" />
+          <span>NF-e Cancelada</span>
+          {quote.nfe_numero && <span className="font-mono font-extrabold text-[9px]">#{quote.nfe_numero}</span>}
+        </span>
+      );
+    }
+
+    if (rawSt === 'emitida' || rawSt === 'autorizada') {
       return (
         <span 
           className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1 shadow-xs"
           title={`NF-e Nº ${quote.nfe_numero || ''} autorizada pela SEFAZ`}
         >
           <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-          <span>NF-e Emitida</span>
+          <span>NF-e Autorizada</span>
           {quote.nfe_numero && <span className="font-mono font-extrabold text-[9px]">#{quote.nfe_numero}</span>}
         </span>
       );
@@ -317,7 +333,8 @@ export default function QuoteHistoryModal({
                 quote.status === 'Aprovado' || 
                 quote.status === 'Faturado' || 
                 quote.status === 'Enviado';
-              const isNfeEmitida = (quote.status_nfe || '').toLowerCase() === 'emitida';
+              const isAutorizada = isNfeAutorizada(quote.status_nfe);
+              const isCancelada = isNfeCancelada(quote.status_nfe);
 
               return (
                 <div
@@ -361,8 +378,8 @@ export default function QuoteHistoryModal({
 
                     <div className="flex items-center gap-1.5 flex-wrap">
                       
-                      {/* AÇÃO 1: EMITIR NF-E (Disponível nas cotações finalizadas/aprovadas) */}
-                      {isFinalizadoOuAprovado && !isNfeEmitida && (
+                      {/* AÇÃO 1: EMITIR NF-E (Disponível nas cotações finalizadas/aprovadas, DESATIVADO se Cancelada ou Autorizada) */}
+                      {isFinalizadoOuAprovado && !isAutorizada && !isCancelada && (
                         <button
                           onClick={() => setQuoteForNfe(quote)}
                           className="px-3 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-sm shadow-emerald-600/30 transition-all active:scale-95 border border-emerald-400/30"
@@ -373,8 +390,8 @@ export default function QuoteHistoryModal({
                         </button>
                       )}
 
-                      {/* Se já foi emitida: Botão de Visualizar / Imprimir DANFE */}
-                      {isNfeEmitida && (
+                      {/* Se AUTORIZADA: Botões de DANFE, XML e CANCELAR NF-E */}
+                      {isAutorizada && (
                         <div className="flex items-center gap-1">
                           <button
                             onClick={() => {
@@ -408,6 +425,16 @@ export default function QuoteHistoryModal({
                             <span>Baixar XML</span>
                           </button>
 
+                          {/* BOTÃO DE CANCELAR NF-E HOMOLOGADA */}
+                          <button
+                            onClick={() => setQuoteForCancelNfe(quote)}
+                            className="px-3 py-2 bg-rose-700 hover:bg-rose-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+                            title="Cancelar NF-e Homologada na SEFAZ (Status 101)"
+                          >
+                            <Ban className="w-3.5 h-3.5" />
+                            <span>CANCELAR NF-E</span>
+                          </button>
+
                           <button
                             onClick={() => setQuoteForNfe(quote)}
                             className="p-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-xs font-bold cursor-pointer transition-colors"
@@ -415,6 +442,41 @@ export default function QuoteHistoryModal({
                           >
                             <ExternalLink className="w-3.5 h-3.5" />
                           </button>
+                        </div>
+                      )}
+
+                      {/* Se CANCELADA: Exibe espelho da DANFE cancelada (sem valor fiscal) e XML do cancelamento */}
+                      {isCancelada && (
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => {
+                              const resolvedClient = clients.find(c => 
+                                (quote.clientId && c.id === quote.clientId) || 
+                                (quote.clientDocument && c.document && c.document.replace(/\D/g, '') === quote.clientDocument.replace(/\D/g, '')) ||
+                                (c.name || (c as any).nome) === quote.clientName
+                              );
+                              abrirDanfeEmNovaAba(quote, resolvedClient);
+                            }}
+                            className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-rose-300 border border-rose-500/30 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+                            title="Visualizar espelho da DANFE cancelada com tarja 'SEM VALOR FISCAL'"
+                          >
+                            <Ban className="w-3.5 h-3.5 text-rose-400" />
+                            <span>DANFE Cancelada</span>
+                          </button>
+
+                          {quote.xml_cancelamento && (
+                            <button
+                              onClick={() => {
+                                const chave = quote.nfe_chave || quote.chave_acesso || quote.quoteNumber;
+                                downloadXmlCancelamento(quote.xml_cancelamento!, chave);
+                              }}
+                              className="px-3 py-2 bg-rose-900/60 hover:bg-rose-800 text-rose-200 border border-rose-700/50 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+                              title="Baixar XML do evento de cancelamento homologado (procEventoNFe)"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                              <span>XML Cancelamento</span>
+                            </button>
+                          )}
                         </div>
                       )}
 
@@ -481,6 +543,26 @@ export default function QuoteHistoryModal({
           client={clientForSelectedQuote}
           onSuccess={handleNfeSuccess}
           onClose={() => setQuoteForNfe(null)}
+        />
+      )}
+
+      {/* Modal de Cancelamento de NF-e Homologada na SEFAZ */}
+      {quoteForCancelNfe && (
+        <CancelarNfeModal
+          quote={quoteForCancelNfe}
+          client={clients.find(c => 
+            (quoteForCancelNfe.clientId && c.id === quoteForCancelNfe.clientId) || 
+            (quoteForCancelNfe.clientDocument && c.document && c.document.replace(/\D/g, '') === quoteForCancelNfe.clientDocument.replace(/\D/g, '')) ||
+            (c.name || (c as any).nome) === quoteForCancelNfe.clientName
+          ) || null}
+          onSuccess={(updated) => {
+            setLocalQuotes(prev => prev.map(q => (q.id === updated.id || q.quoteNumber === updated.quoteNumber) ? updated : q));
+            if (onUpdateQuote) {
+              onUpdateQuote(updated);
+            }
+            setQuoteForCancelNfe(null);
+          }}
+          onClose={() => setQuoteForCancelNfe(null)}
         />
       )}
     </div>

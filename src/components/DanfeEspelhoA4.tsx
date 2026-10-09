@@ -14,7 +14,9 @@ import {
   detectarFormaPagamentoInicial,
   montarEnderecoSemDuplicacao,
   buscarInscricaoEstadual,
-  obterOuBaixarXmlNfe
+  obterOuBaixarXmlNfe,
+  isNfeAutorizada,
+  isNfeCancelada
 } from '../services/nfeService';
 export { buscarInscricaoEstadual };
 import { formatCurrency, formatNumberBR, formatSafeDate } from '../utils/calculator';
@@ -28,7 +30,8 @@ import {
   FileText, 
   CheckCircle2, 
   AlertTriangle,
-  Scissors
+  Scissors,
+  Ban
 } from 'lucide-react';
 
 interface DanfeEspelhoA4Props {
@@ -38,6 +41,7 @@ interface DanfeEspelhoA4Props {
   isPrevia?: boolean;
   onClose?: () => void;
   onTransmitir?: () => void;
+  onCancelar?: () => void;
   onOpenEdit?: () => void;
   isTransmitting?: boolean;
   formaPagamento?: 'A_VISTA' | 'A_PRAZO' | string;
@@ -104,15 +108,19 @@ export default function DanfeEspelhoA4({
   quote,
   client,
   company = DEFAULT_COMPANY_DATA,
-  isPrevia = quote.status_nfe !== 'Emitida',
+  isPrevia: isPreviaProp,
   onClose,
   onTransmitir,
+  onCancelar,
   onOpenEdit,
   isTransmitting = false,
   formaPagamento,
   duplicatas: duplicatasProp,
   clienteDestinatario
 }: DanfeEspelhoA4Props) {
+  const isCancelada = isNfeCancelada(quote.status_nfe);
+  const isAutorizada = isNfeAutorizada(quote.status_nfe);
+  const isPrevia = isPreviaProp !== undefined ? isPreviaProp : (!isAutorizada && !isCancelada);
   const printRef = useRef<HTMLDivElement>(null);
 
   // 1. Dados do Emitente
@@ -326,16 +334,30 @@ export default function DanfeEspelhoA4({
       {/* Barra de Ações Superior (Oculta na Impressão) */}
       <div className="w-full max-w-[210mm] bg-slate-900 border border-slate-800 rounded-t-xl px-4 py-3 flex items-center justify-between gap-3 text-slate-100 shadow-xl shrink-0 print:hidden mb-2">
         <div className="flex items-center gap-2.5 min-w-0">
-          <div className={`p-1.5 rounded-lg ${isPrevia ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'}`}>
-            <FileText className="w-5 h-5 shrink-0" />
+          <div className={`p-1.5 rounded-lg ${
+            isCancelada 
+              ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' 
+              : isPrevia 
+                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' 
+                : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+          }`}>
+            {isCancelada ? <Ban className="w-5 h-5 shrink-0 text-rose-400" /> : <FileText className="w-5 h-5 shrink-0" />}
           </div>
           <div className="min-w-0">
             <h2 className="font-bold text-sm tracking-wide flex items-center gap-2 truncate">
-              {isPrevia ? 'Espelho DANFE (Prévia Oficial A4)' : 'DANFE Oficial - Modelo 55'}
+              {isCancelada 
+                ? 'DANFE de NF-e Cancelada (Sem Valor Fiscal)' 
+                : isPrevia 
+                  ? 'Espelho DANFE (Prévia Oficial A4)' 
+                  : 'DANFE Oficial - Modelo 55'}
               <span className={`text-[10px] font-mono px-2 py-0.5 rounded uppercase tracking-wider ${
-                isPrevia ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                isCancelada 
+                  ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' 
+                  : isPrevia 
+                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' 
+                    : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
               }`}>
-                {isPrevia ? 'Modo Conferência' : 'Emitida SEFAZ'}
+                {isCancelada ? 'CANCELADA (STATUS 101)' : isPrevia ? 'Modo Conferência' : 'Emitida SEFAZ'}
               </span>
             </h2>
             <p className="text-[11px] text-slate-400 truncate">
@@ -345,7 +367,7 @@ export default function DanfeEspelhoA4({
         </div>
 
         <div className="flex items-center gap-2">
-          {onOpenEdit && (
+          {onOpenEdit && !isCancelada && (
             <button
               type="button"
               onClick={onOpenEdit}
@@ -355,7 +377,7 @@ export default function DanfeEspelhoA4({
             </button>
           )}
 
-          {!isPrevia && (
+          {!isPrevia && !isCancelada && (
             <button
               type="button"
               onClick={handleDownloadXml}
@@ -368,6 +390,18 @@ export default function DanfeEspelhoA4({
             </button>
           )}
 
+          {isAutorizada && onCancelar && (
+            <button
+              type="button"
+              onClick={onCancelar}
+              className="px-3.5 py-1.5 bg-rose-700 hover:bg-rose-600 text-white text-xs font-bold rounded-lg transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
+              title="Cancelar NF-e Homologada na SEFAZ"
+            >
+              <Ban className="w-4 h-4" />
+              <span>CANCELAR NF-E</span>
+            </button>
+          )}
+
           <button
             type="button"
             onClick={handlePrint}
@@ -375,10 +409,10 @@ export default function DanfeEspelhoA4({
             title="Imprimir DANFE na folha A4 oficial"
           >
             <Printer className="w-4 h-4" />
-            <span>Imprimir A4</span>
+            <span>{isCancelada ? 'Imprimir Cancelada' : 'Imprimir A4'}</span>
           </button>
 
-          {isPrevia && onTransmitir && (
+          {isPrevia && !isCancelada && onTransmitir && (
             <button
               type="button"
               onClick={onTransmitir}
@@ -414,8 +448,17 @@ export default function DanfeEspelhoA4({
         style={{ fontFamily: 'Arial, Helvetica, sans-serif' }}
       >
         
-        {/* Marca d'água Diagonal Central de Conferência */}
-        {isPrevia && (
+        {/* Marca d'água Diagonal Central */}
+        {isCancelada ? (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none select-none z-30 overflow-hidden">
+            <div className="rotate-[-28deg] border-4 border-dashed border-red-600/30 text-red-600/30 font-black text-4xl sm:text-5xl uppercase tracking-widest p-8 text-center rounded-2xl max-w-xl">
+              NF-E CANCELADA<br />
+              <span className="text-xl sm:text-2xl font-bold tracking-normal text-red-700/30">
+                SEM VALOR FISCAL (STATUS 101)
+              </span>
+            </div>
+          </div>
+        ) : isPrevia ? (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none select-none z-30 overflow-hidden">
             <div className="rotate-[-28deg] border-4 border-dashed border-red-600/25 text-red-600/20 font-black text-4xl sm:text-5xl uppercase tracking-widest p-8 text-center rounded-2xl max-w-xl">
               PRÉVIA - SEM VALOR FISCAL<br />
@@ -424,7 +467,7 @@ export default function DanfeEspelhoA4({
               </span>
             </div>
           </div>
-        )}
+        ) : null}
 
         {/* =========================================================================
             1. CANHOTO SUPERIOR (Declaração de Recebimento)

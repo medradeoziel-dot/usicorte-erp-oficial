@@ -9,12 +9,14 @@ import {
   X,
   FileCheck2,
   FileText,
-  Receipt
+  Receipt,
+  Ban
 } from 'lucide-react';
 import { TipoImpressaoConsulta } from './ConsultaPrintDocuments';
 import { Client, Quote } from '../types';
 import EmissaoNfeModal from './EmissaoNfeModal';
-import { abrirDanfeEmNovaAba } from '../services/nfeService';
+import CancelarNfeModal from './CancelarNfeModal';
+import { abrirDanfeEmNovaAba, isNfeAutorizada, isNfeCancelada } from '../services/nfeService';
 
 export type TipoImpressaoOrcamento = TipoImpressaoConsulta | 'NFE';
 
@@ -45,6 +47,7 @@ export default function QuotePrintOptionsModal({
 }: QuotePrintOptionsModalProps) {
   const [currentQuote, setCurrentQuote] = useState<any>(orcamentoSalvo);
   const [showEmissaoNfeModal, setShowEmissaoNfeModal] = useState<boolean>(false);
+  const [showCancelarModal, setShowCancelarModal] = useState<boolean>(false);
 
   useEffect(() => {
     if (orcamentoSalvo) {
@@ -132,10 +135,14 @@ export default function QuotePrintOptionsModal({
     ''
   ).trim();
 
-  const isNfeEmitida = statusNfe.toLowerCase() === 'emitida';
+  const isAutorizada = isNfeAutorizada(statusNfe);
+  const isCancelada = isNfeCancelada(statusNfe);
+  const isNfeEmitida = isAutorizada;
 
   // Descrição Dinâmica baseada em status_nfe
-  const nfeDescricao = isNfeEmitida
+  const nfeDescricao = isCancelada
+    ? 'Nota Fiscal cancelada na SEFAZ (Status 101 - Sem valor fiscal)'
+    : isAutorizada
     ? 'Imprimir / Baixar DANFE (PDF da Nota Fiscal Emitida)'
     : 'Emitir Nota Fiscal Eletrônica (SEFAZ) para este pedido';
 
@@ -205,17 +212,23 @@ export default function QuotePrintOptionsModal({
     {
       tipo: 'NFE',
       titulo: 'NOTA FISCAL',
-      subtitulo: isNfeEmitida ? 'DANFE EMITIDA' : 'NF-E / DANFE',
+      subtitulo: isCancelada ? 'NF-E CANCELADA' : isAutorizada ? 'DANFE AUTORIZADA' : 'NF-E / DANFE',
       descricao: nfeDescricao,
-      icone: isNfeEmitida ? (
+      icone: isCancelada ? (
+        <Ban className="w-6 h-6 text-rose-400 group-hover:scale-110 transition-transform" />
+      ) : isAutorizada ? (
         <FileText className="w-6 h-6 text-emerald-400 group-hover:scale-110 transition-transform" />
       ) : (
         <Receipt className="w-6 h-6 text-purple-400 group-hover:scale-110 transition-transform" />
       ),
-      cardClasses: isNfeEmitida
+      cardClasses: isCancelada
+        ? 'hover:border-rose-500 hover:bg-rose-950/40 border-rose-700/60 bg-rose-950/20 text-rose-300 shadow-rose-950/30'
+        : isAutorizada
         ? 'hover:border-emerald-500 hover:bg-emerald-950/40 border-emerald-700/60 bg-emerald-950/20 text-emerald-300 shadow-emerald-950/30'
         : 'hover:border-purple-500 hover:bg-purple-950/40 border-purple-800/60 bg-purple-950/20 text-purple-300 shadow-purple-950/30',
-      iconBgClasses: isNfeEmitida
+      iconBgClasses: isCancelada
+        ? 'bg-rose-500/15 border-rose-500/30 text-rose-400'
+        : isAutorizada
         ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
         : 'bg-purple-500/15 border-purple-500/30 text-purple-400',
     },
@@ -224,13 +237,14 @@ export default function QuotePrintOptionsModal({
   const handleAction = async (tipo: TipoImpressaoOrcamento) => {
     if (tipo === 'NFE') {
       const targetQuote = currentQuote || orcamentoSalvo;
-      if (isNfeEmitida) {
-        // Caso A NOTA JÁ FOI EMITIDA (status_nfe == 'Emitida'):
-        // Abre diretamente o PDF da DANFE (danfe_url) em uma nova aba para impressão rápida.
+      if (isCancelada) {
+        // Caso A NOTA FOI CANCELADA: abre DANFE com tarja SEM VALOR FISCAL (não reemite)
+        await abrirDanfeEmNovaAba(targetQuote, resolvedClient);
+      } else if (isAutorizada) {
+        // Caso A NOTA JÁ FOI AUTORIZADA: abre diretamente o PDF da DANFE oficial
         await abrirDanfeEmNovaAba(targetQuote, resolvedClient);
       } else {
-        // Caso A NOTA AINDA NÃO FOI EMITIDA (status_nfe != 'Emitida'):
-        // Abre o Modal/Tela de Conferência e Transmissão Fiscal para a SEFAZ.
+        // Caso A NOTA AINDA NÃO FOI EMITIDA: abre tela de conferência fiscal
         setShowEmissaoNfeModal(true);
       }
       return;
@@ -269,9 +283,14 @@ export default function QuotePrintOptionsModal({
                   <span className="text-xs font-mono font-bold text-slate-400">
                     Cotação #{displayQuoteNumber}
                   </span>
-                  {isNfeEmitida && (
+                  {isAutorizada && (
                     <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
-                      <FileText className="w-3 h-3" /> NF-e Emitida
+                      <FileText className="w-3 h-3" /> NF-e Autorizada
+                    </span>
+                  )}
+                  {isCancelada && (
+                    <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/40 flex items-center gap-1">
+                      <Ban className="w-3 h-3 text-rose-400" /> NF-e Cancelada (Status 101)
                     </span>
                   )}
                 </div>
@@ -287,13 +306,27 @@ export default function QuotePrintOptionsModal({
               </div>
             </div>
 
-            <button
-              onClick={onClose}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
-              title="Fechar opções"
-            >
-              <X className="w-5 h-5" />
-            </button>
+            <div className="flex items-center gap-2">
+              {isAutorizada && (
+                <button
+                  type="button"
+                  onClick={() => setShowCancelarModal(true)}
+                  className="px-3.5 py-1.5 bg-rose-700 hover:bg-rose-600 text-white font-bold text-xs rounded-xl transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
+                  title="Cancelar NF-e Homologada na SEFAZ (Status 101)"
+                >
+                  <Ban className="w-3.5 h-3.5" />
+                  <span>CANCELAR NF-E</span>
+                </button>
+              )}
+
+              <button
+                onClick={onClose}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer"
+                title="Fechar opções"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
           </div>
 
           {/* Grade Horizontal com os 7 botões de ação com ícones visíveis */}
@@ -356,6 +389,19 @@ export default function QuotePrintOptionsModal({
           client={resolvedClient}
           onSuccess={handleNfeSuccess}
           onClose={() => setShowEmissaoNfeModal(false)}
+        />
+      )}
+
+      {/* MODAL DE CANCELAMENTO DE NF-E HOMOLOGADA NA SEFAZ */}
+      {showCancelarModal && (
+        <CancelarNfeModal
+          quote={currentQuote || orcamentoSalvo}
+          client={resolvedClient}
+          onSuccess={(updated) => {
+            handleNfeSuccess(updated);
+            setShowCancelarModal(false);
+          }}
+          onClose={() => setShowCancelarModal(false)}
         />
       )}
     </>

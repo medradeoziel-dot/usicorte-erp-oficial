@@ -138,7 +138,7 @@ export interface Quote {
   createdAt: string;
   updatedAt: string;
   // Campos Fiscais da Nota Fiscal Eletrônica (NF-e)
-  status_nfe?: 'Pendente' | 'Processando' | 'Emitida' | 'Erro' | string;
+  status_nfe?: 'Pendente' | 'Processando' | 'Emitida' | 'AUTORIZADA' | 'CANCELADA' | 'Erro' | string;
   nfe_chave?: string;
   chave_acesso?: string;
   nfe_numero?: string;
@@ -148,6 +148,10 @@ export interface Quote {
   protocolo_autorizacao?: string;
   protocolo_nfe?: string;
   mensagem_erro_nfe?: string;
+  protocolo_cancelamento?: string;
+  xml_cancelamento?: string;
+  motivo_cancelamento?: string;
+  nfe_cancelada_em?: string;
   nfe_emitida_em?: string;
   serie_nfe?: string;
   cliente_id?: string;

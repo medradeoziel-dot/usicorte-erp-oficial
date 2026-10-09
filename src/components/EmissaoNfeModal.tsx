@@ -11,8 +11,13 @@ import {
   buscarInscricaoEstadual,
   downloadXmlNfe,
   obterOuBaixarXmlNfe,
-  enviarEmailNfe
+  enviarEmailNfe,
+  isNfeAutorizada,
+  isNfeCancelada,
+  downloadXmlCancelamento,
+  abrirDanfeEmNovaAba
 } from '../services/nfeService';
+import CancelarNfeModal from './CancelarNfeModal';
 import { updateCotacaoNfeStatusDb } from '../lib/db';
 import { fetchCompanyData, CompanyFiscalData, DEFAULT_COMPANY_DATA } from '../services/companyService';
 import { formatCurrency } from '../utils/calculator';
@@ -34,7 +39,8 @@ import {
   ExternalLink,
   Info,
   Eye,
-  Mail
+  Mail,
+  Ban
 } from 'lucide-react';
 
 interface EmissaoNfeModalProps {
@@ -59,6 +65,15 @@ export default function EmissaoNfeModal({
   const [openingNewTab, setOpeningNewTab] = useState<boolean>(false);
   const [emailFeedback, setEmailFeedback] = useState<string | null>(null);
   const [isDownloadingXml, setIsDownloadingXml] = useState<boolean>(false);
+  const [currentQuoteState, setCurrentQuoteState] = useState<Quote>(quote);
+  const [showCancelarModal, setShowCancelarModal] = useState<boolean>(false);
+
+  useEffect(() => {
+    setCurrentQuoteState(quote);
+  }, [quote]);
+
+  const isCancelada = isNfeCancelada(currentQuoteState.status_nfe);
+  const isAutorizada = isNfeAutorizada(currentQuoteState.status_nfe);
 
   const handleOpenPreDanfeNewTab = async () => {
     setOpeningNewTab(true);
@@ -268,6 +283,38 @@ export default function EmissaoNfeModal({
         {/* Modal Body */}
         <div className="p-6 overflow-y-auto space-y-5 flex-1 text-xs">
           
+          {/* Banner de NF-e CANCELADA */}
+          {isCancelada && (
+            <div className="p-4 rounded-xl bg-rose-950/80 border border-rose-500/60 text-rose-100 space-y-3 animate-in fade-in duration-300">
+              <div className="flex items-start gap-3">
+                <Ban className="w-6 h-6 text-rose-400 shrink-0 mt-0.5" />
+                <div className="flex-1 space-y-1">
+                  <div className="flex items-center gap-2">
+                    <h4 className="font-bold text-sm text-rose-200">
+                      NF-E CANCELADA HOMOLOGADA NA SEFAZ (STATUS 101)
+                    </h4>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-rose-500/30 text-rose-300 border border-rose-500/50">
+                      SEM VALOR FISCAL
+                    </span>
+                  </div>
+                  <p className="text-xs text-rose-300/90">
+                    Esta nota fiscal foi cancelada perante a Receita Estadual. A emissão de novo DANFE com validade jurídica foi permanentemente desativada.
+                  </p>
+                  {currentQuoteState.protocolo_cancelamento && (
+                    <p className="text-xs text-slate-300">
+                      <strong>Protocolo do Evento de Cancelamento:</strong> <span className="font-mono text-rose-300">{currentQuoteState.protocolo_cancelamento}</span>
+                    </p>
+                  )}
+                  {currentQuoteState.motivo_cancelamento && (
+                    <p className="text-xs text-slate-300">
+                      <strong>Justificativa Informada:</strong> <span className="italic text-slate-200">"{currentQuoteState.motivo_cancelamento}"</span>
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Sucesso Banner */}
           {transmissionResult && transmissionResult.sucesso && (
             <div className="p-4 rounded-xl bg-emerald-950/70 border border-emerald-500/50 text-emerald-100 space-y-3 animate-in fade-in duration-300">
@@ -517,7 +564,33 @@ export default function EmissaoNfeModal({
               </span>
             )}
 
-            {(transmissionResult?.sucesso || quote.status_nfe === 'Emitida') ? (
+            {isCancelada ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => abrirDanfeEmNovaAba(currentQuoteState, client)}
+                  className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-rose-300 border border-rose-500/30 font-bold text-xs rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
+                  title="Visualizar espelho da DANFE cancelada com tarja oficial SEM VALOR FISCAL"
+                >
+                  <Ban className="w-4 h-4 text-rose-400" />
+                  DANFE Cancelada (Sem Valor Fiscal)
+                </button>
+                {currentQuoteState.xml_cancelamento && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const chave = currentQuoteState.nfe_chave || currentQuoteState.chave_acesso || currentQuoteState.quoteNumber;
+                      downloadXmlCancelamento(currentQuoteState.xml_cancelamento!, chave);
+                    }}
+                    className="px-4 py-2.5 bg-rose-900/60 hover:bg-rose-800 text-rose-200 border border-rose-700/50 font-bold text-xs rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
+                    title="Baixar XML do evento de cancelamento da NF-e homologado na SEFAZ"
+                  >
+                    <Download className="w-4 h-4" />
+                    Baixar XML Cancelamento
+                  </button>
+                )}
+              </>
+            ) : (transmissionResult?.sucesso || isAutorizada) ? (
               <>
                 <button
                   type="button"
@@ -537,6 +610,16 @@ export default function EmissaoNfeModal({
                 >
                   <Download className="w-4 h-4" />
                   {isDownloadingXml ? 'Baixando...' : 'Baixar XML'}
+                </button>
+                {/* BOTÃO CANCELAR NF-E NA BARRA DE FERRAMENTAS FISCAL */}
+                <button
+                  type="button"
+                  onClick={() => setShowCancelarModal(true)}
+                  className="px-4 py-2.5 bg-rose-700 hover:bg-rose-600 text-white font-bold text-xs rounded-xl transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
+                  title="Cancelar NF-e Homologada na SEFAZ (Status 101)"
+                >
+                  <Ban className="w-4 h-4" />
+                  <span>CANCELAR NF-E</span>
                 </button>
                 <button
                   type="button"
@@ -886,6 +969,20 @@ export default function EmissaoNfeModal({
 
           </div>
         </div>
+      )}
+
+      {/* MODAL DE CANCELAMENTO DE NF-E HOMOLOGADA (SEFAZ) */}
+      {showCancelarModal && (
+        <CancelarNfeModal
+          quote={currentQuoteState}
+          client={client}
+          onSuccess={(updated) => {
+            setCurrentQuoteState(updated);
+            onSuccess(updated);
+            setShowCancelarModal(false);
+          }}
+          onClose={() => setShowCancelarModal(false)}
+        />
       )}
     </>
   );

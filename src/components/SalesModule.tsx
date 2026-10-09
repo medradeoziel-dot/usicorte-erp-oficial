@@ -60,7 +60,14 @@ import { createPortal } from 'react-dom';
 import QuotePrintModal, { PrintMode } from './QuotePrintModal';
 import QuotePrintOptionsModal, { TipoImpressaoOrcamento } from './QuotePrintOptionsModal';
 import EmissaoNfeModal from './EmissaoNfeModal';
-import { abrirDanfeEmNovaAba } from '../services/nfeService';
+import CancelarNfeModal from './CancelarNfeModal';
+import { 
+  abrirDanfeEmNovaAba, 
+  obterOuBaixarXmlNfe, 
+  isNfeAutorizada, 
+  isNfeCancelada, 
+  downloadXmlCancelamento 
+} from '../services/nfeService';
 import { 
   ConsultaPrintDocuments, 
   TipoImpressaoConsulta,
@@ -115,7 +122,11 @@ import {
   X,
   Ruler,
   Upload,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Ban,
+  FileCheck2,
+  Download,
+  FileText
 } from 'lucide-react';
 
 interface SalesModuleProps {
@@ -241,6 +252,7 @@ export default function SalesModule({
   const [editingQuoteId, setEditingQuoteId] = useState<string | null>(() => quoteToEdit?.id || null);
   const [editingOriginalQuoteNumber, setEditingOriginalQuoteNumber] = useState<string | null>(() => quoteToEdit?.quoteNumber || quoteToEdit?.id || null);
   const [editingQuoteCreatedAt, setEditingQuoteCreatedAt] = useState<string | null>(() => quoteToEdit?.createdAt || null);
+  const [quoteForCancelNfe, setQuoteForCancelNfe] = useState<Quote | null>(null);
 
   const editingQuoteIdRef = useRef<string | null>(quoteToEdit?.id || null);
   const editingQuoteNumberRef = useRef<string | null>(quoteToEdit?.quoteNumber || quoteToEdit?.id || null);
@@ -2584,6 +2596,82 @@ export default function SalesModule({
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
+          {/* BARRA DE AÇÕES FISCAIS (NF-E) QUANDO AUTORIZADA OU CANCELADA */}
+          {(() => {
+            const cleanNum = numeroCotacao.trim();
+            const matchedQuote = savedQuotes.find(
+              q => (editingQuoteId && (q.id === editingQuoteId || String(q.id).toLowerCase() === String(editingQuoteId).toLowerCase())) ||
+                   (editingOriginalQuoteNumber && (q.quoteNumber === editingOriginalQuoteNumber || q.id === editingOriginalQuoteNumber)) ||
+                   (cleanNum && (q.quoteNumber === cleanNum || q.id === cleanNum))
+            ) || lastSavedQuoteForPrint;
+
+            if (!matchedQuote) return null;
+
+            const isAutorizada = isNfeAutorizada(matchedQuote.status_nfe);
+            const isCancelada = isNfeCancelada(matchedQuote.status_nfe);
+
+            if (isAutorizada) {
+              const resolvedCl = clients.find(c => c.id === matchedQuote.clientId || (matchedQuote.clientDocument && c.document === matchedQuote.clientDocument)) || null;
+              return (
+                <div className="flex items-center gap-1.5 p-1 bg-emerald-950/40 border border-emerald-500/40 rounded-xl">
+                  <span className="text-[11px] font-bold text-emerald-300 flex items-center gap-1 px-1.5 hidden sm:flex">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                    NF-e #{matchedQuote.nfe_numero || ''}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => abrirDanfeEmNovaAba(matchedQuote, resolvedCl)}
+                    className="px-2.5 py-1.5 bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold rounded-lg flex items-center gap-1 transition cursor-pointer shadow-xs"
+                    title="Visualizar DANFE A4 oficial"
+                  >
+                    <FileCheck2 className="w-3.5 h-3.5" />
+                    <span>VER DANFE</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => obterOuBaixarXmlNfe(matchedQuote, resolvedCl)}
+                    className="px-2.5 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold rounded-lg flex items-center gap-1 transition cursor-pointer shadow-xs"
+                    title="Baixar XML oficial autorizado pela SEFAZ"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>BAIXAR XML</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setQuoteForCancelNfe(matchedQuote)}
+                    className="px-2.5 py-1.5 bg-rose-700 hover:bg-rose-600 text-white text-xs font-bold rounded-lg flex items-center gap-1 transition cursor-pointer shadow-xs"
+                    title="Cancelar NF-e Homologada na SEFAZ (Status 101)"
+                  >
+                    <Ban className="w-3.5 h-3.5" />
+                    <span>CANCELAR NF-E</span>
+                  </button>
+                </div>
+              );
+            }
+
+            if (isCancelada) {
+              const resolvedCl = clients.find(c => c.id === matchedQuote.clientId || (matchedQuote.clientDocument && c.document === matchedQuote.clientDocument)) || null;
+              return (
+                <div className="flex items-center gap-1.5 p-1 bg-rose-950/40 border border-rose-500/40 rounded-xl text-rose-300 text-xs font-bold">
+                  <span className="flex items-center gap-1 px-1.5">
+                    <Ban className="w-3.5 h-3.5 text-rose-400" />
+                    <span>NF-e Cancelada</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => abrirDanfeEmNovaAba(matchedQuote, resolvedCl)}
+                    className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-rose-200 text-xs font-bold rounded-lg transition cursor-pointer"
+                    title="Visualizar DANFE cancelada com tarja SEM VALOR FISCAL"
+                  >
+                    DANFE Cancelada
+                  </button>
+                </div>
+              );
+            }
+
+            return null;
+          })()}
+
           <button
             onClick={() => handleAdvanceToNextQuote(true)}
             className="px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
@@ -4293,11 +4381,24 @@ export default function SalesModule({
           clients={clients}
           onSelectQuote={handleLoadQuoteFromHistory}
           onDeleteQuote={handleDeleteSavedQuote}
-          onDuplicateQuote={(q) => handleLoadQuoteForDuplication({ quote: q, originalNumber: q.quoteNumber || q.id })}
           onUpdateQuote={(updated) => {
             setSavedQuotes(prev => prev.map(q => q.id === updated.id || q.quoteNumber === updated.quoteNumber ? updated : q));
           }}
           onClose={() => setShowHistoryModal(false)}
+        />
+      )}
+
+      {/* MODAL DE CANCELAMENTO DE NF-E HOMOLOGADA NA SEFAZ */}
+      {quoteForCancelNfe && (
+        <CancelarNfeModal
+          quote={quoteForCancelNfe}
+          client={clients.find(c => c.id === quoteForCancelNfe.clientId || (quoteForCancelNfe.clientDocument && c.document === quoteForCancelNfe.clientDocument)) || null}
+          onSuccess={(updated) => {
+            setLastSavedQuoteForPrint(updated);
+            setSavedQuotes(prev => prev.map(q => q.id === updated.id || q.quoteNumber === updated.quoteNumber ? updated : q));
+            setQuoteForCancelNfe(null);
+          }}
+          onClose={() => setQuoteForCancelNfe(null)}
         />
       )}
 

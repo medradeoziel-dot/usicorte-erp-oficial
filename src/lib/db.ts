@@ -1181,7 +1181,7 @@ export async function saveCotacaoDb(quote: Quote): Promise<{ data: any; error: a
 export async function updateCotacaoNfeStatusDb(
   cotacaoIdOrNumber: string,
   payload: {
-    status_nfe: 'Pendente' | 'Processando' | 'Emitida' | 'Erro' | string;
+    status_nfe: 'Pendente' | 'Processando' | 'Emitida' | 'AUTORIZADA' | 'CANCELADA' | 'Erro' | string;
     nfe_chave?: string;
     chave_acesso?: string;
     nfe_numero?: string;
@@ -1193,6 +1193,10 @@ export async function updateCotacaoNfeStatusDb(
     xml_conteudo?: string;
     mensagem_erro_nfe?: string | null;
     nfe_emitida_em?: string;
+    protocolo_cancelamento?: string;
+    xml_cancelamento?: string;
+    motivo_cancelamento?: string;
+    nfe_cancelada_em?: string;
   }
 ): Promise<{ success: boolean; error: any }> {
   try {
@@ -1220,6 +1224,10 @@ export async function updateCotacaoNfeStatusDb(
     if (payload.xml_conteudo !== undefined) updateObj.xml_conteudo = payload.xml_conteudo;
     if (payload.mensagem_erro_nfe !== undefined) updateObj.mensagem_erro_nfe = payload.mensagem_erro_nfe;
     if (payload.nfe_emitida_em !== undefined) updateObj.nfe_emitida_em = payload.nfe_emitida_em;
+    if (payload.protocolo_cancelamento !== undefined) updateObj.protocolo_cancelamento = payload.protocolo_cancelamento;
+    if (payload.xml_cancelamento !== undefined) updateObj.xml_cancelamento = payload.xml_cancelamento;
+    if (payload.motivo_cancelamento !== undefined) updateObj.motivo_cancelamento = payload.motivo_cancelamento;
+    if (payload.nfe_cancelada_em !== undefined) updateObj.nfe_cancelada_em = payload.nfe_cancelada_em;
 
     // Persistência local garantida como redundância segura
     try {
@@ -1229,6 +1237,12 @@ export async function updateCotacaoNfeStatusDb(
       }
       if (payload.xml_conteudo) {
         localStorage.setItem(`usicorte_nfe_xml_cot_${cotacaoIdOrNumber}`, payload.xml_conteudo);
+      }
+      if (cleanChave && payload.xml_cancelamento) {
+        localStorage.setItem(`usicorte_nfe_cancel_xml_${cleanChave}`, payload.xml_cancelamento);
+      }
+      if (cleanChave && payload.status_nfe === 'CANCELADA') {
+        localStorage.setItem(`usicorte_nfe_status_${cleanChave}`, 'CANCELADA');
       }
     } catch {}
 
@@ -1254,7 +1268,12 @@ export async function updateCotacaoNfeStatusDb(
       if (payload.serie_nfe !== undefined) safeFallback.serie_nfe = payload.serie_nfe;
       if (payload.danfe_url !== undefined) safeFallback.danfe_url = payload.danfe_url;
       if (payload.xml_url !== undefined) safeFallback.xml_url = payload.xml_url;
-      if (payload.mensagem_erro_nfe !== undefined) safeFallback.mensagem_erro_nfe = payload.mensagem_erro_nfe;
+      // Se status for cancelada, inclui no campo mensagem_erro_nfe ou observacoes o registro do cancelamento
+      if (payload.status_nfe === 'CANCELADA' && payload.protocolo_cancelamento) {
+        safeFallback.mensagem_erro_nfe = `CANCELADA SEFAZ - Prot: ${payload.protocolo_cancelamento} - Motivo: ${payload.motivo_cancelamento || ''}`;
+      } else if (payload.mensagem_erro_nfe !== undefined) {
+        safeFallback.mensagem_erro_nfe = payload.mensagem_erro_nfe;
+      }
       if (payload.nfe_emitida_em !== undefined) safeFallback.nfe_emitida_em = payload.nfe_emitida_em;
 
       let retryQuery = db.from('cotacoes').update(safeFallback);

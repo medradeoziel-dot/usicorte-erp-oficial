@@ -68,13 +68,15 @@ import {
   ChevronRight,
   Send,
   FileCheck2,
-  Receipt
+  Receipt,
+  Ban
 } from 'lucide-react';
 import BoletosGestaoModal from './BoletosGestaoModal';
 import EmissaoNfeModal from './EmissaoNfeModal';
+import CancelarNfeModal from './CancelarNfeModal';
 import DanfeEspelhoA4Modal from './DanfeEspelhoA4Modal';
 import OrdemCorte80mm, { imprimirCupom80mm } from './OrdemCorte80mm';
-import { obterOuBaixarXmlNfe } from '../services/nfeService';
+import { obterOuBaixarXmlNfe, isNfeAutorizada, isNfeCancelada, downloadXmlCancelamento } from '../services/nfeService';
 import { 
   ContaReceberParcela,
   fetchBoletosDb,
@@ -648,9 +650,10 @@ export default function ReportsModule({
   const [isQuickPayingBoletoId, setIsQuickPayingBoletoId] = useState<string | null>(null);
   const [vencimentosDismissed, setVencimentosDismissed] = useState<boolean>(false);
 
-  // Estados para Emissão e Visualização de Nota Fiscal Eletrônica (NF-e / DANFE)
+  // Estados para Emissão, Visualização e Cancelamento de Nota Fiscal Eletrônica (NF-e / DANFE)
   const [quoteForNfeModal, setQuoteForNfeModal] = useState<Quote | null>(null);
   const [quoteForDanfeModal, setQuoteForDanfeModal] = useState<Quote | null>(null);
+  const [quoteForCancelNfeModal, setQuoteForCancelNfeModal] = useState<Quote | null>(null);
   const [isLoadingNfeQuote, setIsLoadingNfeQuote] = useState<boolean>(false);
 
   // Carregamento inicial de boletos cadastrados
@@ -1120,6 +1123,13 @@ export default function ReportsModule({
 
   // Abre o modal de emissão / transmissão da NF-e para a SEFAZ
   const handleAbrirEmissaoNfe = async (item: ConsultaItem) => {
+    if (isNfeCancelada(item.status_nfe)) {
+      setDeleteFeedback({
+        message: `Esta NF-e (Nº ${item.nfe_numero || ''}) foi CANCELADA na SEFAZ (Status 101). A emissão de novo DANFE com valor fiscal está permanentemente desativada.`,
+        type: 'error'
+      });
+      return;
+    }
     const quote = await resolveQuoteForNfe(item);
     if (quote) {
       setQuoteForNfeModal(quote);
@@ -1222,6 +1232,68 @@ export default function ReportsModule({
       return;
     }
     await handleBaixarXmlTabela(selectedItem);
+  };
+
+  // Abre o modal de cancelamento da NF-e homologada perante a SEFAZ
+  const handleAbrirCancelamentoNfe = async (item: ConsultaItem) => {
+    const quote = await resolveQuoteForNfe(item);
+    if (quote) {
+      setQuoteForCancelNfeModal(quote);
+    } else {
+      setDeleteFeedback({
+        message: 'Não foi possível carregar os dados desta cotação para cancelamento da NF-e.',
+        type: 'error'
+      });
+    }
+  };
+
+  // Disparo de cancelamento de NF-e a partir da barra superior
+  const handleCancelarNfeTopBar = async () => {
+    const selectedItem = filteredConsultaItems.find(it => selectedIds.includes(it.idVer)) || 
+      (selectedIds.length === 0 && filteredConsultaItems.length === 1 ? filteredConsultaItems[0] : null);
+
+    if (!selectedItem) {
+      setDeleteFeedback({
+        message: 'Selecione uma cotação/pedido na tabela com NF-e autorizada para cancelar.',
+        type: 'error'
+      });
+      return;
+    }
+
+    if (!isNfeAutorizada(selectedItem.status_nfe)) {
+      setDeleteFeedback({
+        message: `Esta nota não está com status AUTORIZADA (Status atual: ${selectedItem.status_nfe || 'Pendente'}). Somente NF-e autorizada pode ser cancelada na SEFAZ.`,
+        type: 'error'
+      });
+      return;
+    }
+
+    await handleAbrirCancelamentoNfe(selectedItem);
+  };
+
+  // Callback de sucesso ao cancelar NF-e na SEFAZ
+  const handleNfeCancelSuccess = (updatedQuote: Quote) => {
+    setDeleteFeedback({
+      message: `NF-e Nº ${updatedQuote.nfe_numero || ''} cancelada com sucesso perante a SEFAZ (Status 101)!`,
+      type: 'success'
+    });
+    setDbQuotesItems(prev => prev.map(item => {
+      const match = 
+        (item.cotacao && item.cotacao === updatedQuote.quoteNumber) ||
+        (item.cotacaoId && item.cotacaoId === updatedQuote.id) ||
+        (item.cotacao && item.cotacao === updatedQuote.id);
+      if (match) {
+        return {
+          ...item,
+          status_nfe: 'CANCELADA',
+          protocolo_cancelamento: updatedQuote.protocolo_cancelamento,
+          xml_cancelamento: updatedQuote.xml_cancelamento,
+          motivo_cancelamento: updatedQuote.motivo_cancelamento,
+          nfe_cancelada_em: updatedQuote.nfe_cancelada_em
+        };
+      }
+      return item;
+    }));
   };
 
   // Callback de sucesso ao emitir / autorizar NF-e
@@ -3697,6 +3769,26 @@ export default function ReportsModule({
                 </span>
                 BAIXAR XML
               </button>
+              {(() => {
+                const selectedItem = filteredConsultaItems.find(it => selectedIds.includes(it.idVer)) || 
+                  (selectedIds.length === 0 && filteredConsultaItems.length === 1 ? filteredConsultaItems[0] : null);
+                const isAutorizada = selectedItem && isNfeAutorizada(selectedItem.status_nfe);
+                if (!isAutorizada) return null;
+                return (
+                  <button
+                    type="button"
+                    className="btn-print w-full min-w-0 cursor-pointer border transition-all bg-rose-700 hover:bg-rose-600 text-white border-rose-500 shadow-md shadow-rose-700/30"
+                    onClick={handleCancelarNfeTopBar}
+                    disabled={isLoadingNfeQuote}
+                    title={`Cancelar NF-e Homologada (Nº ${selectedItem?.nfe_numero || ''}) perante a SEFAZ`}
+                  >
+                    <span className="flex items-center justify-center">
+                      <Ban className="w-4 h-4 mb-0.5 text-rose-200" />
+                    </span>
+                    CANCELAR NF-E
+                  </button>
+                );
+              })()}
               <button
                 type="button"
                 onClick={handleDuplicateSelectedQuote}
@@ -4180,7 +4272,7 @@ export default function ReportsModule({
                             >
                               <FileCheck2 className="w-3.5 h-3.5" />
                             </button>
-                            {item.status_nfe === 'Emitida' && (
+                            {isNfeAutorizada(item.status_nfe) && (
                               <button
                                 type="button"
                                 onClick={async (e) => {
@@ -4191,6 +4283,19 @@ export default function ReportsModule({
                                 title={`Baixar XML oficial da NF-e Nº ${item.nfe_numero || ''} (NFe${(item.nfe_chave || '').replace(/\D/g, '')}.xml)`}
                               >
                                 <Download className="w-3.5 h-3.5 text-emerald-400" />
+                              </button>
+                            )}
+                            {isNfeAutorizada(item.status_nfe) && (
+                              <button
+                                type="button"
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  await handleAbrirCancelamentoNfe(item);
+                                }}
+                                className="p-1.5 bg-rose-600/20 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-500/40 rounded-md transition-all cursor-pointer flex items-center justify-center shadow-xs"
+                                title={`Cancelar NF-e Homologada (Nº ${item.nfe_numero || ''}) na SEFAZ`}
+                              >
+                                <Ban className="w-3.5 h-3.5 text-rose-400 group-hover:text-white" />
                               </button>
                             )}
                             <button
@@ -4232,7 +4337,15 @@ export default function ReportsModule({
                         <td>
                           <div className="flex flex-col gap-0.5">
                             <strong>{item.cotacao || '-'}</strong>
-                            {item.status_nfe === 'Emitida' && (
+                            {isNfeCancelada(item.status_nfe) ? (
+                              <span 
+                                className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-400 bg-rose-950/70 border border-rose-500/40 px-1.5 py-0.5 rounded-md w-fit"
+                                title={`NF-e cancelada perante a SEFAZ (Status 101). Protocolo: ${item.protocolo_cancelamento || '-'}`}
+                              >
+                                <Ban className="w-2.5 h-2.5 text-rose-400" />
+                                NF-e CANCELADA
+                              </span>
+                            ) : isNfeAutorizada(item.status_nfe) ? (
                               <span 
                                 className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-950/70 border border-emerald-500/40 px-1.5 py-0.5 rounded-md w-fit"
                                 title={`NF-e autorizada pela SEFAZ. Chave: ${item.nfe_chave || 'Autorizada'}`}
@@ -4240,7 +4353,7 @@ export default function ReportsModule({
                                 <CheckCircle2 className="w-2.5 h-2.5 text-emerald-400" />
                                 NF-e {item.nfe_numero || 'OK'}
                               </span>
-                            )}
+                            ) : null}
                           </div>
                         </td>
                         <td style={{ textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
@@ -4837,6 +4950,21 @@ export default function ReportsModule({
                 setQuoteForDanfeModal(null);
                 if (q) setQuoteForNfeModal(q);
               }}
+            />
+          )}
+
+          {/* ===================================================
+               MODAL DE CANCELAMENTO DE NF-E HOMOLOGADA (SEFAZ)
+               =================================================== */}
+          {quoteForCancelNfeModal && (
+            <CancelarNfeModal
+              quote={quoteForCancelNfeModal}
+              client={resolveClientForQuote(quoteForCancelNfeModal)}
+              onSuccess={(updated) => {
+                handleNfeCancelSuccess(updated);
+                setQuoteForCancelNfeModal(null);
+              }}
+              onClose={() => setQuoteForCancelNfeModal(null)}
             />
           )}
 
