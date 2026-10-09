@@ -105,6 +105,18 @@ export default function EmissaoNfeModal({
 
   const isOperacaoInterestadual = clienteInfo.uf !== 'SP';
 
+  const proximoNumeroNfe = useMemo(() => {
+    if (quote.nfe_numero) return quote.nfe_numero;
+    const ultimo = typeof company.ultimo_numero_nfe === 'number' && !isNaN(company.ultimo_numero_nfe)
+      ? company.ultimo_numero_nfe
+      : 0;
+    return String(ultimo + 1).padStart(6, '0');
+  }, [quote.nfe_numero, company.ultimo_numero_nfe]);
+
+  const serieNfe = useMemo(() => {
+    return String(quote.serie_nfe || company.serie_nfe || '1');
+  }, [quote.serie_nfe, company.serie_nfe]);
+
   // 4. Confirmar & Transmitir SEFAZ
   const handleTransmitirSefaz = async () => {
     setIsTransmitting(true);

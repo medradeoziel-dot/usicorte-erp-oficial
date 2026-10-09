@@ -818,7 +818,123 @@ export default function CompanySettingsModule({ onBackToDashboard }: CompanySett
           </div>
         </div>
 
-        {/* 6. INFORMAÇÕES PARA PAGAMENTO & PIX */}
+        {/* SEÇÃO 6: CONTROLE DE NUMERAÇÃO FISCAL (NF-E / DANFE) */}
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-800/80 gap-2">
+            <div className="flex items-center gap-2">
+              <div className="p-1.5 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-lg">
+                <FileText className="w-4 h-4" />
+              </div>
+              <div>
+                <h2 className="text-sm font-bold text-slate-200">6. Controle de Numeração Fiscal (NF-e / DANFE)</h2>
+                <p className="text-[11px] text-slate-400">
+                  Numeração oficial e independente de emissão de Nota Fiscal Eletrônica (Modelo 55).
+                </p>
+              </div>
+            </div>
+            <span className="text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30 px-2.5 py-1 rounded-full flex items-center gap-1.5 w-fit">
+              <Sparkles className="w-3 h-3" /> Sequencial Fiscal Independente
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
+            {/* Campo Numérico: Último Número de NF-e Emitida */}
+            <div className="md:col-span-6 flex flex-col gap-1.5">
+              <label className="text-xs font-semibold text-slate-300 flex items-center justify-between">
+                <span className="flex items-center gap-1.5">
+                  <ListOrdered className="w-3.5 h-3.5 text-blue-400" />
+                  <span>Último Número de NF-e Emitida *</span>
+                </span>
+                <span className="text-[10px] text-slate-500 font-mono">Ex: 537</span>
+              </label>
+              <input
+                type="number"
+                min="0"
+                step="1"
+                value={formData.ultimo_numero_nfe !== undefined ? formData.ultimo_numero_nfe : 0}
+                onChange={(e) => {
+                  const val = parseInt(e.target.value, 10);
+                  const validVal = isNaN(val) || val < 0 ? 0 : val;
+                  setFormData(prev => ({
+                    ...prev,
+                    ultimo_numero_nfe: validVal
+                  }));
+                }}
+                placeholder="537"
+                className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm outline-none focus:border-blue-500 text-blue-300 font-mono font-bold text-base"
+                required
+              />
+              <span className="text-[11px] text-slate-400">
+                Guarda o último número emitido (coluna <code>ultimo_numero_nfe</code> na tabela <code>emitente</code>). A próxima NF-e gerada ou conferida terá o número <strong>{(Number(formData.ultimo_numero_nfe) || 0) + 1}</strong>.
+              </span>
+            </div>
+
+            {/* Campo Numérico: Série da NF-e */}
+            <div className="md:col-span-6 flex flex-col gap-1.5">
+              <label className="text-xs font-semibold text-slate-300 flex items-center justify-between">
+                <span>Série da NF-e *</span>
+                <span className="text-[10px] text-slate-500 font-mono">Padrão: 1</span>
+              </label>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                value={formData.serie_nfe !== undefined ? formData.serie_nfe : 1}
+                onChange={(e) => {
+                  const val = parseInt(e.target.value, 10);
+                  const validVal = isNaN(val) || val < 1 ? 1 : val;
+                  setFormData(prev => ({
+                    ...prev,
+                    serie_nfe: validVal
+                  }));
+                }}
+                placeholder="1"
+                className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm outline-none focus:border-blue-500 text-slate-100 font-mono font-bold"
+                required
+              />
+              <span className="text-[11px] text-slate-400">
+                Série fiscal de emissão da NF-e gravada na tabela <code>emitente</code> (coluna <code>serie_nfe</code>).
+              </span>
+            </div>
+
+            {/* Card Demonstrativo da Prévia da NF-e */}
+            <div className="md:col-span-12 p-4 bg-slate-950 border border-slate-800 rounded-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                  <span>Prévia da Próxima Nota Fiscal Eletrônica:</span>
+                </div>
+                <div className="text-[11px] text-slate-400">
+                  Totalmente separada da cotação. A cotação continuará identificada no rodapé como referência comercial.
+                </div>
+              </div>
+
+              {(() => {
+                const ultimo = Number(formData.ultimo_numero_nfe) || 0;
+                const proxNfe = ultimo + 1;
+                const proxNfeFormatado = String(proxNfe).padStart(6, '0');
+                const serieAtual = formData.serie_nfe || 1;
+
+                return (
+                  <div className="flex flex-wrap items-center gap-2 font-mono text-xs">
+                    <div className="px-3 py-1.5 bg-blue-950/70 border border-blue-600/40 text-blue-300 rounded-lg font-black flex flex-col">
+                      <span className="text-[9px] font-sans text-blue-400 uppercase font-semibold">Próxima NF-e</span>
+                      <span>Nº {proxNfeFormatado} (Série {serieAtual})</span>
+                    </div>
+
+                    <ArrowRight className="w-4 h-4 text-slate-600" />
+
+                    <div className="px-3 py-1.5 bg-slate-900 border border-slate-800 text-slate-400 rounded-lg flex flex-col">
+                      <span className="text-[9px] font-sans text-slate-500 uppercase font-semibold">NF-e Posterior</span>
+                      <span>Nº {String(proxNfe + 1).padStart(6, '0')} (Série {serieAtual})</span>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+        </div>
+
+        {/* 7. INFORMAÇÕES PARA PAGAMENTO & PIX */}
         <div className="p-6 bg-slate-900/90 border border-emerald-900/40 rounded-2xl shadow-xl space-y-6 relative overflow-hidden">
           <div className="absolute top-0 right-0 w-96 h-96 bg-emerald-600/5 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20"></div>
 
@@ -829,7 +945,7 @@ export default function CompanySettingsModule({ onBackToDashboard }: CompanySett
               </div>
               <div>
                 <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
-                  Informações para Pagamento & PIX
+                  7. Informações para Pagamento & PIX
                   <span className="px-2 py-0.5 text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full">
                     Extrato & PDF Dinâmico
                   </span>

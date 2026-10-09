@@ -43,7 +43,11 @@ export const DEFAULT_COMPANY_DATA: CompanyFiscalData = {
   proximo_numero_cotacao: 140,
   prefixo_cotacao: 'COT-2026-',
 
-  // 6. Informações para Pagamento & Chave PIX (Dinâmico)
+  // 6. Controle de Numeração Fiscal (NF-e Modelo 55)
+  ultimo_numero_nfe: 0,
+  serie_nfe: 1,
+
+  // 7. Informações para Pagamento & Chave PIX (Dinâmico)
   chavePix: '25.038.430/0001-23',
   tipoChavePix: 'CNPJ',
   favorecidoPix: 'L. M. BANZATTO METAIS',
@@ -136,7 +140,19 @@ export function mapSupabaseToCompany(row: any): CompanyFiscalData {
           : (parseInt(row.proximo_numero_sequencial || row.proximo_numero_cotacao || row.nextQuoteSequential, 10) || 140))),
     quotePrefix: row.prefixo_cotacao || row.quotePrefix || DEFAULT_COMPANY_DATA.quotePrefix,
 
-    // 6. Dados Bancários & PIX
+    // 6. Controle de Numeração Fiscal (NF-e)
+    ultimo_numero_nfe: typeof row.ultimo_numero_nfe === 'number' && !isNaN(row.ultimo_numero_nfe)
+      ? row.ultimo_numero_nfe
+      : (typeof row.ultimoNumeroNfe === 'number' && !isNaN(row.ultimoNumeroNfe)
+        ? row.ultimoNumeroNfe
+        : (parseInt(row.ultimo_numero_nfe || row.ultimoNumeroNfe, 10) || 0)),
+    serie_nfe: typeof row.serie_nfe === 'number' && !isNaN(row.serie_nfe)
+      ? row.serie_nfe
+      : (typeof row.serieNfe === 'number' && !isNaN(row.serieNfe)
+        ? row.serieNfe
+        : (parseInt(row.serie_nfe || row.serieNfe, 10) || 1)),
+
+    // 7. Dados Bancários & PIX
     chavePix: row.chave_pix !== undefined && row.chave_pix !== null ? row.chave_pix : (row.chavePix ?? DEFAULT_COMPANY_DATA.chavePix),
     tipoChavePix: row.tipo_chave_pix !== undefined && row.tipo_chave_pix !== null ? row.tipo_chave_pix : (row.tipoChavePix ?? DEFAULT_COMPANY_DATA.tipoChavePix),
     favorecidoPix: row.favorecido_pix !== undefined && row.favorecido_pix !== null ? row.favorecido_pix : (row.favorecidoPix ?? DEFAULT_COMPANY_DATA.favorecidoPix),
@@ -224,6 +240,12 @@ export function mapCompanyToSupabase(data: CompanyFiscalData): Record<string, an
     cep: data.cep || '',
     proximo_numero_sequencial: seq,
     prefixo_cotacao: prefix,
+    ultimo_numero_nfe: typeof data.ultimo_numero_nfe === 'number' && !isNaN(data.ultimo_numero_nfe)
+      ? data.ultimo_numero_nfe
+      : (parseInt(String(data.ultimo_numero_nfe || 0), 10) || 0),
+    serie_nfe: typeof data.serie_nfe === 'number' && !isNaN(data.serie_nfe)
+      ? data.serie_nfe
+      : (parseInt(String(data.serie_nfe || 1), 10) || 1),
     chave_pix: data.chavePix !== undefined ? data.chavePix : (data.chave_pix || ''),
     tipo_chave_pix: data.tipoChavePix !== undefined ? data.tipoChavePix : (data.tipo_chave_pix || ''),
     favorecido_pix: data.favorecidoPix !== undefined ? data.favorecidoPix : (data.favorecido_pix || ''),
@@ -292,6 +314,8 @@ export async function fetchCompanyData(): Promise<CompanyFiscalData> {
         bancoTitular: data.banco_titular !== null && data.banco_titular !== undefined ? data.banco_titular : (mapped.bancoTitular ?? local.bancoTitular),
         bancoCnpj: data.banco_cnpj !== null && data.banco_cnpj !== undefined ? data.banco_cnpj : (mapped.bancoCnpj ?? local.bancoCnpj),
         instrucoesPagamento: data.instrucoes_pagamento !== null && data.instrucoes_pagamento !== undefined ? data.instrucoes_pagamento : (mapped.instrucoesPagamento ?? local.instrucoesPagamento),
+        ultimo_numero_nfe: data.ultimo_numero_nfe !== null && data.ultimo_numero_nfe !== undefined ? Number(data.ultimo_numero_nfe) : (mapped.ultimo_numero_nfe ?? local.ultimo_numero_nfe ?? 0),
+        serie_nfe: data.serie_nfe !== null && data.serie_nfe !== undefined ? Number(data.serie_nfe) : (mapped.serie_nfe ?? local.serie_nfe ?? 1),
         updated_at: data.created_at || new Date().toISOString()
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
@@ -663,4 +687,98 @@ export function setQuoteSequentialConfig(nextSequential: number, prefix?: string
   }
   updateEmitenteNextSequential(nextSequential).catch(() => {});
 }
+
+/**
+ * Busca as configurações de controle fiscal de NF-e da tabela 'emitente'
+ */
+export async function fetchEmitenteNfeConfig(): Promise<{ ultimoNumeroNfe: number; serieNfe: number }> {
+  try {
+    const { data } = await db
+      .from('emitente')
+      .select('ultimo_numero_nfe, serie_nfe')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (data) {
+      const ultimoNumeroNfe = typeof data.ultimo_numero_nfe === 'number' && !isNaN(data.ultimo_numero_nfe)
+        ? data.ultimo_numero_nfe
+        : (parseInt(data.ultimo_numero_nfe, 10) || 0);
+      const serieNfe = typeof data.serie_nfe === 'number' && !isNaN(data.serie_nfe)
+        ? data.serie_nfe
+        : (parseInt(data.serie_nfe, 10) || 1);
+      return { ultimoNumeroNfe, serieNfe };
+    }
+  } catch (err) {
+    console.warn('Aviso ao consultar controle fiscal na tabela emitente:', err);
+  }
+
+  const local = getLocalCompanyData();
+  return {
+    ultimoNumeroNfe: Number(local.ultimo_numero_nfe ?? 0),
+    serieNfe: Number(local.serie_nfe ?? 1)
+  };
+}
+
+/**
+ * Atualiza o último número de NF-e e a série na tabela 'emitente'
+ */
+export async function updateEmitenteNfeConfig(ultimoNumeroNfe: number, serieNfe?: number): Promise<boolean> {
+  try {
+    const { data: existing } = await db
+      .from('emitente')
+      .select('id')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const updatePayload: Record<string, any> = {
+      ultimo_numero_nfe: ultimoNumeroNfe
+    };
+    if (serieNfe !== undefined) {
+      updatePayload.serie_nfe = serieNfe;
+    }
+
+    if (existing && existing.id) {
+      const { error } = await db
+        .from('emitente')
+        .update(updatePayload)
+        .eq('id', existing.id);
+
+      if (error) {
+        console.warn('Erro ao atualizar ultimo_numero_nfe no Supabase:', error);
+      }
+    }
+
+    const local = getLocalCompanyData();
+    local.ultimo_numero_nfe = ultimoNumeroNfe;
+    if (serieNfe !== undefined) {
+      local.serie_nfe = serieNfe;
+    }
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(local));
+    } catch {}
+
+    window.dispatchEvent(new CustomEvent('company-data-updated', { detail: local }));
+    return true;
+  } catch (err) {
+    console.warn('Falha ao atualizar ultimo_numero_nfe:', err);
+    return false;
+  }
+}
+
+/**
+ * Incrementa o último número de NF-e na tabela 'emitente' ao emitir/transmitir uma nota
+ */
+export async function incrementEmitenteUltimoNumeroNfe(currentUsedNumber?: number): Promise<number> {
+  const config = await fetchEmitenteNfeConfig();
+  const current = config.ultimoNumeroNfe;
+  const next = typeof currentUsedNumber === 'number' && !isNaN(currentUsedNumber) && currentUsedNumber > current
+    ? currentUsedNumber
+    : current + 1;
+
+  await updateEmitenteNfeConfig(next);
+  return next;
+}
+
 

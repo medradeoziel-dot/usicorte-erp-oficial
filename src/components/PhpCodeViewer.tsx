@@ -868,8 +868,16 @@ CREATE TABLE IF NOT EXISTS empresa_emitente (
     logo_url TEXT,
     nome_responsavel VARCHAR(150),
     documento_responsavel VARCHAR(30),
+    proximo_numero_sequencial INTEGER DEFAULT 140,
+    prefixo_cotacao VARCHAR(50) DEFAULT 'COT-2026-',
+    ultimo_numero_nfe INTEGER DEFAULT 0,
+    serie_nfe INTEGER DEFAULT 1,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
 );
+
+-- Script de Atualização para a tabela emitente existente no Supabase:
+ALTER TABLE IF EXISTS emitente ADD COLUMN IF NOT EXISTS ultimo_numero_nfe INTEGER DEFAULT 0;
+ALTER TABLE IF EXISTS emitente ADD COLUMN IF NOT EXISTS serie_nfe INTEGER DEFAULT 1;
 
 -- Inserir dados fiscais da Usicorte Metais
 INSERT INTO empresa_emitente (

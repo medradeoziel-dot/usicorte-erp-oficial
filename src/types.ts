@@ -397,7 +397,11 @@ export interface CompanyFiscalData {
   proximo_numero_cotacao?: number;
   prefixo_cotacao?: string;
 
-  // 6. Informações para Pagamento & Chave PIX (Dinâmico)
+  // 6. Controle de Numeração Fiscal (NF-e Modelo 55)
+  ultimo_numero_nfe?: number; // Último Número de NF-e Emitida (default 0)
+  serie_nfe?: number; // Série da NF-e (default 1)
+
+  // 7. Informações para Pagamento & Chave PIX (Dinâmico)
   chavePix?: string; // Chave PIX
   tipoChavePix?: string; // Tipo da Chave (Ex: CNPJ / E-mail)
   favorecidoPix?: string; // Favorecido / Titular do PIX

@@ -1,7 +1,7 @@
 import React, { useRef } from 'react';
 import { Quote, Client } from '../types';
 import { CompanyFiscalData, DEFAULT_COMPANY_DATA } from '../services/companyService';
-import { ItemFiscalNfe, prepararItensFiscais, formatarChaveAcesso, gerarChaveAcessoNfe } from '../services/nfeService';
+import { ItemFiscalNfe, prepararItensFiscais, formatarChaveAcesso, gerarChaveAcessoNfe, formatarNumeroDanfe } from '../services/nfeService';
 import { formatCurrency, formatNumberBR, formatSafeDate } from '../utils/calculator';
 import Logo from './Logo';
 import { 
@@ -135,8 +135,11 @@ export default function DanfeEspelhoA4({
   const pesoTotal = quote.totalWeightKg || quote.items?.reduce((acc, it) => acc + (it.totalWeightKg || it.pesoTotal || 0), 0) || 0;
 
   // 5. Dados da NF-e
-  const numeroNfe = quote.nfe_numero || String(quote.quoteNumber || '1').replace(/\D/g, '').slice(-6).padStart(6, '0') || '000001';
-  const serie = quote.serie_nfe || '1';
+  const emitenteUltimo = typeof emitente.ultimo_numero_nfe === 'number' && !isNaN(emitente.ultimo_numero_nfe)
+    ? emitente.ultimo_numero_nfe
+    : 0;
+  const numeroNfe = quote.nfe_numero || String(emitenteUltimo + 1).padStart(6, '0');
+  const serie = String(quote.serie_nfe || emitente.serie_nfe || '1');
   const chaveAcessoRaw = quote.nfe_chave || gerarChaveAcessoNfe(emitente.uf, new Date(), emitente.cnpj, serie, numeroNfe);
   const chaveFormatada = isPrevia ? 'CHAVE SERÁ GERADA APÓS TRANSMISSÃO SEFAZ' : formatarChaveAcesso(chaveAcessoRaw);
 
@@ -183,7 +186,7 @@ export default function DanfeEspelhoA4({
               </span>
             </h2>
             <p className="text-[11px] text-slate-400 truncate">
-              NF-e Nº {numeroNfe} • Série {serie} • {clienteInfo.nome}
+              NF-e Nº {formatarNumeroDanfe(numeroNfe)} • Série {serie} • {clienteInfo.nome}
             </p>
           </div>
         </div>
@@ -280,7 +283,7 @@ export default function DanfeEspelhoA4({
 
             <div className="col-span-2 p-1 text-center flex flex-col justify-center items-center bg-gray-50/50">
               <span className="font-extrabold text-[12px] leading-tight">NF-e</span>
-              <span className="font-bold text-[9px] mt-0.5">Nº {numeroNfe}</span>
+              <span className="font-bold text-[9px] mt-0.5">Nº {formatarNumeroDanfe(numeroNfe)}</span>
               <span className="text-[7.5px] text-gray-700">SÉRIE {serie}</span>
             </div>
           </div>
@@ -335,7 +338,7 @@ export default function DanfeEspelhoA4({
             </div>
 
             <div>
-              <div className="font-bold text-[10px] leading-tight">Nº {numeroNfe}</div>
+              <div className="font-bold text-[10px] leading-tight">Nº {formatarNumeroDanfe(numeroNfe)}</div>
               <div className="text-[8px] font-semibold text-gray-800">SÉRIE {serie}</div>
               <div className="text-[7.5px] text-gray-600">FOLHA 1 / 1</div>
             </div>

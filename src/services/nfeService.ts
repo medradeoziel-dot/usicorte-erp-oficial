@@ -1,7 +1,18 @@
 import { Quote, QuoteItem, Client } from '../types';
 import { db, updateCotacaoNfeStatusDb } from '../lib/db';
-import { fetchCompanyData, CompanyFiscalData, DEFAULT_COMPANY_DATA } from './companyService';
+import { fetchCompanyData, CompanyFiscalData, DEFAULT_COMPANY_DATA, incrementEmitenteUltimoNumeroNfe } from './companyService';
 import { generateBarcodeSvg } from '../utils/barcode';
+
+/**
+ * Formata o número da NF-e para exibição oficial no DANFE (ex: 000538 -> 000.538 ou 538)
+ */
+export function formatarNumeroDanfe(numStr: string | number): string {
+  const clean = String(numStr).replace(/\D/g, '');
+  if (clean.length === 6) {
+    return `${clean.slice(0, 3)}.${clean.slice(3)}`;
+  }
+  return clean || String(numStr);
+}
 
 export interface ItemFiscalNfe {
   id: string;
@@ -428,10 +439,13 @@ export async function transmitirNfeSefaz(
   const valorTotal = quote.grandTotal || quote.subtotalTotal || itensFiscais.reduce((s, it) => s + it.subtotal, 0);
 
   // 5. Geração de Numeração e Chave de Acesso
-  const seqAtual = companyData.proximo_numero_sequencial || 140;
-  const proximoSeq = seqAtual + 1;
-  const numeroNfe = String(seqAtual).padStart(6, '0');
-  const serie = '1';
+  // O número da NF-e DEVE SER: ultimo_numero_nfe + 1 (totalmente independente do número da cotação)
+  const ultimoNfeNum = typeof companyData.ultimo_numero_nfe === 'number' && !isNaN(companyData.ultimo_numero_nfe)
+    ? companyData.ultimo_numero_nfe
+    : 0;
+  const proximoNumeroNfe = ultimoNfeNum + 1;
+  const numeroNfe = String(proximoNumeroNfe).padStart(6, '0');
+  const serie = String(companyData.serie_nfe || '1');
   const dataEmissao = new Date();
 
   const chaveAcesso = gerarChaveAcessoNfe(
@@ -460,7 +474,7 @@ export async function transmitirNfeSefaz(
   const xmlUrl = URL.createObjectURL(xmlBlob);
 
   // Simulação de transmissão bem sucedida com autorização da SEFAZ
-  const danfeHtml = gerarDanfeHtml(emitente, destinatario, itensFiscais, numeroNfe, serie, chaveAcesso, protocolo, dataEmissao, valorTotal);
+  const danfeHtml = gerarDanfeHtml(emitente, destinatario, itensFiscais, numeroNfe, serie, chaveAcesso, protocolo, dataEmissao, valorTotal, false, quote.quoteNumber);
   const danfeBlob = new Blob([danfeHtml], { type: 'text/html' });
   const danfeUrl = URL.createObjectURL(danfeBlob);
 
@@ -470,20 +484,19 @@ export async function transmitirNfeSefaz(
       status_nfe: 'Emitida',
       nfe_chave: chaveAcesso,
       nfe_numero: numeroNfe,
+      serie_nfe: serie,
       danfe_url: danfeUrl,
       xml_url: xmlUrl,
       mensagem_erro_nfe: null,
       nfe_emitida_em: dataEmissao.toISOString()
     });
 
-    // Atualiza próximo sequencial na tabela emitente
+    // Atualiza ultimo_numero_nfe (+1) na tabela emitente
     try {
-      await db
-        .from('emitente')
-        .update({ proximo_numero_sequencial: proximoSeq })
-        .order('created_at', { ascending: false })
-        .limit(1);
-    } catch {}
+      await incrementEmitenteUltimoNumeroNfe(proximoNumeroNfe);
+    } catch (e) {
+      console.warn('Aviso ao incrementar ultimo_numero_nfe na tabela emitente:', e);
+    }
   } catch (dbErr) {
     console.warn('Aviso ao persistir status_nfe no Supabase (será mantido localmente):', dbErr);
   }
@@ -521,7 +534,8 @@ export function gerarDanfeHtml(
   protocolo: string,
   dataEmissao: Date,
   valorTotal: number,
-  isPrevia: boolean = false
+  isPrevia: boolean = false,
+  numeroCotacaoRef?: string
 ): string {
   const chaveFormatada = isPrevia ? 'CHAVE SERÁ GERADA APÓS TRANSMISSÃO SEFAZ' : formatarChaveAcesso(chaveAcesso);
   const totalProdutos = itens.reduce((acc, it) => acc + it.subtotal, 0);
@@ -650,7 +664,7 @@ export function gerarDanfeHtml(
           </td>
           <td style="width: 18%; text-align: center; vertical-align: middle; background: #fafafa; padding: 4px;">
             <div style="font-size: 12px; font-weight: 900;">NF-e</div>
-            <div style="font-size: 9px; font-weight: bold; margin-top: 2px;">Nº ${numeroNfe}</div>
+            <div style="font-size: 9px; font-weight: bold; margin-top: 2px;">Nº ${formatarNumeroDanfe(numeroNfe)}</div>
             <div style="font-size: 7.5px; color: #555;">SÉRIE ${serie}</div>
           </td>
         </tr>
@@ -680,7 +694,7 @@ export function gerarDanfeHtml(
               <span style="color: #666;">0 - ENTRADA</span><br>
               <strong>1 - SAÍDA [ 1 ]</strong>
             </div>
-            <div style="font-weight: bold; font-size: 10px;">Nº ${numeroNfe}</div>
+            <div style="font-weight: bold; font-size: 10px;">Nº ${formatarNumeroDanfe(numeroNfe)}</div>
             <div style="font-size: 8px;">SÉRIE ${serie}</div>
             <div style="font-size: 7px; color: #666;">FOLHA 1 / 1</div>
           </td>
@@ -962,7 +976,7 @@ export function gerarDanfeHtml(
             <div style="font-size: 7.5px; line-height: 1.3;">
               <strong>DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL. NÃO GERA DIREITO A CRÉDITO FISCAL DE IPI E ICMS.</strong><br>
               Valor aprox. tributos: R$ ${ibptFed.toFixed(2).replace('.', ',')} Federal (8,50%), R$ ${ibptEst.toFixed(2).replace('.', ',')} Estadual (4,95%) e R$ 0,00 Municipal. Fonte: IBPT.<br>
-              Pedido / Cotação UsiCorte Metais Ref: Nº ${numeroNfe}.<br>
+              Pedido de Venda / Cotação UsiCorte Ref: Nº ${numeroCotacaoRef || 'COT-1'}.<br>
               ${isPrevia ? '<strong style="color: #b91c1c;">⚠️ ATENÇÃO: MODO DE CONFERÊNCIA. ESTE DOCUMENTO É UMA PRÉVIA E NÃO POSSUI VALIDADE JURÍDICA OU FISCAL.</strong>' : ''}
             </div>
           </td>
@@ -1034,10 +1048,13 @@ export async function abrirDanfeEmNovaAba(quote: Quote, client?: Client | null):
     };
 
     const valorTotal = quote.grandTotal || quote.subtotalTotal || itensFiscais.reduce((acc, it) => acc + it.subtotal, 0);
-    const numeroNfe = quote.nfe_numero || String(quote.quoteNumber || '1').replace(/\D/g, '').slice(-6).padStart(6, '0') || '000001';
-    const serie = '1';
+    const emitenteUltimo = typeof emitente.ultimo_numero_nfe === 'number' && !isNaN(emitente.ultimo_numero_nfe)
+      ? emitente.ultimo_numero_nfe
+      : 0;
+    const numeroNfe = quote.nfe_numero || String(emitenteUltimo + 1).padStart(6, '0');
+    const serie = String(quote.serie_nfe || emitente.serie_nfe || '1');
     const chaveAcesso = quote.nfe_chave || gerarChaveAcessoNfe(emitente.uf || 'SP', new Date(), emitente.cnpj, serie, numeroNfe);
-    const protocolo = '135260000000001 (Autorizado o uso da NF-e)';
+    const protocolo = quote.protocolo_nfe || '135260000000001 (Autorizado o uso da NF-e)';
     const dataEmissao = quote.nfe_emitida_em ? new Date(quote.nfe_emitida_em) : new Date();
 
     const danfeHtml = gerarDanfeHtml(
@@ -1049,7 +1066,9 @@ export async function abrirDanfeEmNovaAba(quote: Quote, client?: Client | null):
       chaveAcesso,
       protocolo,
       dataEmissao,
-      valorTotal
+      valorTotal,
+      false,
+      quote.quoteNumber
     );
 
     const blob = new Blob([danfeHtml], { type: 'text/html' });
@@ -1093,8 +1112,11 @@ export async function gerarPreDanfeHtml(quote: Quote, client?: Client | null): P
   };
 
   const valorTotal = quote.grandTotal || quote.subtotalTotal || itensFiscais.reduce((acc, it) => acc + it.subtotal, 0);
-  const numeroNfe = quote.nfe_numero || String(quote.quoteNumber || '1').replace(/\D/g, '').slice(-6).padStart(6, '0') || '000001';
-  const serie = '1';
+  const emitenteUltimo = typeof emitente.ultimo_numero_nfe === 'number' && !isNaN(emitente.ultimo_numero_nfe)
+    ? emitente.ultimo_numero_nfe
+    : 0;
+  const numeroNfe = quote.nfe_numero || String(emitenteUltimo + 1).padStart(6, '0');
+  const serie = String(quote.serie_nfe || emitente.serie_nfe || '1');
   const chaveAcesso = '0000 0000 0000 0000 0000 0000 0000 0000 0000 0000 0000';
   const protocolo = 'SIMULAÇÃO / NÃO TRANSMITIDA';
   const dataEmissao = new Date();
@@ -1109,7 +1131,8 @@ export async function gerarPreDanfeHtml(quote: Quote, client?: Client | null): P
     protocolo,
     dataEmissao,
     valorTotal,
-    true // isPrevia = true
+    true, // isPrevia = true
+    quote.quoteNumber
   );
 }
 

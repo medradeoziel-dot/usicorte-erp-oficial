@@ -32,6 +32,15 @@ export default function RelatorioCortePrint({ itens, cliente, numeroPedido, data
             max-width: 210mm !important;
             margin: 0 auto !important;
           }
+
+          .ordem-corte-a4-container table {
+            width: 100% !important;
+            page-break-inside: auto;
+          }
+
+          .ordem-corte-a4-container tr {
+            page-break-inside: avoid;
+          }
         }
       `}</style>
 
@@ -111,16 +120,16 @@ export default function RelatorioCortePrint({ itens, cliente, numeroPedido, data
       </div>
 
       {/* DESKTOP & IMPRESSÃO: Tabela (>= 640px / print) */}
-      <div className="hidden sm:block print:block overflow-x-auto">
-        <table className="w-full text-xs sm:text-sm border-separate" style={{ borderSpacing: '0 6px' }}>
+      <div className="hidden sm:block print:block overflow-x-hidden">
+        <table className="w-full text-xs border-collapse table-fixed">
           <thead>
-            <tr>
-              <th className="border-b-2 border-black pb-2 text-center font-bold uppercase text-[11px]">Código</th>
-              <th className="border-b-2 border-black pb-2 text-center font-bold uppercase text-[11px]">Material / Liga</th>
-              <th className="border-b-2 border-black pb-2 text-center font-bold uppercase text-[11px]">Medidas de Corte</th>
-              <th className="border-b-2 border-black pb-2 text-center font-bold uppercase text-[11px]">Descrição Técnica</th>
-              <th className="border-b-2 border-black pb-2 text-center font-bold uppercase text-[11px]">Qtd Peças</th>
-              <th className="border-b-2 border-black pb-2 text-center font-bold uppercase text-[11px] w-28">Visto Máquina</th>
+            <tr className="bg-slate-100 print:bg-slate-200">
+              <th className="border border-black p-1.5 text-left font-bold uppercase text-[11px] w-[20%]">Observação</th>
+              <th className="border border-black p-1.5 text-left font-bold uppercase text-[11px] w-[24%]">Produto / Material</th>
+              <th className="border border-black p-1.5 text-left font-bold uppercase text-[11px] w-[22%]">Medidas</th>
+              <th className="border border-black p-1.5 text-left font-bold uppercase text-[11px] w-[20%]">Descrição</th>
+              <th className="border border-black p-1.5 text-center font-bold uppercase text-[11px] w-[7%]">Qtd</th>
+              <th className="border border-black p-1.5 text-center font-bold uppercase text-[11px] w-[7%]">Cortado</th>
             </tr>
           </thead>
           
@@ -129,8 +138,8 @@ export default function RelatorioCortePrint({ itens, cliente, numeroPedido, data
               const obsItem = getObservacaoEspecificaItem(item);
               return (
                 <tr key={item.idVer || index} className="text-gray-900" style={{ pageBreakInside: 'avoid', breakInside: 'avoid' }}>
-                  <td className="border-y border-l border-black py-2 px-2 text-center whitespace-nowrap font-mono">{obsItem || '-'}</td>
-                  <td className="border-y border-black py-2 px-2 text-center font-bold">
+                  <td className="border border-black p-1.5 text-left font-bold uppercase text-[11px] break-words">{obsItem || '-'}</td>
+                  <td className="border border-black p-1.5 text-left font-bold uppercase text-[11px]">
                     <div>
                       <div className="leading-tight text-slate-900">
                         {item.produto}
@@ -143,18 +152,18 @@ export default function RelatorioCortePrint({ itens, cliente, numeroPedido, data
                       </div>
                     </div>
                   </td>
-                  <td className="border-y border-black py-2 px-2 text-center font-mono">
-                    <div className="medida-bloco-center flex flex-col items-center justify-center">
+                  <td className="border border-black p-1.5 text-left">
+                    <div className="medida-bloco flex flex-col">
                       <span className="medida-dimensao font-bold font-mono text-slate-900 leading-tight">{item.medida}</span>
                       {obsItem && (
                         <span className="medida-obs text-[9.5px] text-slate-500 italic font-sans leading-tight mt-0.5">{obsItem}</span>
                       )}
                     </div>
                   </td>
-                  <td className="border-y border-black py-2 px-2 text-center text-xs">{item.descricao}</td>
-                  <td className="border-y border-black py-2 px-2 text-center font-black font-mono text-sm">{item.qtd}</td>
-                  <td className="border-y border-r border-black py-2 px-2 text-center">
-                    <div className="w-full h-5 border border-dashed border-slate-300 rounded bg-slate-50"></div>
+                  <td className="border border-black p-1.5 text-left uppercase text-[10px] text-gray-700 break-words">{item.descricao || '-'}</td>
+                  <td className="border border-black p-1.5 text-center font-black font-mono text-xs">{item.qtd}</td>
+                  <td className="border border-black p-1.5 text-center">
+                    <div className="w-4 h-4 border border-black mx-auto"></div>
                   </td>
                 </tr>
               );
