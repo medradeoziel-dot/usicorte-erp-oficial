@@ -27,7 +27,21 @@ export default function RelatorioCortePrint({ itens }: Props) {
   };
 
   return (
-    <div className="w-full bg-white text-black font-sans print:p-0 p-4 sm:p-8 max-w-[1000px] mx-auto box-border overflow-x-hidden">
+    <div className="ordem-corte-a4-container w-full bg-white text-black font-sans print:p-0 p-4 sm:p-8 max-w-[210mm] mx-auto box-border overflow-x-hidden">
+      <style>{`
+        @media print {
+          @page {
+            size: A4 portrait;
+            margin: 10mm;
+          }
+
+          body, .ordem-corte-a4-container {
+            width: 100% !important;
+            max-width: 210mm !important;
+            margin: 0 auto !important;
+          }
+        }
+      `}</style>
       <div className="print:hidden mb-6 flex justify-between sm:justify-end items-center gap-3">
         <span className="text-xs text-slate-500 font-semibold sm:hidden">
           {itens.length} {itens.length === 1 ? 'item' : 'itens'} para corte

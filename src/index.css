@@ -175,11 +175,11 @@
   body.print-empresa .secao-proposta { display: none !important; }
   body.print-empresa .secao-proposta-resumida { display: block !important; }
 
-  /* Modo Corte A4 (Ordem de Corte Produção): Ocupa toda a folha A4 em modo paisagem/horizontal (100% largura) */
+  /* Modo Corte A4 (Ordem de Corte Produção): Ocupa a folha A4 em modo retrato (100% largura útil, máx 210mm) */
   body.print-corte {
     width: 100% !important;
-    max-width: 100% !important;
-    margin: 0 !important;
+    max-width: 210mm !important;
+    margin: 0 auto !important;
     padding: 0 !important;
   }
   body.print-corte #print-area,
@@ -187,11 +187,11 @@
   body.print-corte #container-impressao-vendas,
   body.print-corte .print-container,
   body.print-corte .secao-corte,
+  body.print-corte .ordem-corte-a4-container,
   body.print-corte #doc-corte {
     width: 100% !important;
-    max-width: 100% !important;
-    min-width: 100% !important;
-    margin: 0 !important;
+    max-width: 210mm !important;
+    margin: 0 auto !important;
     padding: 0 !important;
     box-sizing: border-box !important;
     display: block !important;

@@ -19,7 +19,22 @@ export default function RelatorioCortePrint({ itens, cliente, numeroPedido, data
   };
 
   return (
-    <div className="print-container w-full bg-white text-black font-sans print:p-0 p-4 sm:p-8 max-w-[1000px] mx-auto box-border overflow-x-hidden print:overflow-visible print:h-auto print:max-h-none secao-corte">
+    <div className="print-container ordem-corte-a4-container w-full bg-white text-black font-sans print:p-0 p-4 sm:p-8 max-w-[210mm] mx-auto box-border overflow-x-hidden print:overflow-visible print:h-auto print:max-h-none secao-corte">
+      <style>{`
+        @media print {
+          @page {
+            size: A4 portrait;
+            margin: 10mm;
+          }
+
+          body, .ordem-corte-a4-container {
+            width: 100% !important;
+            max-width: 210mm !important;
+            margin: 0 auto !important;
+          }
+        }
+      `}</style>
+
       {/* Cabeçalho Corte CNC */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end mb-3 gap-2 border-b-2 border-slate-900 pb-2">
         <div className="leading-tight">

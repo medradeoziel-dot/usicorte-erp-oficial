@@ -3175,7 +3175,7 @@ export default function ReportsModule({
            =================================================== */}
       <div
         id="doc-corte"
-        className={`documento-modelo secao-corte bg-white text-slate-900 p-6 rounded-xl shadow-2xl font-sans w-full max-w-4xl print:max-w-none print:w-full print:p-0 mx-auto ${
+        className={`documento-modelo secao-corte ordem-corte-a4-container bg-white text-slate-900 p-6 rounded-xl shadow-2xl font-sans w-full max-w-4xl print:max-w-[210mm] print:w-full print:p-0 mx-auto ${
           activeModel === 'corte' ? 'block' : 'hidden'
         }`}
       >
@@ -3198,15 +3198,15 @@ export default function ReportsModule({
           </div>
         </div>
 
-        <table className="w-full border-collapse text-[11px]">
+        <table className="w-full border-collapse text-[11px] table-fixed">
           <thead>
             <tr className="bg-slate-200">
-              <th className="border border-black p-1.5 text-left">Observação</th>
-              <th className="border border-black p-1.5 text-left">Produto / Material</th>
-              <th className="border border-black p-1.5 text-left">Medidas</th>
-              <th className="border border-black p-1.5 text-left">Descrição</th>
-              <th className="border border-black p-1.5 text-center w-12">Qtd</th>
-              <th className="border border-black p-1.5 text-center w-16">Cortado</th>
+              <th className="border border-black p-1.5 text-left w-[20%]">Observação</th>
+              <th className="border border-black p-1.5 text-left w-[24%]">Produto / Material</th>
+              <th className="border border-black p-1.5 text-left w-[22%]">Medidas</th>
+              <th className="border border-black p-1.5 text-left w-[20%]">Descrição</th>
+              <th className="border border-black p-1.5 text-center w-[7%]">Qtd</th>
+              <th className="border border-black p-1.5 text-center w-[7%]">Cortado</th>
             </tr>
           </thead>
           <tbody>
@@ -3278,12 +3278,31 @@ export default function ReportsModule({
   return (
     <div id="screen-relatorios" className="space-y-6">
 
-      {/* Tamanho de página: A4 PAISAGEM para Ordem de Corte A4, auto/5mm para ETIQUETAS, A4 RETRATO para os demais */}
+      {/* Tamanho de página: A4 RETRATO para Ordem de Corte A4, auto/5mm para ETIQUETAS, A4 RETRATO para os demais */}
       <style>{activeModel === 'corte'
-        ? `@page { size: A4 landscape; margin: 8mm; }
-           @media print {
-             html, body, #root, #app-root, main, .print-container { width: 100% !important; max-width: 100% !important; margin: 0 !important; padding: 0 !important; }
-             .documento-modelo.secao-corte, #doc-corte { width: 100% !important; max-width: 100% !important; margin: 0 auto !important; box-shadow: none !important; border: none !important; }
+        ? `@media print {
+             @page {
+               size: A4 portrait;
+               margin: 10mm;
+             }
+             body, .ordem-corte-a4-container {
+               width: 100% !important;
+               max-width: 210mm !important;
+               margin: 0 auto !important;
+             }
+             html, #root, #app-root, main, .print-container {
+               width: 100% !important;
+               max-width: 210mm !important;
+               margin: 0 auto !important;
+               padding: 0 !important;
+             }
+             .documento-modelo.secao-corte, #doc-corte {
+               width: 100% !important;
+               max-width: 210mm !important;
+               margin: 0 auto !important;
+               box-shadow: none !important;
+               border: none !important;
+             }
            }`
         : activeModel === 'etiqueta-80'
         ? `@page { size: auto; margin: 5mm; }
@@ -3341,12 +3360,14 @@ export default function ReportsModule({
           body.print-corte .tabela-container,
           body.print-corte .screen-header,
           body.print-corte .documento-modelo:not(.secao-corte) { display: none !important; }
-          body.print-corte #doc-corte { 
+          body.print-corte #doc-corte,
+          body.print-corte .ordem-corte-a4-container { 
             display: block !important; 
             box-shadow: none !important; 
             padding: 0 !important; 
             width: 100% !important; 
-            max-width: 100% !important; 
+            max-width: 210mm !important; 
+            margin: 0 auto !important;
           }
           body.print-corte #doc-corte table { page-break-inside: auto; width: 100% !important; }
           body.print-corte #doc-corte tr { page-break-inside: avoid; }
