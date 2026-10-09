@@ -68,6 +68,8 @@ export interface DuplicataDanfe {
 export interface ClienteDanfeDestinatario {
   id?: string;
   nome: string;
+  razao_social?: string;
+  nome_fantasia?: string;
   doc: string;
   endereco: string;
   bairro: string;
@@ -75,8 +77,28 @@ export interface ClienteDanfeDestinatario {
   cidade: string;
   uf: string;
   ie: string;
+  inscricao_estadual?: string;
+  inscricaoEstadual?: string;
   telefone: string;
 }
+
+/**
+ * 1. CORREÇÃO DO ENDEREÇO DO EMITENTE (REMOVER DUPLICAÇÕES DE TEXTO):
+ * Formata a string de endereço montando os campos de forma limpa sem repetições
+ */
+export const montarEnderecoSemDuplicacao = (
+  logradouro?: string | null,
+  numero?: string | null,
+  complemento?: string | null,
+  bairro?: string | null
+): string => {
+  const partes: string[] = [];
+  if (logradouro) partes.push(logradouro.trim());
+  if (numero && !logradouro?.includes(numero)) partes.push(numero.trim());
+  if (complemento) partes.push(complemento.trim());
+  if (bairro && !logradouro?.includes(bairro)) partes.push(bairro.trim());
+  return partes.join(', ');
+};
 
 /**
  * Identifica a forma de pagamento da cotação/venda:
@@ -289,15 +311,25 @@ export async function fetchClienteCompletoParaDanfe(
     }
   }
 
-  // Mapeamento dos dados reais retornados conforme as regras do DANFE:
-  // • NOME / RAZÃO SOCIAL: cliente.razao_social || cliente.nome_fantasia || cotacao.cliente_nome
-  const nomeFinal = clienteRaw?.razao_social ||
-                    clienteRaw?.nome_fantasia ||
-                    clienteRaw?.nome ||
-                    clienteRaw?.empresa ||
-                    clienteRaw?.name ||
-                    clienteNome ||
-                    'CLIENTE BALCÃO';
+  // 1. MAPEAMENTO DO CAMPO "NOME / RAZÃO SOCIAL" NO DANFE:
+  // Altere o campo 'NOME / RAZÃO SOCIAL' do bloco DESTINATÁRIO / REMETENTE para priorizar estritamente a Razão Social vinda do cadastro do cliente:
+  const cliRazaoSocial = clienteRaw?.razao_social ||
+                         clienteRaw?.nome ||
+                         clienteRaw?.name ||
+                         fallbackClient?.razao_social ||
+                         fallbackClient?.name;
+
+  const cliNomeFantasia = clienteRaw?.nome_fantasia ||
+                          clienteRaw?.empresa ||
+                          clienteRaw?.fantasyName ||
+                          clienteRaw?.fantasy_name ||
+                          fallbackClient?.nome_fantasia ||
+                          fallbackClient?.fantasyName;
+
+  const razaoSocial = cliRazaoSocial || cliNomeFantasia || clienteNome || 'CLIENTE BALCÃO';
+  const nomeExibicaoDanfe = (cliRazaoSocial && cliNomeFantasia && cliRazaoSocial !== cliNomeFantasia)
+    ? `${cliRazaoSocial} (${cliNomeFantasia})`
+    : razaoSocial;
 
   // • CNPJ / CPF: cliente.cnpj_cpf
   const docBruto = clienteRaw?.cnpj_cpf ||
@@ -359,11 +391,15 @@ export async function fetchClienteCompletoParaDanfe(
     'SP'
   ).toUpperCase();
 
-  // • INSCRIÇÃO ESTADUAL: cliente.inscricao_estadual || 'ISENTO'
-  const ieFinal = clienteRaw?.inscricao_estadual ||
-                  clienteRaw?.ie ||
-                  clienteRaw?.inscricaoEstadual ||
-                  'ISENTO';
+  // 2. CORREÇÃO DA INSCRIÇÃO ESTADUAL DO DESTINATÁRIO/CLIENTE:
+  // Mapeia diretamente o campo vindo da tabela clientes do Supabase (cliente.inscricao_estadual ou cliente.ie)
+  const ieCliente = clienteRaw?.inscricao_estadual ||
+                    clienteRaw?.ie ||
+                    clienteRaw?.inscricaoEstadual ||
+                    fallbackClient?.inscricao_estadual ||
+                    fallbackClient?.ie ||
+                    fallbackClient?.inscricaoEstadual;
+  const ieExibicao = (ieCliente && String(ieCliente).trim() !== '') ? String(ieCliente).trim() : 'ISENTO';
 
   const telefoneFinal = clienteRaw?.telefone ||
                         clienteRaw?.phone ||
@@ -373,14 +409,18 @@ export async function fetchClienteCompletoParaDanfe(
 
   return {
     id: clienteRaw?.id || clienteId,
-    nome: nomeFinal,
+    nome: nomeExibicaoDanfe,
+    razao_social: cliRazaoSocial || razaoSocial,
+    nome_fantasia: cliNomeFantasia || '',
     doc: docFinal,
     endereco: enderecoFinal,
     bairro: bairroFinal,
     cep: cepFinal,
     cidade: municipioFinal,
     uf: ufFinal,
-    ie: ieFinal,
+    ie: ieExibicao,
+    inscricao_estadual: ieExibicao,
+    inscricaoEstadual: ieExibicao,
     telefone: telefoneFinal
   };
 }
@@ -1010,7 +1050,7 @@ export function gerarDanfeHtml(
             <div style="font-size: 11px; font-weight: 900; text-transform: uppercase;">${emitente.razaoSocial}</div>
             <div style="font-size: 10px; font-weight: 900; color: #b91c1c; text-transform: uppercase; margin-top: 1px;">${emitente.nomeFantasia}</div>
             <div style="font-size: 7.5px; margin-top: 4px; line-height: 1.2;">
-              ${emitente.endereco}, ${emitente.numero} - ${emitente.bairro}<br>
+              ${montarEnderecoSemDuplicacao(emitente.endereco, emitente.numero, (emitente as any).complemento, emitente.bairro)}<br>
               ${emitente.cidade} - ${emitente.uf} • CEP: ${emitente.cep}<br>
               Tel: ${emitente.telefone}
             </div>
@@ -1256,6 +1296,14 @@ export function gerarDanfeHtml(
           <td style="width: 10%; padding: 2px; border-right: 1px solid #000;"><div class="title">CÓDIGO ANTT</div><div class="val">-</div></td>
           <td style="width: 15%; padding: 2px; border-right: 1px solid #000;"><div class="title">PLACA DO VEÍCULO</div><div class="val">-</div></td>
           <td style="width: 5%; padding: 2px; text-align: center;"><div class="title">UF</div><div class="val">SP</div></td>
+        </tr>
+      </table>
+      <table style="border-bottom: 1px solid #000;">
+        <tr>
+          <td style="width: 50%; padding: 2px; border-right: 1px solid #000;"><div class="title">ENDEREÇO</div><div class="val">${montarEnderecoSemDuplicacao(emitente.endereco, emitente.numero, (emitente as any).complemento, emitente.bairro)}</div></td>
+          <td style="width: 30%; padding: 2px; border-right: 1px solid #000;"><div class="title">MUNICÍPIO</div><div class="val">${emitente.cidade}</div></td>
+          <td style="width: 5%; padding: 2px; text-align: center; border-right: 1px solid #000;"><div class="title">UF</div><div class="val">${emitente.uf}</div></td>
+          <td style="width: 15%; padding: 2px;"><div class="title">INSCRIÇÃO ESTADUAL</div><div class="val" style="font-family: monospace;">${emitente.ie}</div></td>
         </tr>
       </table>
       <table>

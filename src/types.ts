@@ -25,6 +25,7 @@ export interface Client {
   tipo?: 'CNPJ' | 'CPF' | string;
   documento?: string;
   nome?: string;
+  razao_social?: string;
   nome_fantasia?: string;
   situacao?: string;
   endereco?: string;

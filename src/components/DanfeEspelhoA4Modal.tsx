@@ -280,20 +280,24 @@ export default function DanfeEspelhoA4Modal({
             <span className="text-slate-400">Destinatário Fiscal:</span>
             {carregandoCliente ? (
               <span className="text-amber-400 italic text-[11px]">Buscando dados cadastrais no Supabase...</span>
-            ) : (
-              <span className="font-bold text-slate-100 truncate">
-                {clienteDestinatario?.nome || quote.clientName}
-                <span className="text-slate-400 font-normal font-mono ml-2 text-[11px]">
-                  CNPJ/CPF: {clienteDestinatario?.doc || quote.clientDocument || 'NÃO INFORMADO'}
+            ) : (() => {
+              const ieCli = clienteDestinatario?.inscricao_estadual || clienteDestinatario?.ie || (client as any)?.inscricao_estadual || client?.ie;
+              const ieExib = (ieCli && String(ieCli).trim() !== '') ? String(ieCli).trim() : 'ISENTO';
+              return (
+                <span className="font-bold text-slate-100 truncate">
+                  {clienteDestinatario?.nome || quote.cliente_nome || quote.clientName}
+                  <span className="text-slate-400 font-normal font-mono ml-2 text-[11px]">
+                    CNPJ/CPF: {clienteDestinatario?.doc || quote.clientDocument || 'NÃO INFORMADO'}
+                  </span>
+                  <span className="text-slate-400 font-normal font-mono ml-2 text-[11px]">
+                    IE: {ieExib}
+                  </span>
+                  <span className="text-slate-400 font-normal ml-2 text-[11px]">
+                    • {clienteDestinatario?.cidade || quote.clientCity || 'BAURU'}/{clienteDestinatario?.uf || quote.clientState || 'SP'}
+                  </span>
                 </span>
-                <span className="text-slate-400 font-normal font-mono ml-2 text-[11px]">
-                  IE: {clienteDestinatario?.ie || 'ISENTO'}
-                </span>
-                <span className="text-slate-400 font-normal ml-2 text-[11px]">
-                  • {clienteDestinatario?.cidade}/{clienteDestinatario?.uf}
-                </span>
-              </span>
-            )}
+              );
+            })()}
           </div>
           <div className="text-[11px] font-mono font-bold text-slate-200">
             Total da Nota: <span className="text-emerald-400">{formatCurrency(valorTotalNota)}</span>

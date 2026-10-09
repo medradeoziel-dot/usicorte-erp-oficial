@@ -11,7 +11,8 @@ import {
   ClienteDanfeDestinatario,
   fetchClienteCompletoParaDanfe,
   gerarDuplicatasProporcionais,
-  detectarFormaPagamentoInicial
+  detectarFormaPagamentoInicial,
+  montarEnderecoSemDuplicacao
 } from '../services/nfeService';
 import { formatCurrency, formatNumberBR, formatSafeDate } from '../utils/calculator';
 import Logo from './Logo';
@@ -112,13 +113,26 @@ export default function DanfeEspelhoA4({
   const printRef = useRef<HTMLDivElement>(null);
 
   // 1. Dados do Emitente
+  const rawLogradouro = company.street || company.endereco || (company as any).logradouro || 'RUA CORONEL IVON CESAR PIMENTEL';
+  const rawNumero = company.number || company.numero || '3-41';
+  const rawComplemento = company.complement || (company as any).complemento || '';
+  const rawBairro = company.neighborhood || company.bairro || 'PARQUE PAULISTA';
+
+  // 1. CORREÇÃO DO ENDEREÇO DO EMITENTE (REMOVER DUPLICAÇÕES DE TEXTO)
+  const enderecoEmitenteFormatado = montarEnderecoSemDuplicacao(
+    rawLogradouro,
+    rawNumero,
+    rawComplemento,
+    rawBairro
+  );
+
   const emitente = {
     razaoSocial: company.corporateName || company.razao_social || 'L. M. BANZATTO METAIS',
     nomeFantasia: company.tradeName || company.nome_fantasia || 'USICORTE METAIS',
     cnpj: company.cnpj || '25.038.430/0001-23',
     ie: company.ie || company.inscricao_estadual || '20963213114',
-    endereco: company.street || company.endereco || 'RUA PADRE FRANCISCO VAN DER MAAS, 3-41',
-    bairro: company.neighborhood || company.bairro || 'PARQUE PAULISTA',
+    endereco: enderecoEmitenteFormatado,
+    bairro: rawBairro,
     cidade: company.city || company.cidade || 'BAURU',
     uf: company.state || company.uf || 'SP',
     cep: company.cep || '17031-190',
@@ -143,21 +157,68 @@ export default function DanfeEspelhoA4({
   }, [quote, client, clienteDestinatario]);
 
   const destinatario: ClienteDanfeDestinatario = useMemo(() => {
-    if (clienteDestinatario) return clienteDestinatario;
-    if (destinatarioAsync) return destinatarioAsync;
+    if (clienteDestinatario) {
+      const ieCli = clienteDestinatario.inscricao_estadual || clienteDestinatario.ie;
+      const ieExib = (ieCli && String(ieCli).trim() !== '') ? String(ieCli).trim() : 'ISENTO';
+
+      const rz = clienteDestinatario.razao_social || (client as any)?.razao_social || client?.name || quote.cliente_nome || quote.clientName;
+      const nf = clienteDestinatario.nome_fantasia || (client as any)?.nome_fantasia || client?.fantasyName || '';
+      const nomeExib = (rz && nf && rz !== nf)
+        ? `${rz} (${nf})`
+        : (clienteDestinatario.nome || rz || 'CLIENTE BALCÃO');
+
+      return {
+        ...clienteDestinatario,
+        nome: nomeExib,
+        ie: ieExib,
+        inscricao_estadual: ieExib
+      };
+    }
+    if (destinatarioAsync) {
+      const ieCli = destinatarioAsync.inscricao_estadual || destinatarioAsync.ie;
+      const ieExib = (ieCli && String(ieCli).trim() !== '') ? String(ieCli).trim() : 'ISENTO';
+
+      const rz = destinatarioAsync.razao_social || (client as any)?.razao_social || client?.name || quote.cliente_nome || quote.clientName;
+      const nf = destinatarioAsync.nome_fantasia || (client as any)?.nome_fantasia || client?.fantasyName || '';
+      const nomeExib = (rz && nf && rz !== nf)
+        ? `${rz} (${nf})`
+        : (destinatarioAsync.nome || rz || 'CLIENTE BALCÃO');
+
+      return {
+        ...destinatarioAsync,
+        nome: nomeExib,
+        ie: ieExib,
+        inscricao_estadual: ieExib
+      };
+    }
     const destUf = (client?.state || client?.uf || quote.clientState || 'SP').toUpperCase();
+    const ieCli = client?.inscricao_estadual || client?.ie || client?.inscricaoEstadual;
+    const ieExib = (ieCli && String(ieCli).trim() !== '') ? String(ieCli).trim() : 'ISENTO';
+
+    const rz = (client as any)?.razao_social || client?.name || client?.nome || quote.cliente_nome || quote.clientName || 'CLIENTE BALCÃO';
+    const nf = (client as any)?.nome_fantasia || client?.fantasyName || '';
+    const nomeExib = (rz && nf && rz !== nf)
+      ? `${rz} (${nf})`
+      : (rz || 'CLIENTE BALCÃO / CONSUMIDOR FINAL');
+
     return {
-      nome: client?.name || client?.nome || quote.clientName || 'CLIENTE BALCÃO / CONSUMIDOR FINAL',
+      nome: nomeExib,
       doc: client?.document || client?.documento || quote.clientDocument || 'NÃO INFORMADO',
       endereco: client?.street || client?.endereco || quote.clientStreet || 'ENDEREÇO COMERCIAL',
       bairro: client?.neighborhood || client?.bairro || quote.clientNeighborhood || 'CENTRO',
       cidade: client?.city || client?.cidade || quote.clientCity || 'BAURU',
       uf: destUf,
       cep: client?.cep || quote.clientCep || '17000-000',
-      ie: client?.inscricao_estadual || client?.inscricaoEstadual || client?.ie || 'ISENTO',
+      ie: ieExib,
+      inscricao_estadual: ieExib,
       telefone: client?.phone || client?.telefone || quote.clientPhone || '-'
     };
   }, [clienteDestinatario, destinatarioAsync, client, quote]);
+
+  // 2. CORREÇÃO DA INSCRIÇÃO ESTADUAL DO DESTINATÁRIO/CLIENTE:
+  // Mapeia diretamente o campo vindo da tabela clientes do Supabase (cliente.inscricao_estadual ou cliente.ie)
+  const ieCliente = destinatario?.inscricao_estadual || destinatario?.ie || client?.inscricao_estadual || client?.ie;
+  const ieExibicao = (ieCliente && String(ieCliente).trim() !== '') ? String(ieCliente).trim() : 'ISENTO';
 
   const destUf = (destinatario.uf || 'SP').toUpperCase();
 
@@ -365,7 +426,7 @@ export default function DanfeEspelhoA4({
             </div>
             
             <div className="text-[7.5px] text-gray-800 mt-1 leading-tight">
-              <span>{emitente.endereco} - {emitente.bairro}</span><br />
+              <span>{enderecoEmitenteFormatado}</span><br />
               <span>{emitente.cidade} - {emitente.uf} • CEP: {emitente.cep}</span><br />
               <span>Fone: {emitente.telefone} • E-mail: {emitente.email}</span>
             </div>
@@ -501,7 +562,7 @@ export default function DanfeEspelhoA4({
             </div>
             <div className="col-span-2 p-1">
               <span className="block text-[6.5px] font-bold uppercase text-gray-600">INSCRIÇÃO ESTADUAL</span>
-              <strong className="font-mono">{destinatario.ie}</strong>
+              <strong className="font-mono">{ieExibicao}</strong>
             </div>
             <div className="col-span-2 p-1">
               <span className="block text-[6.5px] font-bold uppercase text-gray-600">HORA DE SAÍDA</span>

@@ -6,7 +6,8 @@ import {
   ItemFiscalNfe,
   NfeTransmissionResult,
   formatarChaveAcesso,
-  abrirPreDanfeEmNovaAba
+  abrirPreDanfeEmNovaAba,
+  montarEnderecoSemDuplicacao
 } from '../services/nfeService';
 import { updateCotacaoNfeStatusDb } from '../lib/db';
 import { fetchCompanyData, CompanyFiscalData, DEFAULT_COMPANY_DATA } from '../services/companyService';
@@ -83,7 +84,8 @@ export default function EmissaoNfeModal({
   const clienteInfo = useMemo(() => {
     const nome = client?.name || client?.nome || quote.clientName || 'Cliente Balcão';
     const doc = client?.document || client?.documento || quote.clientDocument || 'Não informado';
-    const ie = client?.inscricao_estadual || client?.inscricaoEstadual || client?.ie || 'ISENTO';
+    const ieCliente = client?.inscricao_estadual || client?.ie || client?.inscricaoEstadual;
+    const ie = (ieCliente && ieCliente.trim() !== '') ? ieCliente.trim() : 'ISENTO';
     const indicadorIe = client?.indicador_ie || client?.indicadorIe || (doc.replace(/\D/g, '').length > 11 ? '1' : '9');
     const cidade = client?.city || client?.cidade || quote.clientCity || 'BAURU';
     const uf = (client?.state || client?.uf || quote.clientState || 'SP').toUpperCase();
@@ -325,7 +327,7 @@ export default function EmissaoNfeModal({
                   </div>
                 </div>
                 <p className="text-[11px] text-slate-400 pt-1">
-                  {company.street || company.endereco}, {company.number || company.numero || '3-41'} - {company.neighborhood || company.bairro || 'PARQUE PAULISTA'} • {company.city || company.cidade}/{company.state || company.uf || 'SP'}
+                  {montarEnderecoSemDuplicacao(company.street || company.endereco, company.number || company.numero, company.complement || (company as any).complemento, company.neighborhood || company.bairro)} • {company.city || company.cidade}/{company.state || company.uf || 'SP'}
                 </p>
               </div>
             </div>
@@ -625,7 +627,7 @@ export default function EmissaoNfeModal({
                     <h2 className="font-bold text-sm leading-tight uppercase">{company.corporateName || company.razao_social || 'L. M. BANZATTO METAIS'}</h2>
                     <h3 className="font-bold text-xs text-red-700 leading-tight uppercase">{company.tradeName || company.nome_fantasia || 'USICORTE METAIS'}</h3>
                     <p className="text-[10px] text-gray-700 mt-1 leading-normal">
-                      {company.street || company.endereco}, {company.number || company.numero || '3-41'} - {company.neighborhood || company.bairro || 'PARQUE PAULISTA'}<br />
+                      {montarEnderecoSemDuplicacao(company.street || company.endereco, company.number || company.numero, company.complement || (company as any).complemento, company.neighborhood || company.bairro)}<br />
                       {company.city || company.cidade} - {company.state || company.uf || 'SP'} • CEP: {company.cep || '17031-190'}<br />
                       Tel: {company.phone || company.telefone || '(14) 3203-2000'}
                     </p>
