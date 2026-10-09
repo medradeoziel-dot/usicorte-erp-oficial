@@ -59,6 +59,332 @@ export interface DadosDestinatarioNfe {
   email?: string;
 }
 
+export interface DuplicataDanfe {
+  numero: string;
+  vencimento: string; // YYYY-MM-DD ou formato legível
+  valor: number;
+}
+
+export interface ClienteDanfeDestinatario {
+  id?: string;
+  nome: string;
+  doc: string;
+  endereco: string;
+  bairro: string;
+  cep: string;
+  cidade: string;
+  uf: string;
+  ie: string;
+  telefone: string;
+}
+
+/**
+ * Identifica a forma de pagamento da cotação/venda:
+ * 2. REGRA DE FORMA DE PAGAMENTO E FATURA / DUPLICATAS:
+ * A) Pagamento À Vista (PDV / Dinheiro / PIX / Débito):
+ *    - Se a forma de pagamento for "A_VISTA", "DINHEIRO", "PIX" ou "DEBITO":
+ *    - Retorna 'A_VISTA' (indPag = 0).
+ * B) Pagamento a Prazo / Duplicata:
+ *    - Se a forma de pagamento for "A_PRAZO", "DUPLICATA", "FATURADO" ou "BOLETO":
+ *    - Retorna 'A_PRAZO' (indPag = 1).
+ */
+export function detectarFormaPagamentoInicial(quote?: Quote | null): 'A_VISTA' | 'A_PRAZO' {
+  if (!quote) return 'A_VISTA';
+  const pt = String(quote.paymentTerms || '').toUpperCase().trim();
+  const pm = String(quote.paymentMethod || '').toUpperCase().trim();
+  const fp = String(quote.forma_pagamento || (quote as any).forma_pagamento || '').toUpperCase().trim();
+  const combined = `${pt} ${pm} ${fp}`;
+
+  // Se explicitamente a prazo, duplicata, faturado ou boleto
+  if (
+    combined.includes('A_PRAZO') ||
+    combined.includes('PRAZO') ||
+    combined.includes('DUPLICATA') ||
+    combined.includes('FATURADO') ||
+    combined.includes('BOLETO') ||
+    combined.includes('30 DIAS') ||
+    combined.includes('PARCELADO') ||
+    combined.includes('CREDITO') ||
+    combined.includes('CRÉDITO')
+  ) {
+    return 'A_PRAZO';
+  }
+
+  // Padrão À Vista (PDV, Dinheiro, PIX, Débito, À Vista) => indPag = 0
+  return 'A_VISTA';
+}
+
+/**
+ * Gera lista de duplicatas dividindo o valor total de forma proporcional
+ * e calculando os vencimentos (ex: a cada 30 dias).
+ */
+export function gerarDuplicatasProporcionais(
+  valorTotal: number,
+  numeroParcelas: number,
+  numeroNfe: string,
+  diasIntervalo: number = 30,
+  dataBase: Date = new Date()
+): DuplicataDanfe[] {
+  const qtd = Math.max(1, Math.min(12, numeroParcelas));
+  const numLimpo = String(numeroNfe || '1').replace(/\D/g, '').slice(-6).padStart(6, '0') || '000001';
+
+  const valorTotalCentavos = Math.round((valorTotal || 0) * 100);
+  const valorBaseCentavos = Math.floor(valorTotalCentavos / qtd);
+  const sobraCentavos = valorTotalCentavos - (valorBaseCentavos * qtd);
+
+  const resultado: DuplicataDanfe[] = [];
+
+  for (let i = 1; i <= qtd; i++) {
+    const dataVenc = new Date(dataBase);
+    dataVenc.setDate(dataVenc.getDate() + (i * diasIntervalo));
+    const ano = dataVenc.getFullYear();
+    const mes = String(dataVenc.getMonth() + 1).padStart(2, '0');
+    const dia = String(dataVenc.getDate()).padStart(2, '0');
+    const vencIso = `${ano}-${mes}-${dia}`;
+
+    // A primeira parcela absorve os centavos restantes para garantir soma exata
+    const centavosDestaParcela = i === 1 ? valorBaseCentavos + sobraCentavos : valorBaseCentavos;
+    const valorParcela = centavosDestaParcela / 100;
+
+    resultado.push({
+      numero: `${numLimpo}/${String(i).padStart(2, '0')}`,
+      vencimento: vencIso,
+      valor: valorParcela
+    });
+  }
+
+  return resultado;
+}
+
+/**
+ * 1. CORREÇÃO DEFINITIVA DA BUSCA DO CLIENTE (SUPABASE):
+ * Realiza a busca no Supabase utilizando o cliente_id associado à cotação/venda na tabela clientes:
+ * 
+ * const { data: cliente } = await supabase
+ *   .from('clientes')
+ *   .select('*')
+ *   .eq('id', cotacao.cliente_id)
+ *   .single();
+ * 
+ * Mapeia os dados reais retornados para o bloco "DESTINATÁRIO / REMETENTE":
+ * • NOME / RAZÃO SOCIAL: cliente.razao_social || cliente.nome_fantasia || cotacao.cliente_nome
+ * • CNPJ / CPF: cliente.cnpj_cpf
+ * • ENDEREÇO: `${cliente.logradouro}, ${cliente.numero}`
+ * • BAIRRO: cliente.bairro
+ * • CEP: cliente.cep
+ * • MUNICÍPIO / UF: cliente.municipio / cliente.uf
+ * • INSCRIÇÃO ESTADUAL: cliente.inscricao_estadual || 'ISENTO'
+ */
+export async function fetchClienteCompletoParaDanfe(
+  quote: Quote,
+  fallbackClient?: Client | null
+): Promise<ClienteDanfeDestinatario> {
+  let clienteId = quote.cliente_id || (quote as any).cliente_id || quote.clientId;
+  let clienteNome = quote.cliente_nome || (quote as any).cliente_nome || quote.clientName || '';
+
+  // Se cliente_id não está no objeto da cotação, consulta na tabela cotacoes do Supabase
+  if (!clienteId && (quote.id || quote.quoteNumber)) {
+    try {
+      const qId = quote.id;
+      const qNum = quote.quoteNumber;
+      let queryCot = db.from('cotacoes').select('cliente_id, cliente_nome, forma_pagamento');
+      if (qId && qNum && qId !== qNum) {
+        queryCot = queryCot.or(`id.eq.${qId},numero.eq.${qNum}`);
+      } else if (qId) {
+        queryCot = queryCot.eq('id', qId);
+      } else if (qNum) {
+        queryCot = queryCot.eq('numero', qNum);
+      }
+      const { data: cotDb } = await queryCot.limit(1).maybeSingle();
+      if (cotDb?.cliente_id) {
+        clienteId = cotDb.cliente_id;
+      }
+      if (cotDb?.cliente_nome && (!clienteNome || clienteNome === 'Cliente Balcão')) {
+        clienteNome = cotDb.cliente_nome;
+      }
+    } catch (e) {
+      console.warn('Aviso ao consultar cliente_id na cotação do Supabase:', e);
+    }
+  }
+
+  let clienteRaw: any = null;
+
+  // 1. Busca no Supabase utilizando cliente_id na tabela clientes:
+  // const { data: cliente } = await supabase.from('clientes').select('*').eq('id', cotacao.cliente_id).single();
+  if (clienteId) {
+    try {
+      const { data, error } = await db
+        .from('clientes')
+        .select('*')
+        .eq('id', clienteId)
+        .maybeSingle();
+
+      if (data && !error) {
+        clienteRaw = data;
+      }
+    } catch (e) {
+      console.warn('Aviso ao buscar cliente por ID no Supabase:', e);
+    }
+  }
+
+  // 2. Se cliente_id não encontrou, busca no Supabase por nome / razão / fantasia (ex: "TECNOMAQ"):
+  if (!clienteRaw && clienteNome && clienteNome.trim().toUpperCase() !== 'CLIENTE BALCÃO') {
+    const termo = clienteNome.trim();
+    try {
+      // 2a. Busca por igualdade exata
+      const { data: exato } = await db
+        .from('clientes')
+        .select('*')
+        .or(`nome.ilike.${termo},razao_social.ilike.${termo},nome_fantasia.ilike.${termo},empresa.ilike.${termo}`)
+        .limit(1)
+        .maybeSingle();
+
+      if (exato) {
+        clienteRaw = exato;
+      } else {
+        // 2b. Busca contendo termo
+        const { data: parcial } = await db
+          .from('clientes')
+          .select('*')
+          .or(`nome.ilike.%${termo}%,razao_social.ilike.%${termo}%,nome_fantasia.ilike.%${termo}%,empresa.ilike.%${termo}%`)
+          .limit(1)
+          .maybeSingle();
+
+        if (parcial) {
+          clienteRaw = parcial;
+        }
+      }
+    } catch (e) {
+      console.warn('Aviso ao buscar cliente por nome no Supabase:', e);
+    }
+  }
+
+  // 3. Fallback no cache do LocalStorage
+  if (!clienteRaw) {
+    try {
+      const cacheStr = localStorage.getItem('s_clientes_cache') || localStorage.getItem('s_clientes');
+      if (cacheStr) {
+        const arr = JSON.parse(cacheStr);
+        if (Array.isArray(arr)) {
+          const match = arr.find((c: any) =>
+            (clienteId && (c.id === clienteId || c.clientId === clienteId)) ||
+            (c.name && c.name.trim().toLowerCase() === clienteNome.toLowerCase()) ||
+            (c.fantasyName && c.fantasyName.trim().toLowerCase() === clienteNome.toLowerCase()) ||
+            (c.razao_social && c.razao_social.trim().toLowerCase() === clienteNome.toLowerCase()) ||
+            (c.nome_fantasia && c.nome_fantasia.trim().toLowerCase() === clienteNome.toLowerCase()) ||
+            (c.nome && c.nome.trim().toLowerCase() === clienteNome.toLowerCase())
+          );
+          if (match) clienteRaw = match;
+        }
+      }
+    } catch {}
+  }
+
+  // 4. Fallback no fallbackClient caso seja um cliente válido e não o padrão genérico 00.000.000/0001-00
+  if (!clienteRaw && fallbackClient) {
+    const docLimpo = (fallbackClient.document || '').replace(/\D/g, '');
+    const isDocPlaceholder = !docLimpo || docLimpo === '00000000000000' || docLimpo === '00000000000';
+    if (!isDocPlaceholder) {
+      clienteRaw = fallbackClient;
+    }
+  }
+
+  // Mapeamento dos dados reais retornados conforme as regras do DANFE:
+  // • NOME / RAZÃO SOCIAL: cliente.razao_social || cliente.nome_fantasia || cotacao.cliente_nome
+  const nomeFinal = clienteRaw?.razao_social ||
+                    clienteRaw?.nome_fantasia ||
+                    clienteRaw?.nome ||
+                    clienteRaw?.empresa ||
+                    clienteRaw?.name ||
+                    clienteNome ||
+                    'CLIENTE BALCÃO';
+
+  // • CNPJ / CPF: cliente.cnpj_cpf
+  const docBruto = clienteRaw?.cnpj_cpf ||
+                   clienteRaw?.cnpj ||
+                   clienteRaw?.cpf ||
+                   clienteRaw?.documento ||
+                   clienteRaw?.document ||
+                   quote.clientDocument ||
+                   '';
+
+  const cleanDoc = String(docBruto || '').replace(/\D/g, '');
+  let docFinal = String(docBruto || '');
+  if (cleanDoc.length === 14) {
+    docFinal = `${cleanDoc.slice(0, 2)}.${cleanDoc.slice(2, 5)}.${cleanDoc.slice(5, 8)}/${cleanDoc.slice(8, 12)}-${cleanDoc.slice(12, 14)}`;
+  } else if (cleanDoc.length === 11) {
+    docFinal = `${cleanDoc.slice(0, 3)}.${cleanDoc.slice(3, 6)}.${cleanDoc.slice(6, 9)}-${cleanDoc.slice(9, 11)}`;
+  }
+  if (!docFinal || cleanDoc === '00000000000000' || cleanDoc === '00000000000') {
+    docFinal = (docBruto && docBruto !== '00.000.000/0001-00') ? docBruto : 'NÃO INFORMADO';
+  }
+
+  // • ENDEREÇO: `${cliente.logradouro}, ${cliente.numero}`
+  const logradouro = clienteRaw?.logradouro || clienteRaw?.endereco || clienteRaw?.street || '';
+  const numero = clienteRaw?.numero || clienteRaw?.number || '';
+  let enderecoFinal = '';
+  if (logradouro) {
+    enderecoFinal = numero ? `${logradouro}, ${numero}` : logradouro;
+  } else if (quote.clientStreet && quote.clientStreet !== 'ENDEREÇO COMERCIAL') {
+    enderecoFinal = quote.clientStreet;
+  } else {
+    enderecoFinal = 'ENDEREÇO COMERCIAL';
+  }
+
+  // • BAIRRO: cliente.bairro
+  const bairroFinal = clienteRaw?.bairro ||
+                      clienteRaw?.neighborhood ||
+                      (quote.clientNeighborhood && quote.clientNeighborhood !== 'CENTRO' ? quote.clientNeighborhood : '') ||
+                      'CENTRO';
+
+  // • CEP: cliente.cep
+  const rawCep = clienteRaw?.cep || quote.clientCep || '';
+  const cleanCep = String(rawCep).replace(/\D/g, '');
+  const cepFinal = cleanCep.length === 8 
+    ? `${cleanCep.slice(0, 5)}-${cleanCep.slice(5, 8)}` 
+    : (rawCep || '17000-000');
+
+  // • MUNICÍPIO / UF: cliente.municipio / cliente.uf
+  const municipioFinal = clienteRaw?.municipio ||
+                         clienteRaw?.cidade ||
+                         clienteRaw?.city ||
+                         quote.clientCity ||
+                         'BAURU';
+
+  const ufFinal = String(
+    clienteRaw?.uf ||
+    clienteRaw?.estado ||
+    clienteRaw?.state ||
+    quote.clientState ||
+    'SP'
+  ).toUpperCase();
+
+  // • INSCRIÇÃO ESTADUAL: cliente.inscricao_estadual || 'ISENTO'
+  const ieFinal = clienteRaw?.inscricao_estadual ||
+                  clienteRaw?.ie ||
+                  clienteRaw?.inscricaoEstadual ||
+                  'ISENTO';
+
+  const telefoneFinal = clienteRaw?.telefone ||
+                        clienteRaw?.phone ||
+                        clienteRaw?.ddd_telefone_1 ||
+                        quote.clientPhone ||
+                        '-';
+
+  return {
+    id: clienteRaw?.id || clienteId,
+    nome: nomeFinal,
+    doc: docFinal,
+    endereco: enderecoFinal,
+    bairro: bairroFinal,
+    cep: cepFinal,
+    cidade: municipioFinal,
+    uf: ufFinal,
+    ie: ieFinal,
+    telefone: telefoneFinal
+  };
+}
+
 export interface NfeTransmissionResult {
   sucesso: boolean;
   statusNfe: 'Emitida' | 'Erro';
@@ -535,7 +861,9 @@ export function gerarDanfeHtml(
   dataEmissao: Date,
   valorTotal: number,
   isPrevia: boolean = false,
-  numeroCotacaoRef?: string
+  numeroCotacaoRef?: string,
+  duplicatas?: DuplicataDanfe[],
+  isAVista: boolean = false
 ): string {
   const chaveFormatada = isPrevia ? 'CHAVE SERÁ GERADA APÓS TRANSMISSÃO SEFAZ' : formatarChaveAcesso(chaveAcesso);
   const totalProdutos = itens.reduce((acc, it) => acc + it.subtotal, 0);
@@ -877,17 +1205,20 @@ export function gerarDanfeHtml(
 
     <!-- FATURA / DUPLICATAS -->
     <div style="font-weight: 900; font-size: 7.5px; text-transform: uppercase; margin: 2px 0 1px 0;">FATURA / DUPLICATAS</div>
-    <div class="box" style="padding: 2px;">
-      <table>
+    <div class="box" style="padding: 2px; min-height: 24px;">
+      ${(!isAVista && duplicatas && duplicatas.length > 0) ? `
+      <table style="width: 100%; border-collapse: separate; border-spacing: 2px;">
         <tr>
-          <td style="border: 1px solid #ccc; padding: 2px 4px; width: 25%; background: #fafafa;">
-            <span style="font-size: 6.5px; color: #555;">Nº DUP:</span> <strong>${numeroNfe}/01</strong><br>
-            <span style="font-size: 6.5px; color: #555;">VENC:</span> <strong>${new Date(Date.now() + 30*24*60*60*1000).toLocaleDateString('pt-BR')}</strong><br>
-            <span style="font-size: 6.5px; color: #555;">VALOR:</span> <strong>R$ ${valorTotal.toFixed(2).replace('.', ',')}</strong>
+          ${duplicatas.map(dup => `
+          <td style="border: 1px solid #ccc; padding: 2px 4px; background: #fafafa; vertical-align: top; width: ${Math.floor(100 / Math.min(duplicatas.length, 6))}%;">
+            <span style="font-size: 6.5px; color: #555;">Nº DUP:</span> <strong style="font-family: monospace;">${dup.numero}</strong><br>
+            <span style="font-size: 6.5px; color: #555;">VENC:</span> <strong>${dup.vencimento ? (dup.vencimento.includes('-') ? dup.vencimento.split('-').reverse().join('/') : dup.vencimento) : '-'}</strong><br>
+            <span style="font-size: 6.5px; color: #555;">VALOR:</span> <strong style="font-family: monospace;">R$ ${dup.valor.toFixed(2).replace('.', ',')}</strong>
           </td>
-          <td></td>
+          `).join('')}
         </tr>
       </table>
+      ` : ``}
     </div>
 
     <!-- CÁLCULO DO IMPOSTO -->
@@ -1003,15 +1334,22 @@ export function gerarDanfeHtml(
  * Se a danfe_url for uma URL válida, abre-a. Se for um blob expirado ou não informado,
  * regenera dinamicamente a DANFE oficial e abre em nova aba.
  */
-export async function abrirDanfeEmNovaAba(quote: Quote, client?: Client | null): Promise<void> {
-  // Se a danfe_url for um link externo ou data URI
-  if (quote.danfe_url && !quote.danfe_url.startsWith('blob:')) {
+export async function abrirDanfeEmNovaAba(
+  quote: Quote, 
+  client?: Client | null,
+  duplicatas?: DuplicataDanfe[],
+  isAVista?: boolean
+): Promise<void> {
+  const isAVistaFinal = isAVista !== undefined ? isAVista : (detectarFormaPagamentoInicial(quote) === 'A_VISTA');
+
+  // Se a danfe_url for um link externo ou data URI e não houver customização de duplicatas
+  if (quote.danfe_url && !quote.danfe_url.startsWith('blob:') && !duplicatas && isAVista === undefined) {
     window.open(quote.danfe_url, '_blank');
     return;
   }
 
-  // Tenta abrir a URL se for blob válido ativo
-  if (quote.danfe_url && quote.danfe_url.startsWith('blob:')) {
+  // Tenta abrir a URL se for blob válido ativo sem alteração de duplicatas
+  if (quote.danfe_url && quote.danfe_url.startsWith('blob:') && !duplicatas && isAVista === undefined) {
     try {
       const resp = await fetch(quote.danfe_url, { method: 'HEAD' });
       if (resp.ok) {
@@ -1025,25 +1363,25 @@ export async function abrirDanfeEmNovaAba(quote: Quote, client?: Client | null):
 
   try {
     const emitente = await fetchCompanyData();
-    const clienteUf = (client?.state || client?.uf || quote.clientState || 'SP').toUpperCase();
+    const cliDanfe = await fetchClienteCompletoParaDanfe(quote, client);
+    const clienteUf = (cliDanfe.uf || quote.clientState || 'SP').toUpperCase();
     const itensFiscais = prepararItensFiscais(quote.items, clienteUf);
 
-    const docCliente = client?.document || client?.documento || quote.clientDocument || '';
-    const cleanDoc = docCliente.replace(/\D/g, '');
+    const cleanDoc = cliDanfe.doc.replace(/\D/g, '');
     const tipoDoc: 'CNPJ' | 'CPF' = cleanDoc.length > 11 ? 'CNPJ' : 'CPF';
 
     const destinatario: DadosDestinatarioNfe = {
-      nome: client?.name || client?.nome || quote.clientName || 'Cliente Balcão',
-      documento: docCliente || 'Não informado',
+      nome: cliDanfe.nome,
+      documento: cliDanfe.doc,
       tipoDocumento: tipoDoc,
-      inscricaoEstadual: client?.inscricao_estadual || client?.inscricaoEstadual || client?.ie || 'ISENTO',
-      indicadorIe: client?.indicador_ie || client?.indicadorIe || (tipoDoc === 'CNPJ' ? '1' : '9'),
-      endereco: client?.street || client?.endereco || quote.clientStreet || 'Endereço Comercial',
-      bairro: client?.neighborhood || client?.bairro || 'Centro',
-      cidade: client?.city || client?.cidade || quote.clientCity || 'BAURU',
+      inscricaoEstadual: cliDanfe.ie,
+      indicadorIe: tipoDoc === 'CNPJ' ? '1' : '9',
+      endereco: cliDanfe.endereco,
+      bairro: cliDanfe.bairro,
+      cidade: cliDanfe.cidade,
       uf: clienteUf,
-      cep: client?.cep || quote.clientCep || '17000-000',
-      telefone: client?.phone || client?.telefone || quote.clientPhone,
+      cep: cliDanfe.cep,
+      telefone: cliDanfe.telefone,
       email: client?.email || quote.clientEmail
     };
 
@@ -1057,6 +1395,10 @@ export async function abrirDanfeEmNovaAba(quote: Quote, client?: Client | null):
     const protocolo = quote.protocolo_nfe || '135260000000001 (Autorizado o uso da NF-e)';
     const dataEmissao = quote.nfe_emitida_em ? new Date(quote.nfe_emitida_em) : new Date();
 
+    const dupsFinal = isAVistaFinal 
+      ? [] 
+      : (duplicatas || gerarDuplicatasProporcionais(valorTotal, 1, numeroNfe));
+
     const danfeHtml = gerarDanfeHtml(
       emitente as any,
       destinatario,
@@ -1068,7 +1410,9 @@ export async function abrirDanfeEmNovaAba(quote: Quote, client?: Client | null):
       dataEmissao,
       valorTotal,
       false,
-      quote.quoteNumber
+      quote.quoteNumber,
+      dupsFinal,
+      isAVistaFinal
     );
 
     const blob = new Blob([danfeHtml], { type: 'text/html' });
@@ -1087,27 +1431,32 @@ export async function abrirDanfeEmNovaAba(quote: Quote, client?: Client | null):
  * Gera o HTML espelho da Pré-DANFE (com marca d'água "PRÉVIA - SEM VALOR FISCAL"
  * e aviso "MODO DE CONFERÊNCIA - NOTA AINDA NÃO TRANSMITIDA PARA A SEFAZ").
  */
-export async function gerarPreDanfeHtml(quote: Quote, client?: Client | null): Promise<string> {
+export async function gerarPreDanfeHtml(
+  quote: Quote, 
+  client?: Client | null,
+  duplicatas?: DuplicataDanfe[],
+  isAVista?: boolean
+): Promise<string> {
   const emitente = await fetchCompanyData();
-  const clienteUf = (client?.state || client?.uf || quote.clientState || 'SP').toUpperCase();
+  const cliDanfe = await fetchClienteCompletoParaDanfe(quote, client);
+  const clienteUf = (cliDanfe.uf || quote.clientState || 'SP').toUpperCase();
   const itensFiscais = prepararItensFiscais(quote.items, clienteUf);
 
-  const docCliente = client?.document || client?.documento || quote.clientDocument || '';
-  const cleanDoc = docCliente.replace(/\D/g, '');
+  const cleanDoc = cliDanfe.doc.replace(/\D/g, '');
   const tipoDoc: 'CNPJ' | 'CPF' = cleanDoc.length > 11 ? 'CNPJ' : 'CPF';
 
   const destinatario: DadosDestinatarioNfe = {
-    nome: client?.name || client?.nome || quote.clientName || 'Cliente Balcão',
-    documento: docCliente || 'Não informado',
+    nome: cliDanfe.nome,
+    documento: cliDanfe.doc,
     tipoDocumento: tipoDoc,
-    inscricaoEstadual: client?.inscricao_estadual || client?.inscricaoEstadual || client?.ie || 'ISENTO',
-    indicadorIe: client?.indicador_ie || client?.indicadorIe || (tipoDoc === 'CNPJ' ? '1' : '9'),
-    endereco: client?.street || client?.endereco || quote.clientStreet || 'Endereço Comercial',
-    bairro: client?.neighborhood || client?.bairro || 'Centro',
-    cidade: client?.city || client?.cidade || quote.clientCity || 'BAURU',
+    inscricaoEstadual: cliDanfe.ie,
+    indicadorIe: tipoDoc === 'CNPJ' ? '1' : '9',
+    endereco: cliDanfe.endereco,
+    bairro: cliDanfe.bairro,
+    cidade: cliDanfe.cidade,
     uf: clienteUf,
-    cep: client?.cep || quote.clientCep || '17000-000',
-    telefone: client?.phone || client?.telefone || quote.clientPhone,
+    cep: cliDanfe.cep,
+    telefone: cliDanfe.telefone,
     email: client?.email || quote.clientEmail
   };
 
@@ -1121,6 +1470,11 @@ export async function gerarPreDanfeHtml(quote: Quote, client?: Client | null): P
   const protocolo = 'SIMULAÇÃO / NÃO TRANSMITIDA';
   const dataEmissao = new Date();
 
+  const isAVistaFinal = isAVista !== undefined ? isAVista : (detectarFormaPagamentoInicial(quote) === 'A_VISTA');
+  const dupsFinal = isAVistaFinal 
+    ? [] 
+    : (duplicatas || gerarDuplicatasProporcionais(valorTotal, 1, numeroNfe));
+
   return gerarDanfeHtml(
     emitente as any,
     destinatario,
@@ -1132,16 +1486,23 @@ export async function gerarPreDanfeHtml(quote: Quote, client?: Client | null): P
     dataEmissao,
     valorTotal,
     true, // isPrevia = true
-    quote.quoteNumber
+    quote.quoteNumber,
+    dupsFinal,
+    isAVistaFinal
   );
 }
 
 /**
  * Abre a Pré-DANFE (com marca d'água de conferência) diretamente em uma nova aba para conferência e impressão.
  */
-export async function abrirPreDanfeEmNovaAba(quote: Quote, client?: Client | null): Promise<void> {
+export async function abrirPreDanfeEmNovaAba(
+  quote: Quote, 
+  client?: Client | null,
+  duplicatas?: DuplicataDanfe[],
+  isAVista?: boolean
+): Promise<void> {
   try {
-    const html = await gerarPreDanfeHtml(quote, client);
+    const html = await gerarPreDanfeHtml(quote, client, duplicatas, isAVista);
     const blob = new Blob([html], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
     window.open(url, '_blank');

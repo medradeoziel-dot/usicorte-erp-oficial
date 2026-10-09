@@ -1,7 +1,18 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState, useEffect, useMemo } from 'react';
 import { Quote, Client } from '../types';
 import { CompanyFiscalData, DEFAULT_COMPANY_DATA } from '../services/companyService';
-import { ItemFiscalNfe, prepararItensFiscais, formatarChaveAcesso, gerarChaveAcessoNfe, formatarNumeroDanfe } from '../services/nfeService';
+import { 
+  ItemFiscalNfe, 
+  prepararItensFiscais, 
+  formatarChaveAcesso, 
+  gerarChaveAcessoNfe, 
+  formatarNumeroDanfe,
+  DuplicataDanfe,
+  ClienteDanfeDestinatario,
+  fetchClienteCompletoParaDanfe,
+  gerarDuplicatasProporcionais,
+  detectarFormaPagamentoInicial
+} from '../services/nfeService';
 import { formatCurrency, formatNumberBR, formatSafeDate } from '../utils/calculator';
 import Logo from './Logo';
 import { 
@@ -25,6 +36,9 @@ interface DanfeEspelhoA4Props {
   onTransmitir?: () => void;
   onOpenEdit?: () => void;
   isTransmitting?: boolean;
+  formaPagamento?: 'A_VISTA' | 'A_PRAZO' | string;
+  duplicatas?: DuplicataDanfe[];
+  clienteDestinatario?: ClienteDanfeDestinatario;
 }
 
 // Gera padrão gráfico de código de barras Code-128 para a Chave de Acesso
@@ -90,7 +104,10 @@ export default function DanfeEspelhoA4({
   onClose,
   onTransmitir,
   onOpenEdit,
-  isTransmitting = false
+  isTransmitting = false,
+  formaPagamento,
+  duplicatas: duplicatasProp,
+  clienteDestinatario
 }: DanfeEspelhoA4Props) {
   const printRef = useRef<HTMLDivElement>(null);
 
@@ -106,22 +123,43 @@ export default function DanfeEspelhoA4({
     uf: company.state || company.uf || 'SP',
     cep: company.cep || '17031-190',
     telefone: company.phone || company.telefone || '(14) 3203-2000',
-    email: company.email || 'contato@usicorte.com.br'
+    email: company.email || 'contato@usicorte.com.br',
+    ultimo_numero_nfe: company.ultimo_numero_nfe,
+    serie_nfe: company.serie_nfe
   };
 
-  // 2. Destinatário
-  const destUf = (client?.state || client?.uf || quote.clientState || 'SP').toUpperCase();
-  const clienteInfo = {
-    nome: client?.name || client?.nome || quote.clientName || 'CLIENTE BALCÃO / CONSUMIDOR FINAL',
-    doc: client?.document || client?.documento || quote.clientDocument || 'NÃO INFORMADO',
-    ie: client?.inscricao_estadual || client?.inscricaoEstadual || client?.ie || 'ISENTO',
-    endereco: client?.street || client?.endereco || quote.clientStreet || 'ENDEREÇO COMERCIAL',
-    bairro: client?.neighborhood || client?.bairro || 'CENTRO',
-    cidade: client?.city || client?.cidade || quote.clientCity || 'BAURU',
-    uf: destUf,
-    cep: client?.cep || quote.clientCep || '17000-000',
-    telefone: client?.phone || client?.telefone || quote.clientPhone || '-'
-  };
+  // 2. Destinatário Real Carregado do Supabase (tabela clientes)
+  const [destinatarioAsync, setDestinatarioAsync] = useState<ClienteDanfeDestinatario | null>(null);
+
+  useEffect(() => {
+    if (clienteDestinatario) return;
+    let isMounted = true;
+    async function carregarClienteReal() {
+      const cli = await fetchClienteCompletoParaDanfe(quote, client);
+      if (isMounted) setDestinatarioAsync(cli);
+    }
+    carregarClienteReal();
+    return () => { isMounted = false; };
+  }, [quote, client, clienteDestinatario]);
+
+  const destinatario: ClienteDanfeDestinatario = useMemo(() => {
+    if (clienteDestinatario) return clienteDestinatario;
+    if (destinatarioAsync) return destinatarioAsync;
+    const destUf = (client?.state || client?.uf || quote.clientState || 'SP').toUpperCase();
+    return {
+      nome: client?.name || client?.nome || quote.clientName || 'CLIENTE BALCÃO / CONSUMIDOR FINAL',
+      doc: client?.document || client?.documento || quote.clientDocument || 'NÃO INFORMADO',
+      endereco: client?.street || client?.endereco || quote.clientStreet || 'ENDEREÇO COMERCIAL',
+      bairro: client?.neighborhood || client?.bairro || quote.clientNeighborhood || 'CENTRO',
+      cidade: client?.city || client?.cidade || quote.clientCity || 'BAURU',
+      uf: destUf,
+      cep: client?.cep || quote.clientCep || '17000-000',
+      ie: client?.inscricao_estadual || client?.inscricaoEstadual || client?.ie || 'ISENTO',
+      telefone: client?.phone || client?.telefone || quote.clientPhone || '-'
+    };
+  }, [clienteDestinatario, destinatarioAsync, client, quote]);
+
+  const destUf = (destinatario.uf || 'SP').toUpperCase();
 
   // 3. Itens Fiscais
   const itensFiscais: ItemFiscalNfe[] = prepararItensFiscais(quote.items, destUf);
@@ -154,14 +192,24 @@ export default function DanfeEspelhoA4({
   const ibptFed = totalProdutos * 0.085;
   const ibptEst = totalProdutos * 0.0495;
 
-  // 7. Duplicatas / Parcelas
-  const duplicatas = [
-    {
-      numero: `${numeroNfe}/01`,
-      vencimento: formatSafeDate(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)),
-      valor: valorTotalNota
+  // 7. Regra de Forma de Pagamento e Fatura / Duplicatas:
+  // A) Pagamento À Vista (PDV, Dinheiro, PIX, Débito):
+  //    indPag = 0, quadro FATURA / DUPLICATAS VAZIO, sem linhas de duplicata
+  // B) Pagamento a Prazo / Faturado (Duplicata):
+  //    indPag = 1, exibe as parcelas configuradas (Nº DUP, VENC, VALOR)
+  const isAVista = useMemo(() => {
+    if (formaPagamento) {
+      const fp = formaPagamento.toUpperCase();
+      return fp === 'A_VISTA' || fp.includes('VISTA') || fp === 'PIX' || fp === 'DINHEIRO' || fp === 'DEBITO';
     }
-  ];
+    return detectarFormaPagamentoInicial(quote) === 'A_VISTA';
+  }, [formaPagamento, quote]);
+
+  const duplicatasExibir = useMemo(() => {
+    if (isAVista) return [];
+    if (duplicatasProp !== undefined) return duplicatasProp;
+    return gerarDuplicatasProporcionais(valorTotalNota, 1, numeroNfe);
+  }, [isAVista, duplicatasProp, valorTotalNota, numeroNfe]);
 
   const handlePrint = () => {
     window.print();
@@ -186,7 +234,7 @@ export default function DanfeEspelhoA4({
               </span>
             </h2>
             <p className="text-[11px] text-slate-400 truncate">
-              NF-e Nº {formatarNumeroDanfe(numeroNfe)} • Série {serie} • {clienteInfo.nome}
+              NF-e Nº {formatarNumeroDanfe(numeroNfe)} • Série {serie} • {destinatario.nome}
             </p>
           </div>
         </div>
@@ -405,11 +453,11 @@ export default function DanfeEspelhoA4({
           <div className="grid grid-cols-12 divide-x divide-black">
             <div className="col-span-7 p-1">
               <span className="block text-[6.5px] font-bold uppercase text-gray-600">NOME / RAZÃO SOCIAL</span>
-              <strong className="text-[9px] uppercase truncate block">{clienteInfo.nome}</strong>
+              <strong className="text-[9px] uppercase truncate block">{destinatario.nome}</strong>
             </div>
             <div className="col-span-3 p-1">
               <span className="block text-[6.5px] font-bold uppercase text-gray-600">CNPJ / CPF</span>
-              <strong className="font-mono text-[8.5px]">{clienteInfo.doc}</strong>
+              <strong className="font-mono text-[8.5px]">{destinatario.doc}</strong>
             </div>
             <div className="col-span-2 p-1">
               <span className="block text-[6.5px] font-bold uppercase text-gray-600">DATA DA EMISSÃO</span>
@@ -421,15 +469,15 @@ export default function DanfeEspelhoA4({
           <div className="grid grid-cols-12 divide-x divide-black">
             <div className="col-span-6 p-1">
               <span className="block text-[6.5px] font-bold uppercase text-gray-600">ENDEREÇO</span>
-              <span className="uppercase truncate block">{clienteInfo.endereco}</span>
+              <span className="uppercase truncate block">{destinatario.endereco}</span>
             </div>
             <div className="col-span-3 p-1">
               <span className="block text-[6.5px] font-bold uppercase text-gray-600">BAIRRO / DISTRITO</span>
-              <span className="uppercase truncate block">{clienteInfo.bairro}</span>
+              <span className="uppercase truncate block">{destinatario.bairro}</span>
             </div>
             <div className="col-span-1 p-1">
               <span className="block text-[6.5px] font-bold uppercase text-gray-600">CEP</span>
-              <span className="font-mono">{clienteInfo.cep}</span>
+              <span className="font-mono">{destinatario.cep}</span>
             </div>
             <div className="col-span-2 p-1">
               <span className="block text-[6.5px] font-bold uppercase text-gray-600">DATA DE SAÍDA / ENTRADA</span>
@@ -441,19 +489,19 @@ export default function DanfeEspelhoA4({
           <div className="grid grid-cols-12 divide-x divide-black">
             <div className="col-span-5 p-1">
               <span className="block text-[6.5px] font-bold uppercase text-gray-600">MUNICÍPIO</span>
-              <span className="uppercase truncate block">{clienteInfo.cidade}</span>
+              <span className="uppercase truncate block">{destinatario.cidade}</span>
             </div>
             <div className="col-span-2 p-1">
               <span className="block text-[6.5px] font-bold uppercase text-gray-600">FONE / FAX</span>
-              <span>{clienteInfo.telefone}</span>
+              <span>{destinatario.telefone}</span>
             </div>
             <div className="col-span-1 p-1 text-center">
               <span className="block text-[6.5px] font-bold uppercase text-gray-600">UF</span>
-              <strong className="text-[8.5px]">{clienteInfo.uf}</strong>
+              <strong className="text-[8.5px]">{destinatario.uf}</strong>
             </div>
             <div className="col-span-2 p-1">
               <span className="block text-[6.5px] font-bold uppercase text-gray-600">INSCRIÇÃO ESTADUAL</span>
-              <strong className="font-mono">{clienteInfo.ie}</strong>
+              <strong className="font-mono">{destinatario.ie}</strong>
             </div>
             <div className="col-span-2 p-1">
               <span className="block text-[6.5px] font-bold uppercase text-gray-600">HORA DE SAÍDA</span>
@@ -468,25 +516,31 @@ export default function DanfeEspelhoA4({
         <div className="text-[7.5px] font-black uppercase tracking-wider text-gray-800 mb-0.5">
           FATURA / DUPLICATAS
         </div>
-        <div className="border border-black mb-1 p-1">
-          <div className="grid grid-cols-4 sm:grid-cols-6 gap-1.5">
-            {duplicatas.map((dup, idx) => (
-              <div key={idx} className="border border-gray-400 p-1 rounded-xs bg-gray-50/50 text-[7.5px]">
-                <div className="flex justify-between text-gray-600 text-[6.5px]">
-                  <span>Nº DUP:</span>
-                  <strong className="text-black font-mono">{dup.numero}</strong>
+        <div className="border border-black mb-1 p-1 min-h-[28px] flex items-center">
+          {isAVista || duplicatasExibir.length === 0 ? (
+            <div className="w-full h-4">
+              {/* Quadro rigorosamente vazio para Pagamento À Vista (indPag: 0) */}
+            </div>
+          ) : (
+            <div className="w-full grid grid-cols-4 sm:grid-cols-6 gap-1.5">
+              {duplicatasExibir.map((dup, idx) => (
+                <div key={idx} className="border border-gray-400 p-1 rounded-xs bg-gray-50/50 text-[7.5px]">
+                  <div className="flex justify-between text-gray-600 text-[6.5px]">
+                    <span>Nº DUP:</span>
+                    <strong className="text-black font-mono">{dup.numero}</strong>
+                  </div>
+                  <div className="flex justify-between text-gray-600 text-[6.5px] mt-0.5">
+                    <span>VENC:</span>
+                    <strong className="text-black">{formatSafeDate(dup.vencimento)}</strong>
+                  </div>
+                  <div className="flex justify-between text-gray-800 font-bold mt-0.5 border-t border-gray-300 pt-0.5">
+                    <span>VALOR:</span>
+                    <strong className="text-black font-mono">{formatCurrency(dup.valor)}</strong>
+                  </div>
                 </div>
-                <div className="flex justify-between text-gray-600 text-[6.5px] mt-0.5">
-                  <span>VENC:</span>
-                  <strong className="text-black">{dup.vencimento}</strong>
-                </div>
-                <div className="flex justify-between text-gray-800 font-bold mt-0.5 border-t border-gray-300 pt-0.5">
-                  <span>VALOR:</span>
-                  <strong className="text-black font-mono">{formatCurrency(dup.valor)}</strong>
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* =========================================================================

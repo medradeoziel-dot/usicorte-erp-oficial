@@ -146,6 +146,10 @@ export interface Quote {
   nfe_emitida_em?: string;
   serie_nfe?: string;
   protocolo_nfe?: string;
+  cliente_id?: string;
+  cliente_nome?: string;
+  forma_pagamento?: string;
+  indPag?: number;
 }
 
 export interface ViaCepResponse {

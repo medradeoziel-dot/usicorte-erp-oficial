@@ -171,6 +171,7 @@ export interface ConsultaItem {
   nfe_numero?: string;
   nfe_chave?: string;
   danfe_url?: string;
+  clienteId?: string;
 }
 
 // Dados de consulta (inicia vazio para produção)
@@ -913,10 +914,17 @@ export default function ReportsModule({
           quoteNumber: cot.numero || idOuNumero,
           date: cot.data || new Date().toISOString().slice(0, 10),
           clientName: cot.cliente_nome || 'Cliente Selecionado',
+          clientId: cot.cliente_id,
+          cliente_id: cot.cliente_id,
+          cliente_nome: cot.cliente_nome,
+          forma_pagamento: cot.forma_pagamento,
           contactPerson: cot.contato || '',
+          clientPhone: cot.telefone || '',
+          clientEmail: cot.email || '',
           status: mapStatus(cot.status),
           validityDays: 10,
-          paymentTerms: 'À Vista / Pix',
+          paymentTerms: cot.forma_pagamento || 'À Vista / Pix',
+          paymentMethod: cot.forma_pagamento || 'À Vista',
           observations: cot.observacoes || '',
           items: mappedItems,
           subtotalTotal: Number(cot.valor_total) || 0,
@@ -996,29 +1004,19 @@ export default function ReportsModule({
   // Helper para resolver dados completos do cliente para emissão fiscal
   const resolveClientForQuote = useCallback((quote: Quote | null): Client | null => {
     if (!quote) return null;
+    const cid = quote.clientId || (quote as any).cliente_id;
+    const cDoc = (quote.clientDocument || '').replace(/\D/g, '');
+    const cName = (quote.clientName || (quote as any).cliente_nome || '').trim().toLowerCase();
     const found = clients.find(
-      c => (quote.clientId && c.id === quote.clientId) ||
-           (quote.clientDocument && c.document && c.document.replace(/\D/g, '') === quote.clientDocument.replace(/\D/g, '')) ||
-           (quote.clientName && c.name && c.name.trim().toLowerCase() === quote.clientName.trim().toLowerCase())
+      c => (cid && c.id === cid) ||
+           (cDoc && c.document && c.document.replace(/\D/g, '') === cDoc) ||
+           (cName && c.name && c.name.trim().toLowerCase() === cName) ||
+           (cName && c.fantasyName && c.fantasyName.trim().toLowerCase() === cName)
     );
     if (found) return found;
-    return {
-      id: quote.clientId || 'cli-temp',
-      name: quote.clientName || 'Cliente Balcão',
-      tradeName: quote.clientName || 'Cliente Balcão',
-      document: quote.clientDocument || '00.000.000/0001-00',
-      type: (quote.clientDocument && quote.clientDocument.replace(/\D/g, '').length === 11) ? 'CPF' : 'CNPJ',
-      situation: 'Regular',
-      enabled: true,
-      registrationDate: new Date().toISOString().slice(0, 10),
-      phone: quote.clientPhone || '',
-      email: quote.clientEmail || '',
-      city: quote.clientCity || 'Bauru',
-      state: quote.clientState || 'SP',
-      street: quote.clientStreet || '',
-      neighborhood: quote.clientNeighborhood || '',
-      cep: quote.clientCep || ''
-    } as unknown as Client;
+    // Se não encontrou no array local, retorna null para que a busca
+    // assíncrona oficial no Supabase (fetchClienteCompletoParaDanfe) seja executada
+    return null;
   }, [clients]);
 
   // Carrega e reconstrói a cotação completa para operações fiscais da NF-e
@@ -1083,6 +1081,9 @@ export default function ReportsModule({
         quoteObj = {
           id: item.cotacaoId || item.cotacao || `COT-${Date.now()}`,
           quoteNumber: item.cotacao || 'COT-TEMP',
+          clientId: item.clienteId,
+          cliente_id: item.clienteId,
+          cliente_nome: item.empresa,
           date: item.data || new Date().toISOString().slice(0, 10),
           clientName: item.empresa || 'Cliente Balcão',
           contactPerson: item.contato !== '-' ? item.contato : '',
@@ -1321,6 +1322,7 @@ export default function ReportsModule({
                     valorGeral: it.valor_total || ((it.valor_unitario || 0) * (it.quantidade || 1)),
                     cotacao: q.numero,
                     cotacaoId: q.id,
+                    clienteId: q.cliente_id,
                     itemId: it.id,
                     observacao: it.observacao || (it as any).notes || (it as any).obs || '',
                     obs: it.observacao || (it as any).notes || (it as any).obs || '',

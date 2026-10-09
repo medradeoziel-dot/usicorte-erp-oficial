@@ -229,6 +229,7 @@ export interface SupabaseCotacao {
   status_nfe?: string;
   nfe_chave?: string;
   nfe_numero?: string;
+  serie_nfe?: string;
   danfe_url?: string;
   xml_url?: string;
   mensagem_erro_nfe?: string;
@@ -1170,6 +1171,7 @@ export async function updateCotacaoNfeStatusDb(
     status_nfe: 'Pendente' | 'Processando' | 'Emitida' | 'Erro' | string;
     nfe_chave?: string;
     nfe_numero?: string;
+    serie_nfe?: string;
     danfe_url?: string;
     xml_url?: string;
     mensagem_erro_nfe?: string | null;
@@ -1185,6 +1187,7 @@ export async function updateCotacaoNfeStatusDb(
     };
     if (payload.nfe_chave !== undefined) updateObj.nfe_chave = payload.nfe_chave;
     if (payload.nfe_numero !== undefined) updateObj.nfe_numero = payload.nfe_numero;
+    if (payload.serie_nfe !== undefined) updateObj.serie_nfe = payload.serie_nfe;
     if (payload.danfe_url !== undefined) updateObj.danfe_url = payload.danfe_url;
     if (payload.xml_url !== undefined) updateObj.xml_url = payload.xml_url;
     if (payload.mensagem_erro_nfe !== undefined) updateObj.mensagem_erro_nfe = payload.mensagem_erro_nfe;
