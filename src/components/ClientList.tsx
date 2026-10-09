@@ -208,9 +208,9 @@ export default function ClientList({
                     <span>
                       {clientType === 'CNPJ' ? formatCNPJ(clientDoc) : formatCPF(clientDoc)}
                     </span>
-                    {(client.inscricao_estadual || client.inscricaoEstadual) && (
+                    {(client.inscricao_estadual || client.inscricaoEstadual || client.ie) && (
                       <span className="text-[9px] text-indigo-700 bg-indigo-50/80 px-1 py-0.2 rounded border border-indigo-100 font-sans" title="Inscrição Estadual">
-                        IE: {client.inscricao_estadual || client.inscricaoEstadual}
+                        IE: {client.inscricao_estadual || client.inscricaoEstadual || client.ie}
                       </span>
                     )}
                     {(client.indicador_ie || (client as any).indicadorIe) && (

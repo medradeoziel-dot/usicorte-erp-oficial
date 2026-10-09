@@ -694,7 +694,7 @@ export function mapClientToSupabase(c: any): Record<string, any> {
   const cleanPhone = (c.phone || c.telefone || '').replace(/\D/g, '');
   const rawDate = c.registrationDate || c.data_cadastro || new Date().toISOString().split('T')[0];
   const clientType = c.type || c.tipo || (cleanDoc.length > 11 ? 'CNPJ' : 'CPF');
-  const rawIe = c.inscricao_estadual || c.inscricaoEstadual || c.ie || '';
+  const rawIe = c.inscricao_estadual || c.inscricaoEstadual || c.ie || c.i_e || c.InscricaoEstadual || '';
   const rawIndicador = c.indicador_ie || c.indicadorIe || (clientType === 'CNPJ' ? '1' : '9');
 
   return {
@@ -801,7 +801,9 @@ export async function saveClienteDb(client: Client | any): Promise<{ data: Clien
           telefone: payload.telefone,
           email: payload.email,
           documento: payload.documento,
-          endereco: payload.endereco
+          endereco: payload.endereco,
+          inscricao_estadual: payload.inscricao_estadual || '',
+          indicador_ie: payload.indicador_ie || ''
         };
         const { data: fbData, error: fbError } = await db
           .from('clientes')
@@ -861,7 +863,9 @@ export async function saveClienteDb(client: Client | any): Promise<{ data: Clien
         telefone: payload.telefone,
         email: payload.email,
         documento: payload.documento,
-        endereco: payload.endereco
+        endereco: payload.endereco,
+        inscricao_estadual: payload.inscricao_estadual || '',
+        indicador_ie: payload.indicador_ie || ''
       };
       const { data: fbData, error: fbError } = await db
         .from('clientes')

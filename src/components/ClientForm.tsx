@@ -159,7 +159,7 @@ export default function ClientForm({ activeClient, onSave, onDelete, onClear, is
     }
   };
 
-  // Live Receita Federal API CNPJ Consultation
+  // Live Receita Federal / SINTEGRA / SEFAZ API CNPJ Consultation
   const fetchCnpjDetails = async () => {
     const cleanCnpj = document.replace(/\D/g, '');
     if (cleanCnpj.length !== 14) {
@@ -168,33 +168,117 @@ export default function ClientForm({ activeClient, onSave, onDelete, onClear, is
     }
 
     setIsSearchingCnpj(true);
-    showStatus('Consultando base da Receita Federal / SEFAZ...', 'info');
+    showStatus('Consultando base da Receita Federal / SINTEGRA / SEFAZ...', 'info');
+
+    const setIndicadorIE = setIndicadorIe;
 
     try {
-      const response = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cleanCnpj}`);
-      if (!response.ok) {
-        throw new Error('Serviço indisponível ou CNPJ inexistente.');
-      }
-      const data: BrasilApiCnpjResponse = await response.json();
-      
-      setName(data.razao_social || '');
-      setFantasyName(data.nome_fantasia || '');
-      setSituation(data.descricao_situacao_cadastral || 'ATIVA');
-      
-      if (data.cep) {
-        setCep(formatCEP(data.cep));
-      }
-      setStreet(data.logradouro || '');
-      setNeighborhood(data.bairro || '');
-      setCity(data.municipio || '');
-      setState((data.uf || '').toUpperCase());
-      setEmail(data.email || '');
-      
-      if (data.ddd_telefone_1) {
-        setPhone(formatPhone(data.ddd_telefone_1));
+      let data: any = null;
+
+      // 1. Consulta prioritária via CNPJ.ws (publica.cnpj.ws) para obter Inscrição Estadual e SINTEGRA oficial
+      try {
+        const respWs = await fetch(`https://publica.cnpj.ws/cnpj/${cleanCnpj}`);
+        if (respWs.ok) {
+          const jsonWs = await respWs.json();
+          if (jsonWs && (jsonWs.razao_social || jsonWs.estabelecimento)) {
+            data = jsonWs;
+          }
+        }
+      } catch (errWs) {
+        console.warn('Consulta publica.cnpj.ws falhou, tentando fallback BrasilAPI:', errWs);
       }
 
-      showStatus('Dados recuperados com sucesso da base do SEFAZ / Receita!', 'success');
+      // 2. Fallback via BrasilAPI caso CNPJ.ws falhe ou retorne erro
+      if (!data) {
+        const respBrasil = await fetch(`https://brasilapi.com.br/api/cnpj/v1/${cleanCnpj}`);
+        if (respBrasil.ok) {
+          data = await respBrasil.json();
+        }
+      }
+
+      // 3. Fallback adicional via Open CNPJa se necessário
+      if (!data) {
+        try {
+          const respCnpja = await fetch(`https://open.cnpja.com/office/${cleanCnpj}`);
+          if (respCnpja.ok) {
+            data = await respCnpja.json();
+          }
+        } catch {}
+      }
+
+      if (!data) {
+        throw new Error('Serviço indisponível ou CNPJ inexistente.');
+      }
+
+      // Preenchimento de dados cadastrais
+      setName(data.razao_social || data.company?.name || data.name || '');
+      setFantasyName(data.estabelecimento?.nome_fantasia || data.nome_fantasia || '');
+      setSituation(data.estabelecimento?.situacao_cadastral || data.descricao_situacao_cadastral || 'ATIVA');
+
+      const cepConsultado = data.estabelecimento?.cep || data.cep || '';
+      if (cepConsultado) {
+        setCep(formatCEP(cepConsultado));
+      }
+
+      const logradouro = data.estabelecimento?.logradouro 
+        ? `${data.estabelecimento.tipo_logradouro ? data.estabelecimento.tipo_logradouro + ' ' : ''}${data.estabelecimento.logradouro}`
+        : (data.logradouro || '');
+      const numero = data.estabelecimento?.numero || data.numero || '';
+      const complemento = data.estabelecimento?.complemento || data.complemento || '';
+      const enderecoCompleto = numero 
+        ? `${logradouro}, ${numero}${complemento ? ' - ' + complemento : ''}`
+        : logradouro;
+
+      setStreet(enderecoCompleto);
+      setNeighborhood(data.estabelecimento?.bairro || data.bairro || '');
+      setCity(data.estabelecimento?.cidade?.nome || data.municipio || '');
+      setState((data.estabelecimento?.estado?.sigla || data.uf || '').toUpperCase());
+      setEmail(data.estabelecimento?.email || data.email || '');
+
+      const dddTel = data.estabelecimento?.ddd1 && data.estabelecimento?.telefone1 
+        ? `${data.estabelecimento.ddd1}${data.estabelecimento.telefone1}` 
+        : (data.ddd_telefone_1 || '');
+      if (dddTel) {
+        setPhone(formatPhone(dddTel));
+      }
+
+      // Normaliza array de Inscrições Estaduais / SINTEGRA de serviços como CNPJ.ws e CNPJa
+      const iesArray = data.estabelecimento?.inscricoes_estaduais || data.inscricoes_estaduais || data.registrations || [];
+      if (Array.isArray(iesArray) && iesArray.length > 0) {
+        const ufRef = (data.estabelecimento?.estado?.sigla || data.uf || '').toUpperCase();
+        const ieObj = iesArray.find((i: any) => (i.estado?.sigla === ufRef || i.state === ufRef) && (i.ativo !== false && i.enabled !== false))
+          || iesArray.find((i: any) => i.ativo !== false && i.enabled !== false)
+          || iesArray[0];
+        
+        const ieEncontrada = ieObj?.inscricao_estadual || ieObj?.number;
+        if (ieEncontrada) {
+          if (!data.inscricao_estadual) data.inscricao_estadual = ieEncontrada;
+          if (!data.ie) data.ie = ieEncontrada;
+        }
+      }
+
+      // 2. MAPEAMENTO E PREENCHIMENTO AUTOMÁTICO DOS CAMPOS DE INSCRIÇÃO ESTADUAL:
+      const ieConsultada = data.inscricao_estadual || 
+                           data.ie || 
+                           data.sintegra?.inscricao_estadual || 
+                           data.sintegra_estadual;
+
+      if (ieConsultada && typeof ieConsultada === 'string' && ieConsultada.trim() !== '') {
+        // Preenche o campo da Inscrição Estadual
+        setInscricaoEstadual(ieConsultada.trim());
+        // Define o Indicador de IE para "1 - Contribuinte ICMS"
+        setIndicadorIE('1');
+      } else {
+        // Se for isento ou não tiver IE
+        setIndicadorIE('9'); // Não Contribuinte
+      }
+
+      showStatus(
+        ieConsultada && ieConsultada.trim() !== ''
+          ? `Dados e Inscrição Estadual (${ieConsultada.trim()}) preenchidos com sucesso via SINTEGRA / SEFAZ!`
+          : 'Dados cadastrais recuperados com sucesso da base do SEFAZ / Receita!',
+        'success'
+      );
     } catch (err: any) {
       showStatus('Erro ao consultar CNPJ. Verifique se o número está correto.', 'error');
     } finally {

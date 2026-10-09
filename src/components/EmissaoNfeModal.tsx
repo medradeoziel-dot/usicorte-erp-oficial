@@ -7,7 +7,8 @@ import {
   NfeTransmissionResult,
   formatarChaveAcesso,
   abrirPreDanfeEmNovaAba,
-  montarEnderecoSemDuplicacao
+  montarEnderecoSemDuplicacao,
+  buscarInscricaoEstadual
 } from '../services/nfeService';
 import { updateCotacaoNfeStatusDb } from '../lib/db';
 import { fetchCompanyData, CompanyFiscalData, DEFAULT_COMPANY_DATA } from '../services/companyService';
@@ -84,8 +85,9 @@ export default function EmissaoNfeModal({
   const clienteInfo = useMemo(() => {
     const nome = client?.name || client?.nome || quote.clientName || 'Cliente Balcão';
     const doc = client?.document || client?.documento || quote.clientDocument || 'Não informado';
-    const ieCliente = client?.inscricao_estadual || client?.ie || client?.inscricaoEstadual;
-    const ie = (ieCliente && ieCliente.trim() !== '') ? ieCliente.trim() : 'ISENTO';
+    const ie = buscarInscricaoEstadual(client) !== 'ISENTO' 
+      ? buscarInscricaoEstadual(client) 
+      : buscarInscricaoEstadual(quote);
     const indicadorIe = client?.indicador_ie || client?.indicadorIe || (doc.replace(/\D/g, '').length > 11 ? '1' : '9');
     const cidade = client?.city || client?.cidade || quote.clientCity || 'BAURU';
     const uf = (client?.state || client?.uf || quote.clientState || 'SP').toUpperCase();
@@ -623,14 +625,28 @@ export default function EmissaoNfeModal({
                 {/* 1. Cabeçalho DANFE */}
                 <div className="grid grid-cols-12 border border-black mb-1.5">
                   {/* Emitente */}
-                  <div className="col-span-6 p-2 border-r border-black">
-                    <h2 className="font-bold text-sm leading-tight uppercase">{company.corporateName || company.razao_social || 'L. M. BANZATTO METAIS'}</h2>
-                    <h3 className="font-bold text-xs text-red-700 leading-tight uppercase">{company.tradeName || company.nome_fantasia || 'USICORTE METAIS'}</h3>
-                    <p className="text-[10px] text-gray-700 mt-1 leading-normal">
-                      {montarEnderecoSemDuplicacao(company.street || company.endereco, company.number || company.numero, company.complement || (company as any).complemento, company.neighborhood || company.bairro)}<br />
-                      {company.city || company.cidade} - {company.state || company.uf || 'SP'} • CEP: {company.cep || '17031-190'}<br />
-                      Tel: {company.phone || company.telefone || '(14) 3203-2000'}
-                    </p>
+                  <div className="col-span-6 p-2 border-r border-black flex items-center gap-2.5 overflow-hidden">
+                    <div className="flex items-center justify-center shrink-0 w-20 h-12">
+                      <img 
+                        src="/logo-usicorte.png" 
+                        alt="Logo UsiCorte" 
+                        className="max-h-12 h-12 w-auto object-contain shrink-0"
+                        onError={(e) => {
+                          (e.currentTarget as HTMLElement).style.display = 'none';
+                        }}
+                      />
+                    </div>
+                    <div className="flex-1 min-w-0 flex flex-col justify-center">
+                      <h2 className="font-extrabold text-[11px] leading-tight uppercase text-black truncate">
+                        {company.corporateName || company.razao_social || 'L. M. BANZATTO METAIS'}
+                      </h2>
+                      <h3 className="font-bold text-[9px] text-red-700 leading-snug uppercase mt-0.5 truncate">
+                        {company.tradeName || company.nome_fantasia || 'USICORTE METAIS'}
+                      </h3>
+                      <p className="text-[7.5px] text-gray-700 mt-1 leading-tight truncate">
+                        {montarEnderecoSemDuplicacao(company.street || company.endereco, company.number || company.numero, company.complement || (company as any).complemento, company.neighborhood || company.bairro)} • {company.city || company.cidade}/{company.state || company.uf || 'SP'} • CEP: {company.cep || '17031-190'} • Tel: {company.phone || company.telefone || '(14) 3203-2000'} • {company.email || 'contato@usicorte.com.br'}
+                      </p>
+                    </div>
                   </div>
 
                   {/* DANFE Box */}

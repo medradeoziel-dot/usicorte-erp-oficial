@@ -41,6 +41,7 @@ export interface DadosEmitenteNfe {
   uf: string;
   cep: string;
   telefone: string;
+  email?: string;
   regimeTributario: string;
 }
 
@@ -79,8 +80,36 @@ export interface ClienteDanfeDestinatario {
   ie: string;
   inscricao_estadual?: string;
   inscricaoEstadual?: string;
+  i_e?: string;
+  InscricaoEstadual?: string;
   telefone: string;
 }
+
+/**
+ * 2. CORREÇÃO DEFINITIVA DA INSCRIÇÃO ESTADUAL DO CLIENTE/DESTINATÁRIO:
+ * Procura por qualquer variação da coluna de Inscrição Estadual vinda do banco de dados (tabela clientes do Supabase):
+ * Testa inscricao_estadual, ie, inscricaoEstadual, i_e, InscricaoEstadual
+ */
+export const buscarInscricaoEstadual = (cliente: any): string => {
+  if (!cliente) return 'ISENTO';
+  
+  // Procura por qualquer variação do campo vindo do banco de dados
+  const ie = cliente.inscricao_estadual || 
+             cliente.ie || 
+             cliente.inscricaoEstadual || 
+             cliente.i_e || 
+             cliente.InscricaoEstadual;
+             
+  if (ie && typeof ie === 'string' && ie.trim() !== '' && ie.trim().toUpperCase() !== 'ISENTO') {
+    return ie.trim();
+  }
+
+  if (typeof ie === 'number' && !isNaN(ie)) {
+    return String(ie).trim();
+  }
+  
+  return 'ISENTO';
+};
 
 /**
  * 1. CORREÇÃO DO ENDEREÇO DO EMITENTE (REMOVER DUPLICAÇÕES DE TEXTO):
@@ -391,15 +420,17 @@ export async function fetchClienteCompletoParaDanfe(
     'SP'
   ).toUpperCase();
 
-  // 2. CORREÇÃO DA INSCRIÇÃO ESTADUAL DO DESTINATÁRIO/CLIENTE:
-  // Mapeia diretamente o campo vindo da tabela clientes do Supabase (cliente.inscricao_estadual ou cliente.ie)
-  const ieCliente = clienteRaw?.inscricao_estadual ||
-                    clienteRaw?.ie ||
-                    clienteRaw?.inscricaoEstadual ||
-                    fallbackClient?.inscricao_estadual ||
-                    fallbackClient?.ie ||
-                    fallbackClient?.inscricaoEstadual;
-  const ieExibicao = (ieCliente && String(ieCliente).trim() !== '') ? String(ieCliente).trim() : 'ISENTO';
+  // 2. CORREÇÃO DEFINITIVA DA INSCRIÇÃO ESTADUAL DO DESTINATÁRIO/CLIENTE:
+  // Procura por qualquer variação do campo vindo do banco de dados (tabela clientes do Supabase)
+  const ieExibicao = (() => {
+    const fromRaw = buscarInscricaoEstadual(clienteRaw);
+    if (fromRaw !== 'ISENTO') return fromRaw;
+    const fromFb = buscarInscricaoEstadual(fallbackClient);
+    if (fromFb !== 'ISENTO') return fromFb;
+    const fromQuote = buscarInscricaoEstadual(quote);
+    if (fromQuote !== 'ISENTO') return fromQuote;
+    return 'ISENTO';
+  })();
 
   const telefoneFinal = clienteRaw?.telefone ||
                         clienteRaw?.phone ||
@@ -421,6 +452,8 @@ export async function fetchClienteCompletoParaDanfe(
     ie: ieExibicao,
     inscricao_estadual: ieExibicao,
     inscricaoEstadual: ieExibicao,
+    i_e: ieExibicao,
+    InscricaoEstadual: ieExibicao,
     telefone: telefoneFinal
   };
 }
@@ -1046,14 +1079,21 @@ export function gerarDanfeHtml(
     <div class="box">
       <table>
         <tr>
-          <td style="width: 44%; padding: 6px; border-right: 1px solid #000; vertical-align: top;">
-            <div style="font-size: 11px; font-weight: 900; text-transform: uppercase;">${emitente.razaoSocial}</div>
-            <div style="font-size: 10px; font-weight: 900; color: #b91c1c; text-transform: uppercase; margin-top: 1px;">${emitente.nomeFantasia}</div>
-            <div style="font-size: 7.5px; margin-top: 4px; line-height: 1.2;">
-              ${montarEnderecoSemDuplicacao(emitente.endereco, emitente.numero, (emitente as any).complemento, emitente.bairro)}<br>
-              ${emitente.cidade} - ${emitente.uf} • CEP: ${emitente.cep}<br>
-              Tel: ${emitente.telefone}
-            </div>
+          <td style="width: 44%; padding: 6px; border-right: 1px solid #000; vertical-align: middle;">
+            <table style="width: 100%; border-collapse: collapse; margin: 0; padding: 0;">
+              <tr>
+                <td style="width: 80px; vertical-align: middle; text-align: center; padding-right: 8px;">
+                  <img src="/logo-usicorte.png" alt="Logo" style="max-height: 48px; height: 48px; width: auto; object-fit: contain; display: block; margin: 0 auto;" onerror="this.style.display='none'" />
+                </td>
+                <td style="vertical-align: middle; text-align: left;">
+                  <div style="font-size: 10.5px; font-weight: 900; text-transform: uppercase; color: #000; line-height: 1.2;">${emitente.razaoSocial}</div>
+                  <div style="font-size: 9px; font-weight: 800; color: #b91c1c; text-transform: uppercase; margin-top: 1px; line-height: 1.2;">${emitente.nomeFantasia}</div>
+                  <div style="font-size: 7px; color: #333; margin-top: 3px; line-height: 1.2; word-break: break-word;">
+                    ${montarEnderecoSemDuplicacao(emitente.endereco, emitente.numero, (emitente as any).complemento, emitente.bairro)}${emitente.cidade && emitente.uf ? ` • ${emitente.cidade}/${emitente.uf}` : ''}${emitente.cep ? ` • CEP: ${emitente.cep}` : ''}${emitente.telefone ? ` • Tel: ${emitente.telefone}` : ''}${emitente.email ? ` • E-mail: ${emitente.email}` : ''}
+                  </div>
+                </td>
+              </tr>
+            </table>
           </td>
           <td style="width: 22%; text-align: center; padding: 4px; border-right: 1px solid #000; vertical-align: middle; background: #fafafa;">
             <div style="font-size: 14px; font-weight: 900; letter-spacing: 1px;">DANFE</div>
@@ -1233,7 +1273,7 @@ export function gerarDanfeHtml(
           </td>
           <td style="width: 17%; padding: 3px; border-right: 1px solid #000;">
             <div class="title">INSCRIÇÃO ESTADUAL</div>
-            <div class="val" style="font-family: monospace;">${destinatario.inscricaoEstadual || 'ISENTO'}</div>
+            <div class="val" style="font-family: monospace;">${buscarInscricaoEstadual(destinatario)}</div>
           </td>
           <td style="width: 10%; padding: 3px;">
             <div class="title">HORA DE SAÍDA</div>

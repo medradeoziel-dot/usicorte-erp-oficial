@@ -169,11 +169,19 @@ export interface BrasilApiCnpjResponse {
   descricao_situacao_cadastral: string;
   cep: string;
   logradouro: string;
+  numero?: string;
+  complemento?: string;
   bairro: string;
   municipio: string;
   uf: string;
   ddd_telefone_1: string;
   email: string;
+  inscricao_estadual?: string;
+  ie?: string;
+  sintegra?: {
+    inscricao_estadual?: string;
+  };
+  sintegra_estadual?: string;
 }
 
 export interface ItemOS {

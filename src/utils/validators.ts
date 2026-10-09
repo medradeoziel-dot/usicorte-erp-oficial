@@ -85,3 +85,30 @@ export function validateCNPJ(cnpj: string): boolean {
 
   return true;
 }
+
+/**
+ * 2. CORREÇÃO DEFINITIVA DA INSCRIÇÃO ESTADUAL DO CLIENTE/DESTINATÁRIO:
+ * Procura por qualquer variação do campo vindo do banco de dados (tabela clientes do Supabase):
+ * Testa inscricao_estadual, ie, inscricaoEstadual, i_e, InscricaoEstadual
+ */
+export const buscarInscricaoEstadual = (cliente: any): string => {
+  if (!cliente) return 'ISENTO';
+  
+  // Procura por qualquer variação do campo vindo do banco de dados
+  const ie = cliente.inscricao_estadual || 
+             cliente.ie || 
+             cliente.inscricaoEstadual || 
+             cliente.i_e || 
+             cliente.InscricaoEstadual;
+             
+  if (ie && typeof ie === 'string' && ie.trim() !== '' && ie.trim().toUpperCase() !== 'ISENTO') {
+    return ie.trim();
+  }
+
+  if (typeof ie === 'number' && !isNaN(ie)) {
+    return String(ie).trim();
+  }
+  
+  return 'ISENTO';
+};
+

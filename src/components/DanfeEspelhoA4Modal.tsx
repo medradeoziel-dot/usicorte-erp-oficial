@@ -9,7 +9,8 @@ import {
   ClienteDanfeDestinatario,
   fetchClienteCompletoParaDanfe,
   gerarDuplicatasProporcionais,
-  detectarFormaPagamentoInicial
+  detectarFormaPagamentoInicial,
+  buscarInscricaoEstadual
 } from '../services/nfeService';
 import { formatCurrency, formatSafeDate } from '../utils/calculator';
 import { 
@@ -281,8 +282,9 @@ export default function DanfeEspelhoA4Modal({
             {carregandoCliente ? (
               <span className="text-amber-400 italic text-[11px]">Buscando dados cadastrais no Supabase...</span>
             ) : (() => {
-              const ieCli = clienteDestinatario?.inscricao_estadual || clienteDestinatario?.ie || (client as any)?.inscricao_estadual || client?.ie;
-              const ieExib = (ieCli && String(ieCli).trim() !== '') ? String(ieCli).trim() : 'ISENTO';
+              const ieCli = buscarInscricaoEstadual(clienteDestinatario) !== 'ISENTO'
+                ? buscarInscricaoEstadual(clienteDestinatario)
+                : buscarInscricaoEstadual(client);
               return (
                 <span className="font-bold text-slate-100 truncate">
                   {clienteDestinatario?.nome || quote.cliente_nome || quote.clientName}
@@ -290,7 +292,7 @@ export default function DanfeEspelhoA4Modal({
                     CNPJ/CPF: {clienteDestinatario?.doc || quote.clientDocument || 'NÃO INFORMADO'}
                   </span>
                   <span className="text-slate-400 font-normal font-mono ml-2 text-[11px]">
-                    IE: {ieExib}
+                    IE: {ieCli}
                   </span>
                   <span className="text-slate-400 font-normal ml-2 text-[11px]">
                     • {clienteDestinatario?.cidade || quote.clientCity || 'BAURU'}/{clienteDestinatario?.uf || quote.clientState || 'SP'}

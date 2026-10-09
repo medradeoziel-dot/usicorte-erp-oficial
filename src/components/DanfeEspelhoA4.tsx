@@ -12,8 +12,10 @@ import {
   fetchClienteCompletoParaDanfe,
   gerarDuplicatasProporcionais,
   detectarFormaPagamentoInicial,
-  montarEnderecoSemDuplicacao
+  montarEnderecoSemDuplicacao,
+  buscarInscricaoEstadual
 } from '../services/nfeService';
+export { buscarInscricaoEstadual };
 import { formatCurrency, formatNumberBR, formatSafeDate } from '../utils/calculator';
 import Logo from './Logo';
 import { 
@@ -142,6 +144,17 @@ export default function DanfeEspelhoA4({
     serie_nfe: company.serie_nfe
   };
 
+  // 1. Linha única de endereço formatada sem sobreposição: Rua, Número, Bairro, CEP, Telefone e E-mail
+  const enderecoEmitenteLinhaUnica = useMemo(() => {
+    const partes: string[] = [];
+    if (enderecoEmitenteFormatado) partes.push(enderecoEmitenteFormatado);
+    if (emitente.cidade && emitente.uf) partes.push(`${emitente.cidade}/${emitente.uf}`);
+    if (emitente.cep) partes.push(`CEP: ${emitente.cep}`);
+    if (emitente.telefone) partes.push(`Tel: ${emitente.telefone}`);
+    if (emitente.email) partes.push(`E-mail: ${emitente.email}`);
+    return partes.join(' • ');
+  }, [enderecoEmitenteFormatado, emitente.cidade, emitente.uf, emitente.cep, emitente.telefone, emitente.email]);
+
   // 2. Destinatário Real Carregado do Supabase (tabela clientes)
   const [destinatarioAsync, setDestinatarioAsync] = useState<ClienteDanfeDestinatario | null>(null);
 
@@ -158,8 +171,9 @@ export default function DanfeEspelhoA4({
 
   const destinatario: ClienteDanfeDestinatario = useMemo(() => {
     if (clienteDestinatario) {
-      const ieCli = clienteDestinatario.inscricao_estadual || clienteDestinatario.ie;
-      const ieExib = (ieCli && String(ieCli).trim() !== '') ? String(ieCli).trim() : 'ISENTO';
+      const ieExib = buscarInscricaoEstadual(clienteDestinatario) !== 'ISENTO'
+        ? buscarInscricaoEstadual(clienteDestinatario)
+        : buscarInscricaoEstadual(client);
 
       const rz = clienteDestinatario.razao_social || (client as any)?.razao_social || client?.name || quote.cliente_nome || quote.clientName;
       const nf = clienteDestinatario.nome_fantasia || (client as any)?.nome_fantasia || client?.fantasyName || '';
@@ -171,12 +185,14 @@ export default function DanfeEspelhoA4({
         ...clienteDestinatario,
         nome: nomeExib,
         ie: ieExib,
-        inscricao_estadual: ieExib
+        inscricao_estadual: ieExib,
+        inscricaoEstadual: ieExib
       };
     }
     if (destinatarioAsync) {
-      const ieCli = destinatarioAsync.inscricao_estadual || destinatarioAsync.ie;
-      const ieExib = (ieCli && String(ieCli).trim() !== '') ? String(ieCli).trim() : 'ISENTO';
+      const ieExib = buscarInscricaoEstadual(destinatarioAsync) !== 'ISENTO'
+        ? buscarInscricaoEstadual(destinatarioAsync)
+        : buscarInscricaoEstadual(client);
 
       const rz = destinatarioAsync.razao_social || (client as any)?.razao_social || client?.name || quote.cliente_nome || quote.clientName;
       const nf = destinatarioAsync.nome_fantasia || (client as any)?.nome_fantasia || client?.fantasyName || '';
@@ -188,12 +204,14 @@ export default function DanfeEspelhoA4({
         ...destinatarioAsync,
         nome: nomeExib,
         ie: ieExib,
-        inscricao_estadual: ieExib
+        inscricao_estadual: ieExib,
+        inscricaoEstadual: ieExib
       };
     }
     const destUf = (client?.state || client?.uf || quote.clientState || 'SP').toUpperCase();
-    const ieCli = client?.inscricao_estadual || client?.ie || client?.inscricaoEstadual;
-    const ieExib = (ieCli && String(ieCli).trim() !== '') ? String(ieCli).trim() : 'ISENTO';
+    const ieExib = buscarInscricaoEstadual(client) !== 'ISENTO'
+      ? buscarInscricaoEstadual(client)
+      : buscarInscricaoEstadual(quote);
 
     const rz = (client as any)?.razao_social || client?.name || client?.nome || quote.cliente_nome || quote.clientName || 'CLIENTE BALCÃO';
     const nf = (client as any)?.nome_fantasia || client?.fantasyName || '';
@@ -211,14 +229,26 @@ export default function DanfeEspelhoA4({
       cep: client?.cep || quote.clientCep || '17000-000',
       ie: ieExib,
       inscricao_estadual: ieExib,
+      inscricaoEstadual: ieExib,
       telefone: client?.phone || client?.telefone || quote.clientPhone || '-'
     };
   }, [clienteDestinatario, destinatarioAsync, client, quote]);
 
-  // 2. CORREÇÃO DA INSCRIÇÃO ESTADUAL DO DESTINATÁRIO/CLIENTE:
-  // Mapeia diretamente o campo vindo da tabela clientes do Supabase (cliente.inscricao_estadual ou cliente.ie)
-  const ieCliente = destinatario?.inscricao_estadual || destinatario?.ie || client?.inscricao_estadual || client?.ie;
-  const ieExibicao = (ieCliente && String(ieCliente).trim() !== '') ? String(ieCliente).trim() : 'ISENTO';
+  // 2. CORREÇÃO DEFINITIVA DA INSCRIÇÃO ESTADUAL DO DESTINATÁRIO/CLIENTE:
+  // Atualiza a verificação para testar todas as possíveis variações da coluna de Inscrição Estadual trazida da tabela clientes do Supabase
+  const ieExibicao = useMemo(() => {
+    const fromDest = buscarInscricaoEstadual(destinatario);
+    if (fromDest !== 'ISENTO') return fromDest;
+    const fromCliDest = buscarInscricaoEstadual(clienteDestinatario);
+    if (fromCliDest !== 'ISENTO') return fromCliDest;
+    const fromAsync = buscarInscricaoEstadual(destinatarioAsync);
+    if (fromAsync !== 'ISENTO') return fromAsync;
+    const fromClient = buscarInscricaoEstadual(client);
+    if (fromClient !== 'ISENTO') return fromClient;
+    const fromQuote = buscarInscricaoEstadual(quote);
+    if (fromQuote !== 'ISENTO') return fromQuote;
+    return 'ISENTO';
+  }, [destinatario, clienteDestinatario, destinatarioAsync, client, quote]);
 
   const destUf = (destinatario.uf || 'SP').toUpperCase();
 
@@ -408,32 +438,51 @@ export default function DanfeEspelhoA4({
         {/* =========================================================================
             2. CABEÇALHO DA EMISSÃO
             ========================================================================= */}
-        <div className="grid grid-cols-12 border border-black mb-1">
+        <div className="grid grid-cols-12 border border-black mb-1 overflow-hidden">
           {/* Coluna 1: Emitente & Logo */}
-          <div className="col-span-5 p-1.5 border-r border-black flex flex-col justify-between">
-            <div className="flex items-start gap-2">
-              <div className="w-24 shrink-0">
-                <Logo variant="print" className="h-9 w-auto" />
-              </div>
-              <div className="min-w-0">
-                <h1 className="font-bold text-[10px] uppercase leading-tight tracking-tight text-black">
-                  {emitente.razaoSocial}
-                </h1>
-                <h2 className="font-bold text-[9px] text-red-700 uppercase leading-none mt-0.5">
-                  {emitente.nomeFantasia}
-                </h2>
+          <div className="col-span-5 p-2 border-r border-black flex items-center gap-2.5 overflow-hidden">
+            {/* LADO ESQUERDO: Imagem do Logo com altura máxima fixa (height: 48px / max-h-12), centralizada verticalmente */}
+            <div className="flex items-center justify-center shrink-0 w-24 h-12">
+              <img 
+                src="/logo-usicorte.png" 
+                alt="Logo UsiCorte Metais" 
+                className="max-h-12 h-12 w-auto object-contain shrink-0"
+                onError={(e) => {
+                  const target = e.currentTarget;
+                  target.style.display = 'none';
+                  const fallback = target.nextElementSibling as HTMLElement;
+                  if (fallback) fallback.style.display = 'block';
+                }}
+              />
+              <div style={{ display: 'none' }} className="w-full">
+                <Logo variant="print" className="max-h-12 h-12 w-auto" />
               </div>
             </div>
-            
-            <div className="text-[7.5px] text-gray-800 mt-1 leading-tight">
-              <span>{enderecoEmitenteFormatado}</span><br />
-              <span>{emitente.cidade} - {emitente.uf} • CEP: {emitente.cep}</span><br />
-              <span>Fone: {emitente.telefone} • E-mail: {emitente.email}</span>
+
+            {/* LADO DIREITO (Dados do Emitente) */}
+            <div className="flex-1 min-w-0 flex flex-col justify-center">
+              {/* Linha 1: L. M. BANZATTO METAIS (Razão Social em negrito e destaque, fonte de tamanho adequado) */}
+              <h1 className="font-black text-[10.5px] uppercase leading-tight tracking-tight text-black truncate">
+                {emitente.razaoSocial}
+              </h1>
+
+              {/* Linha 2: USICORTE METAIS (Nome Fantasia com fonte ligeiramente menor e sem sobrepor a linha de cima) */}
+              <h2 className="font-bold text-[9px] text-red-700 uppercase leading-snug mt-0.5 truncate">
+                {emitente.nomeFantasia}
+              </h2>
+
+              {/* Linha 3 em diante: Endereço completo formatado em uma única linha limpa (Rua, Número, Bairro, CEP, Telefone e E-mail) */}
+              <p 
+                className="text-[7px] text-gray-800 leading-tight mt-1 truncate print:whitespace-normal print:overflow-visible"
+                title={enderecoEmitenteLinhaUnica}
+              >
+                {enderecoEmitenteLinhaUnica}
+              </p>
             </div>
           </div>
 
           {/* Coluna 2: DANFE Box */}
-          <div className="col-span-3 p-1.5 border-r border-black text-center flex flex-col justify-between items-center bg-gray-50/30">
+          <div className="col-span-3 p-1.5 border-r border-black text-center flex flex-col justify-between items-center bg-gray-50/30 overflow-hidden">
             <div>
               <span className="font-black text-sm tracking-widest block leading-none">DANFE</span>
               <span className="text-[7px] leading-tight block text-gray-700 mt-0.5">
@@ -441,7 +490,7 @@ export default function DanfeEspelhoA4({
               </span>
             </div>
 
-            <div className="border border-black px-2 py-0.5 my-1 text-[8px] font-bold inline-block">
+            <div className="border border-black px-2 py-0.5 my-1 text-[8px] font-bold inline-block leading-tight">
               <span className="text-gray-500">0 - ENTRADA</span><br />
               <strong className="text-black">1 - SAÍDA [ 1 ]</strong>
             </div>
@@ -454,19 +503,19 @@ export default function DanfeEspelhoA4({
           </div>
 
           {/* Coluna 3: Código de Barras & Chave de Acesso */}
-          <div className="col-span-4 p-1.5 flex flex-col justify-between">
-            <div>
+          <div className="col-span-4 p-1.5 flex flex-col justify-between overflow-hidden">
+            <div className="min-w-0">
               <BarcodeSimulado chave={chaveAcessoRaw} />
               
               <div className="mt-0.5">
                 <span className="block text-[6.5px] font-bold uppercase text-gray-600">CHAVE DE ACESSO</span>
-                <div className="font-mono text-[8px] font-bold text-black tracking-wider break-all leading-tight">
+                <div className="font-mono text-[7px] font-bold text-black tracking-normal break-all leading-tight">
                   {chaveFormatada}
                 </div>
               </div>
             </div>
 
-            <div className="border-t border-gray-300 pt-1 mt-1 text-[7px] text-gray-700 leading-tight">
+            <div className="border-t border-gray-300 pt-0.5 mt-0.5 text-[6.5px] text-gray-700 leading-tight">
               {isPrevia ? (
                 <span className="text-red-700 font-semibold block">
                   Documento emitido exclusivamente para prévia e conferência tributária.
@@ -480,7 +529,7 @@ export default function DanfeEspelhoA4({
 
             <div className="border-t border-black pt-0.5 mt-0.5">
               <span className="block text-[6.5px] font-bold uppercase text-gray-600">PROTOCOLO DE AUTORIZAÇÃO DE USO</span>
-              <div className="font-bold text-[8.5px] text-black truncate">
+              <div className="font-bold text-[8px] text-black truncate leading-tight">
                 {protocolo}
               </div>
             </div>
