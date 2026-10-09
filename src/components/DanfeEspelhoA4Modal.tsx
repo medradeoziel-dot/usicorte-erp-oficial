@@ -10,7 +10,9 @@ import {
   fetchClienteCompletoParaDanfe,
   gerarDuplicatasProporcionais,
   detectarFormaPagamentoInicial,
-  buscarInscricaoEstadual
+  buscarInscricaoEstadual,
+  obterOuBaixarXmlNfe,
+  enviarEmailNfe
 } from '../services/nfeService';
 import { formatCurrency, formatSafeDate } from '../utils/calculator';
 import { 
@@ -29,7 +31,9 @@ import {
   Sliders,
   Check,
   Building,
-  UserCheck
+  UserCheck,
+  Download,
+  Mail
 } from 'lucide-react';
 
 interface DanfeEspelhoA4ModalProps {
@@ -56,6 +60,8 @@ export default function DanfeEspelhoA4Modal({
   const [company, setCompany] = useState<CompanyFiscalData>(initialCompany || getLocalCompanyData());
   const [isPrinting, setIsPrinting] = useState<boolean>(false);
   const [isOpeningTab, setIsOpeningTab] = useState<boolean>(false);
+  const [isDownloadingXml, setIsDownloadingXml] = useState<boolean>(false);
+  const [emailFeedback, setEmailFeedback] = useState<string | null>(null);
 
   // 1. CORREÇÃO DEFINITIVA DA BUSCA DO CLIENTE (SUPABASE)
   const [clienteDestinatario, setClienteDestinatario] = useState<ClienteDanfeDestinatario | null>(null);
@@ -200,6 +206,27 @@ export default function DanfeEspelhoA4Modal({
     }, 150);
   };
 
+  const handleDownloadXml = async () => {
+    setIsDownloadingXml(true);
+    try {
+      await obterOuBaixarXmlNfe(quote, client, company);
+    } catch (err) {
+      console.error('Erro ao baixar XML:', err);
+    } finally {
+      setIsDownloadingXml(false);
+    }
+  };
+
+  const handleEnviarEmail = () => {
+    const res = enviarEmailNfe(quote, client, company);
+    if (res.emailDestinatario) {
+      setEmailFeedback(`Cliente: ${res.emailDestinatario}`);
+    } else {
+      setEmailFeedback('Cliente sem e-mail cadastrado (aberto cliente padrão)');
+    }
+    setTimeout(() => setEmailFeedback(null), 4000);
+  };
+
   const handleOpenNewTab = async () => {
     setIsOpeningTab(true);
     try {
@@ -242,6 +269,31 @@ export default function DanfeEspelhoA4Modal({
           </div>
 
           <div className="flex items-center gap-2">
+            {!isPrevia && (
+              <>
+                <button
+                  type="button"
+                  onClick={handleDownloadXml}
+                  disabled={isDownloadingXml}
+                  className="px-3.5 py-2 bg-emerald-700 hover:bg-emerald-600 text-white font-semibold text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-sm disabled:opacity-50"
+                  title="Baixar arquivo XML da NF-e autorizado pela SEFAZ"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>{isDownloadingXml ? 'Baixando...' : 'Baixar XML'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleEnviarEmail}
+                  className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-indigo-500/30 font-semibold text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+                  title="Enviar DANFE e chave da NF-e por e-mail para o cliente"
+                >
+                  <Mail className="w-4 h-4 text-indigo-400" />
+                  <span className="hidden sm:inline">E-mail</span>
+                </button>
+              </>
+            )}
+
             <button
               type="button"
               onClick={handlePrint}
@@ -502,6 +554,37 @@ export default function DanfeEspelhoA4Modal({
           </button>
 
           <div className="flex items-center gap-2.5">
+            {emailFeedback && (
+              <span className="text-xs text-indigo-300 font-medium px-2 py-1 bg-indigo-950/60 rounded-md border border-indigo-500/30 animate-pulse">
+                ✉️ {emailFeedback}
+              </span>
+            )}
+
+            {!isPrevia && (
+              <>
+                <button
+                  type="button"
+                  onClick={handleDownloadXml}
+                  disabled={isDownloadingXml}
+                  className="px-4 py-2.5 bg-emerald-700 hover:bg-emerald-600 text-white font-semibold text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-sm disabled:opacity-50"
+                  title="Baixar arquivo XML da NF-e autorizado pela SEFAZ"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>{isDownloadingXml ? 'Baixando...' : 'Baixar XML'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleEnviarEmail}
+                  className="px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-indigo-500/30 font-semibold text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+                  title="Enviar DANFE e chave da NF-e por e-mail para o cliente"
+                >
+                  <Mail className="w-4 h-4" />
+                  <span>Enviar E-mail</span>
+                </button>
+              </>
+            )}
+
             <button
               type="button"
               onClick={handlePrint}

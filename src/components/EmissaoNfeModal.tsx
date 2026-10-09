@@ -8,7 +8,10 @@ import {
   formatarChaveAcesso,
   abrirPreDanfeEmNovaAba,
   montarEnderecoSemDuplicacao,
-  buscarInscricaoEstadual
+  buscarInscricaoEstadual,
+  downloadXmlNfe,
+  obterOuBaixarXmlNfe,
+  enviarEmailNfe
 } from '../services/nfeService';
 import { updateCotacaoNfeStatusDb } from '../lib/db';
 import { fetchCompanyData, CompanyFiscalData, DEFAULT_COMPANY_DATA } from '../services/companyService';
@@ -30,7 +33,8 @@ import {
   Check,
   ExternalLink,
   Info,
-  Eye
+  Eye,
+  Mail
 } from 'lucide-react';
 
 interface EmissaoNfeModalProps {
@@ -53,6 +57,8 @@ export default function EmissaoNfeModal({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showPreDanfeModal, setShowPreDanfeModal] = useState<boolean>(false);
   const [openingNewTab, setOpeningNewTab] = useState<boolean>(false);
+  const [emailFeedback, setEmailFeedback] = useState<string | null>(null);
+  const [isDownloadingXml, setIsDownloadingXml] = useState<boolean>(false);
 
   const handleOpenPreDanfeNewTab = async () => {
     setOpeningNewTab(true);
@@ -198,18 +204,32 @@ export default function EmissaoNfeModal({
   const handleOpenDanfe = () => {
     if (transmissionResult?.danfeUrl) {
       window.open(transmissionResult.danfeUrl, '_blank');
+    } else if (quote.danfe_url) {
+      window.open(quote.danfe_url, '_blank');
+    } else {
+      setShowPreDanfeModal(true);
     }
   };
 
-  const handleDownloadXml = () => {
-    if (transmissionResult?.xmlUrl) {
-      const a = document.createElement('a');
-      a.href = transmissionResult.xmlUrl;
-      a.download = `NFe-${transmissionResult.nfeChave || 'nfe'}.xml`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
+  const handleDownloadXml = async () => {
+    setIsDownloadingXml(true);
+    try {
+      if (transmissionResult?.xmlConteudo && (transmissionResult.chaveAcesso || transmissionResult.nfeChave)) {
+        downloadXmlNfe(transmissionResult.xmlConteudo, (transmissionResult.chaveAcesso || transmissionResult.nfeChave)!);
+      } else {
+        await obterOuBaixarXmlNfe(quote, client, company);
+      }
+    } catch (e) {
+      console.error('Erro ao baixar XML:', e);
+    } finally {
+      setIsDownloadingXml(false);
     }
+  };
+
+  const handleEnviarEmail = () => {
+    const res = enviarEmailNfe(quote, client, company);
+    setEmailFeedback(res.emailDestinatario ? `E-mail para: ${res.emailDestinatario}` : 'Cliente sem e-mail cadastrado (aberto cliente padrão)');
+    setTimeout(() => setEmailFeedback(null), 4000);
   };
 
   return (
@@ -491,15 +511,32 @@ export default function EmissaoNfeModal({
           </button>
 
           <div className="flex items-center gap-2.5">
-            {transmissionResult?.sucesso ? (
+            {emailFeedback && (
+              <span className="text-xs text-indigo-300 font-medium px-2 py-1 bg-indigo-950/60 rounded-md border border-indigo-500/30 animate-pulse">
+                ✉️ {emailFeedback}
+              </span>
+            )}
+
+            {(transmissionResult?.sucesso || quote.status_nfe === 'Emitida') ? (
               <>
                 <button
                   type="button"
+                  onClick={handleEnviarEmail}
+                  className="px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-indigo-300 font-bold text-xs rounded-xl border border-indigo-500/30 transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
+                  title="Enviar DANFE e chave de acesso da NF-e por e-mail para o cliente"
+                >
+                  <Mail className="w-4 h-4 text-indigo-400" />
+                  Enviar E-mail
+                </button>
+                <button
+                  type="button"
                   onClick={handleDownloadXml}
-                  className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl border border-slate-700 transition-colors flex items-center gap-1.5 cursor-pointer"
+                  disabled={isDownloadingXml}
+                  className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl border border-slate-700 transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm disabled:opacity-50"
+                  title="Baixar arquivo XML autorizado pela SEFAZ"
                 >
                   <Download className="w-4 h-4" />
-                  Baixar XML
+                  {isDownloadingXml ? 'Baixando...' : 'Baixar XML'}
                 </button>
                 <button
                   type="button"

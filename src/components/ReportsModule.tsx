@@ -74,6 +74,7 @@ import BoletosGestaoModal from './BoletosGestaoModal';
 import EmissaoNfeModal from './EmissaoNfeModal';
 import DanfeEspelhoA4Modal from './DanfeEspelhoA4Modal';
 import OrdemCorte80mm, { imprimirCupom80mm } from './OrdemCorte80mm';
+import { obterOuBaixarXmlNfe } from '../services/nfeService';
 import { 
   ContaReceberParcela,
   fetchBoletosDb,
@@ -936,11 +937,14 @@ export default function ReportsModule({
           updatedAt: cot.created_at || new Date().toISOString(),
           status_nfe: cot.status_nfe,
           nfe_numero: cot.nfe_numero,
-          nfe_chave: cot.nfe_chave,
+          nfe_chave: cot.nfe_chave || (cot as any).chave_acesso,
+          chave_acesso: (cot as any).chave_acesso || cot.nfe_chave,
           danfe_url: cot.danfe_url,
           xml_url: cot.xml_url,
+          xml_conteudo: (cot as any).xml_conteudo,
           serie_nfe: (cot as any).serie_nfe,
-          protocolo_nfe: (cot as any).protocolo_nfe,
+          protocolo_autorizacao: (cot as any).protocolo_autorizacao || (cot as any).protocolo_nfe,
+          protocolo_nfe: (cot as any).protocolo_nfe || (cot as any).protocolo_autorizacao,
           nfe_emitida_em: (cot as any).nfe_emitida_em
         };
 
@@ -1102,7 +1106,10 @@ export default function ReportsModule({
           status_nfe: item.status_nfe,
           nfe_numero: item.nfe_numero,
           nfe_chave: item.nfe_chave,
-          danfe_url: item.danfe_url
+          chave_acesso: item.nfe_chave,
+          danfe_url: item.danfe_url,
+          xml_url: (item as any).xml_url,
+          xml_conteudo: (item as any).xml_conteudo
         };
       }
       return quoteObj;
@@ -1165,6 +1172,56 @@ export default function ReportsModule({
       return;
     }
     await handleAbrirVisualizacaoDanfe(selectedItem);
+  };
+
+  // Disparo de download do arquivo XML da NF-e
+  const handleBaixarXmlTabela = async (item: ConsultaItem) => {
+    try {
+      const quote = await resolveQuoteForNfe(item);
+      if (!quote) {
+        setDeleteFeedback({
+          message: 'Não foi possível carregar os dados desta cotação para baixar o XML.',
+          type: 'error'
+        });
+        return;
+      }
+      const matchedClient = (clients || []).find(c => 
+        (quote.clientId && c.id === quote.clientId) || 
+        (quote.clientDocument && c.document && c.document.replace(/\D/g, '') === quote.clientDocument.replace(/\D/g, '')) ||
+        (c.name || (c as any).nome) === quote.clientName
+      );
+      const res = await obterOuBaixarXmlNfe(quote, matchedClient);
+      if (res.success) {
+        setDeleteFeedback({
+          message: `XML da NF-e baixado com sucesso: NFe${(res.chaveAcesso || '').replace(/\D/g, '').padEnd(44, '0').slice(0, 44)}.xml`,
+          type: 'success'
+        });
+      } else {
+        setDeleteFeedback({
+          message: res.error || 'Falha ao baixar XML da NF-e.',
+          type: 'error'
+        });
+      }
+    } catch (err: any) {
+      setDeleteFeedback({
+        message: err?.message || 'Erro ao baixar XML da NF-e.',
+        type: 'error'
+      });
+    }
+  };
+
+  const handleBaixarXmlTopBar = async () => {
+    const selectedItem = filteredConsultaItems.find(it => selectedIds.includes(it.idVer)) || 
+      (selectedIds.length === 0 && filteredConsultaItems.length === 1 ? filteredConsultaItems[0] : null);
+
+    if (!selectedItem) {
+      setDeleteFeedback({
+        message: 'Selecione uma cotação/pedido na tabela (marcando a caixa de seleção) para baixar o XML.',
+        type: 'error'
+      });
+      return;
+    }
+    await handleBaixarXmlTabela(selectedItem);
   };
 
   // Callback de sucesso ao emitir / autorizar NF-e
@@ -3626,6 +3683,22 @@ export default function ReportsModule({
               </button>
               <button
                 type="button"
+                className={`btn-print w-full min-w-0 cursor-pointer border transition-all ${
+                  selectedIds.length > 0
+                    ? 'bg-emerald-700 hover:bg-emerald-600 text-white border-emerald-500 shadow-md shadow-emerald-700/30'
+                    : 'bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 border-emerald-700/50'
+                }`}
+                onClick={handleBaixarXmlTopBar}
+                disabled={isLoadingNfeQuote}
+                title={selectedIds.length > 0 ? "Baixar arquivo XML da NF-e (NFe[CHAVE].xml) do pedido selecionado" : "Baixar XML (selecione um pedido na tabela)"}
+              >
+                <span className="flex items-center justify-center">
+                  <Download className="w-4 h-4 mb-0.5 text-emerald-300" />
+                </span>
+                BAIXAR XML
+              </button>
+              <button
+                type="button"
                 onClick={handleDuplicateSelectedQuote}
                 disabled={selectedIds.length === 0 || isDuplicating}
                 className={`btn-print w-full min-w-0 border transition-all cursor-pointer flex flex-col items-center justify-center ${
@@ -4107,6 +4180,19 @@ export default function ReportsModule({
                             >
                               <FileCheck2 className="w-3.5 h-3.5" />
                             </button>
+                            {item.status_nfe === 'Emitida' && (
+                              <button
+                                type="button"
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  await handleBaixarXmlTabela(item);
+                                }}
+                                className="p-1.5 bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-500/40 rounded-md transition-all cursor-pointer flex items-center justify-center shadow-xs"
+                                title={`Baixar XML oficial da NF-e Nº ${item.nfe_numero || ''} (NFe${(item.nfe_chave || '').replace(/\D/g, '')}.xml)`}
+                              >
+                                <Download className="w-3.5 h-3.5 text-emerald-400" />
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={(e) => {

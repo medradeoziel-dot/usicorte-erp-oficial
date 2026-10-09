@@ -140,13 +140,16 @@ export interface Quote {
   // Campos Fiscais da Nota Fiscal Eletrônica (NF-e)
   status_nfe?: 'Pendente' | 'Processando' | 'Emitida' | 'Erro' | string;
   nfe_chave?: string;
+  chave_acesso?: string;
   nfe_numero?: string;
   danfe_url?: string;
   xml_url?: string;
+  xml_conteudo?: string;
+  protocolo_autorizacao?: string;
+  protocolo_nfe?: string;
   mensagem_erro_nfe?: string;
   nfe_emitida_em?: string;
   serie_nfe?: string;
-  protocolo_nfe?: string;
   cliente_id?: string;
   cliente_nome?: string;
   forma_pagamento?: string;

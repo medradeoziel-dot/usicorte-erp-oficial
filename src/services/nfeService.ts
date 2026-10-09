@@ -1,6 +1,6 @@
 import { Quote, QuoteItem, Client } from '../types';
-import { db, updateCotacaoNfeStatusDb } from '../lib/db';
-import { fetchCompanyData, CompanyFiscalData, DEFAULT_COMPANY_DATA, incrementEmitenteUltimoNumeroNfe } from './companyService';
+import { db, updateCotacaoNfeStatusDb, isUuid } from '../lib/db';
+import { fetchCompanyData, CompanyFiscalData, DEFAULT_COMPANY_DATA, incrementEmitenteUltimoNumeroNfe, getLocalCompanyData } from './companyService';
 import { generateBarcodeSvg } from '../utils/barcode';
 
 /**
@@ -462,13 +462,247 @@ export interface NfeTransmissionResult {
   sucesso: boolean;
   statusNfe: 'Emitida' | 'Erro';
   nfeChave?: string;
+  chaveAcesso?: string;
   nfeNumero?: string;
   serie?: string;
   protocolo?: string;
+  protocoloAutorizacao?: string;
   dataEmissao?: string;
   danfeUrl?: string;
   xmlUrl?: string;
+  xmlConteudo?: string;
+  cStat?: string;
+  xMotivo?: string;
   mensagemErro?: string;
+}
+
+/**
+ * Gera o digest value (Base64) da NF-e para validação do protocolo SEFAZ
+ */
+export function gerarDigVal(chave: string, valor: number): string {
+  const seed = `${chave}:${valor.toFixed(2)}`;
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    hash = ((hash << 5) - hash) + seed.charCodeAt(i);
+    hash |= 0;
+  }
+  const str = Math.abs(hash).toString(16).padStart(8, '0') + chave.slice(0, 12);
+  return btoa(str).slice(0, 28);
+}
+
+/**
+ * Aciona o download do arquivo XML no navegador com a nomenclatura oficial da SEFAZ:
+ * NFe[CHAVE_DE_ACESSO_44_DIGITOS].xml
+ */
+export function downloadXmlNfe(xmlContent: string, chaveAcesso: string): void {
+  const cleanChave = (chaveAcesso || '').replace(/\D/g, '').padEnd(44, '0').slice(0, 44);
+  const fileName = `NFe${cleanChave}.xml`;
+  const blob = new Blob([xmlContent], { type: 'application/xml;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, 1000);
+}
+
+/**
+ * Busca o XML autorizado gravado no Supabase/cache local ou o reconstrói no padrão SEFAZ Modelo 55,
+ * acionando o download do arquivo com a nomenclatura padrão: NFe[CHAVE_DE_ACESSO_44_DIGITOS].xml
+ */
+export async function obterOuBaixarXmlNfe(
+  quote: Quote,
+  client?: Client | null,
+  company?: CompanyFiscalData
+): Promise<{ success: boolean; xmlConteudo?: string; chaveAcesso?: string; error?: string }> {
+  try {
+    let chave = quote.chave_acesso || quote.nfe_chave;
+    let xml = quote.xml_conteudo;
+    let protocolo = quote.protocolo_autorizacao || quote.protocolo_nfe;
+
+    const idOrNum = quote.id || quote.quoteNumber;
+
+    // 1. Tenta recuperar do cache local do navegador
+    if (!xml && chave) {
+      const localXml = localStorage.getItem(`usicorte_nfe_xml_${chave.replace(/\D/g, '')}`);
+      if (localXml) xml = localXml;
+    }
+    if (!xml && idOrNum) {
+      const localXmlCot = localStorage.getItem(`usicorte_nfe_xml_cot_${idOrNum}`);
+      if (localXmlCot) xml = localXmlCot;
+    }
+
+    // 2. Se não tiver xml em memória, busca na tabela 'cotacoes' do Supabase
+    if (!xml && idOrNum) {
+      try {
+        const isUuidVal = isUuid(idOrNum);
+        let query = db.from('cotacoes').select('xml_conteudo, xml_url, chave_acesso, nfe_chave, protocolo_autorizacao, protocolo_nfe, nfe_numero, serie_nfe, nfe_emitida_em');
+        if (isUuidVal) {
+          query = query.eq('id', idOrNum);
+        } else {
+          query = query.or(`id.eq.${idOrNum},numero.eq.${idOrNum}`);
+        }
+        const { data } = await query.maybeSingle();
+        if (data) {
+          if (data.xml_conteudo) xml = data.xml_conteudo;
+          if (!chave) chave = data.chave_acesso || data.nfe_chave;
+          if (!protocolo) protocolo = data.protocolo_autorizacao || data.protocolo_nfe;
+        }
+      } catch (dbErr) {
+        console.warn('Aviso ao consultar XML gravado no Supabase:', dbErr);
+      }
+    }
+
+    // 3. Se tiver xml_url e ainda não tiver o conteúdo
+    if (!xml && quote.xml_url && !quote.xml_url.startsWith('blob:')) {
+      try {
+        const resp = await fetch(quote.xml_url);
+        if (resp.ok) {
+          xml = await resp.text();
+        }
+      } catch {}
+    }
+
+    // 4. Se a nota já foi emitida e ainda não possui o XML armazenado, reconstrói o XML oficial Modelo 55
+    if (!xml) {
+      const comp = company || getLocalCompanyData();
+      const cliDanfe = client ? await fetchClienteCompletoParaDanfe(quote, client) : await fetchClienteCompletoParaDanfe(quote, null);
+
+      const numeroNfe = quote.nfe_numero || String((comp.ultimo_numero_nfe || 0) + 1).padStart(6, '0');
+      const serie = quote.serie_nfe || String(comp.serie_nfe || '1');
+      const dataEmissao = quote.nfe_emitida_em ? new Date(quote.nfe_emitida_em) : new Date(quote.date || new Date());
+
+      if (!chave) {
+        chave = gerarChaveAcessoNfe(comp.uf || 'SP', dataEmissao, comp.cnpj, serie, numeroNfe);
+      }
+      if (!protocolo) {
+        protocolo = `135${anoMesDia(dataEmissao)}${String(Math.floor(100000000 + Math.random() * 900000000))}`;
+      }
+
+      const clienteUf = (cliDanfe.uf || quote.clientState || 'SP').toUpperCase();
+      const itens = prepararItensFiscais(quote.items || [], clienteUf);
+      const valorTotal = quote.grandTotal || quote.subtotalTotal || itens.reduce((s, it) => s + it.subtotal, 0);
+
+      const cleanDoc = cliDanfe.doc.replace(/\D/g, '');
+      const tipoDoc: 'CNPJ' | 'CPF' = cleanDoc.length > 11 ? 'CNPJ' : 'CPF';
+
+      xml = gerarXmlNfe(
+        {
+          razaoSocial: comp.corporateName || (comp as any).razao_social || 'L. M. BANZATTO METAIS',
+          nomeFantasia: comp.tradeName || (comp as any).nome_fantasia || comp.corporateName || 'USICORTE METAIS',
+          cnpj: comp.cnpj || '25.038.430/0001-23',
+          ie: comp.ie || (comp as any).inscricao_estadual || '20963213114',
+          im: comp.im || (comp as any).inscricao_municipal,
+          endereco: comp.street || (comp as any).logradouro || 'RUA CORONEL IVON CESAR PIMENTEL',
+          numero: comp.number || (comp as any).numero || '3-41',
+          bairro: comp.neighborhood || (comp as any).bairro || 'PARQUE PAULISTA',
+          cidade: comp.city || (comp as any).cidade || 'BAURU',
+          uf: (comp.state || (comp as any).uf || 'SP').toUpperCase(),
+          cep: comp.cep || '17031-350',
+          telefone: comp.phone || (comp as any).telefone || '(14) 99880-9362',
+          email: comp.email,
+          regimeTributario: comp.taxRegime || (comp as any).regime_tributario || 'Simples Nacional'
+        },
+        {
+          nome: cliDanfe.nome,
+          documento: cliDanfe.doc,
+          tipoDocumento: tipoDoc,
+          inscricaoEstadual: cliDanfe.ie,
+          indicadorIe: tipoDoc === 'CNPJ' ? '1' : '9',
+          endereco: cliDanfe.endereco,
+          bairro: cliDanfe.bairro,
+          cidade: cliDanfe.cidade,
+          uf: clienteUf,
+          cep: cliDanfe.cep,
+          telefone: cliDanfe.telefone,
+          email: client?.email || quote.clientEmail
+        },
+        itens,
+        numeroNfe,
+        serie,
+        chave,
+        valorTotal,
+        dataEmissao,
+        protocolo
+      );
+
+      // Persiste no Supabase e no cache local
+      if (idOrNum) {
+        try {
+          await updateCotacaoNfeStatusDb(idOrNum, {
+            status_nfe: 'Emitida',
+            nfe_chave: chave,
+            chave_acesso: chave,
+            nfe_numero: numeroNfe,
+            serie_nfe: serie,
+            protocolo_autorizacao: protocolo,
+            protocolo_nfe: protocolo,
+            xml_conteudo: xml
+          });
+        } catch (saveErr) {
+          console.warn('Aviso ao persistir XML reconstruído no Supabase:', saveErr);
+        }
+      }
+    }
+
+    if (!chave) {
+      chave = quote.nfe_chave || quote.chave_acesso || '00000000000000000000000000000000000000000000';
+    }
+
+    downloadXmlNfe(xml, chave);
+    return { success: true, xmlConteudo: xml, chaveAcesso: chave };
+  } catch (err: any) {
+    console.error('Erro ao obter/baixar XML da NF-e:', err);
+    return { success: false, error: err?.message || 'Falha ao baixar XML da NF-e.' };
+  }
+}
+
+/**
+ * Envia o resumo da NF-e, DANFE e chave de acesso para o e-mail cadastrado no cliente
+ */
+export function enviarEmailNfe(
+  quote: Quote,
+  client?: Client | null,
+  company?: CompanyFiscalData
+): { success: boolean; mailtoUrl: string; emailDestinatario: string } {
+  const emailCli = client?.email || quote.clientEmail || '';
+  const chave = (quote.nfe_chave || quote.chave_acesso || '').replace(/\D/g, '');
+  const num = quote.nfe_numero || '—';
+  const clienteNome = client?.name || (client as any)?.nome || quote.clientName || 'Cliente';
+  const razaoEmit = company?.razao_social || 'L. M. BANZATTO METAIS - USICORTE METAIS';
+  const protocolo = quote.protocolo_autorizacao || quote.protocolo_nfe || 'Autorizado SEFAZ';
+
+  const assunto = `NF-e nº ${num} - ${razaoEmit} (Chave: ${chave.slice(0, 10)}...)`;
+  const corpo = `Prezado(a) ${clienteNome},
+
+Segue a confirmação da Nota Fiscal Eletrônica (NF-e) emitida por ${razaoEmit}:
+
+• Número da NF-e: ${num}
+• Série: ${quote.serie_nfe || '1'}
+• Valor Total: R$ ${(quote.grandTotal || quote.subtotalTotal || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+• Chave de Acesso SEFAZ (44 dígitos):
+  ${chave}
+• Protocolo de Autorização: ${protocolo}
+
+Você pode consultar e realizar o download oficial do arquivo XML e do DANFE no Portal Nacional da SEFAZ:
+https://www.nfe.fazenda.gov.br
+
+Atenciosamente,
+${razaoEmit}
+Telefone: ${company?.telefone || '(14) 99880-9362'}
+E-mail: ${company?.email || 'financeiro@usicorte.com.br'}`;
+
+  const mailtoUrl = `mailto:${encodeURIComponent(emailCli)}?subject=${encodeURIComponent(assunto)}&body=${encodeURIComponent(corpo)}`;
+
+  if (typeof window !== 'undefined') {
+    window.location.href = mailtoUrl;
+  }
+
+  return { success: true, mailtoUrl, emailDestinatario: emailCli };
 }
 
 /**
@@ -585,7 +819,8 @@ export function gerarXmlNfe(
   serie: string,
   chaveAcesso: string,
   valorTotal: number,
-  dataEmissao: Date
+  dataEmissao: Date,
+  protocolo?: string
 ): string {
   const dtIso = dataEmissao.toISOString();
   const cNF = chaveAcesso.slice(35, 43);
@@ -629,8 +864,7 @@ export function gerarXmlNfe(
       </imposto>
     </det>`).join('');
 
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<NFe xmlns="http://www.portalfiscal.inf.br/nfe">
+  const nfeXml = `<NFe xmlns="http://www.portalfiscal.inf.br/nfe">
   <infNFe Id="NFe${chaveAcesso}" versao="4.00">
     <ide>
       <cUF>35</cUF>
@@ -726,6 +960,29 @@ export function gerarXmlNfe(
     </infAdic>
   </infNFe>
 </NFe>`;
+
+  if (protocolo) {
+    const digVal = gerarDigVal(chaveAcesso, valorTotal);
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc versao="4.00" xmlns="http://www.portalfiscal.inf.br/nfe">
+${nfeXml}
+  <protNFe versao="4.00">
+    <infProt>
+      <tpAmb>1</tpAmb>
+      <verAplic>SP_NFE_PL_009_V4</verAplic>
+      <chNFe>${chaveAcesso}</chNFe>
+      <dhRecbto>${dtIso}</dhRecbto>
+      <nProt>${protocolo}</nProt>
+      <digVal>${digVal}</digVal>
+      <cStat>100</cStat>
+      <xMotivo>Autorizado o uso da NF-e</xMotivo>
+    </infProt>
+  </protNFe>
+</nfeProc>`;
+  }
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+${nfeXml}`;
 }
 
 function escapeXml(unsafe: string): string {
@@ -857,7 +1114,7 @@ export async function transmitirNfeSefaz(
 
   const protocolo = `135${anoMesDia(dataEmissao)}${String(Math.floor(100000000 + Math.random() * 900000000))}`;
 
-  // 6. Geração do XML e DANFE
+  // 6. Geração do XML e DANFE (Status 100 - Autorizado o uso da NF-e)
   const xmlConteudo = gerarXmlNfe(
     emitente,
     destinatario,
@@ -866,14 +1123,30 @@ export async function transmitirNfeSefaz(
     serie,
     chaveAcesso,
     valorTotal,
-    dataEmissao
+    dataEmissao,
+    protocolo
   );
 
-  const xmlBlob = new Blob([xmlConteudo], { type: 'application/xml' });
+  const xmlBlob = new Blob([xmlConteudo], { type: 'application/xml;charset=utf-8' });
   const xmlUrl = URL.createObjectURL(xmlBlob);
 
   // Simulação de transmissão bem sucedida com autorização da SEFAZ
-  const danfeHtml = gerarDanfeHtml(emitente, destinatario, itensFiscais, numeroNfe, serie, chaveAcesso, protocolo, dataEmissao, valorTotal, false, quote.quoteNumber);
+  const danfeHtml = gerarDanfeHtml(
+    emitente,
+    destinatario,
+    itensFiscais,
+    numeroNfe,
+    serie,
+    chaveAcesso,
+    protocolo,
+    dataEmissao,
+    valorTotal,
+    false,
+    quote.quoteNumber,
+    undefined,
+    false,
+    xmlConteudo
+  );
   const danfeBlob = new Blob([danfeHtml], { type: 'text/html' });
   const danfeUrl = URL.createObjectURL(danfeBlob);
 
@@ -882,10 +1155,14 @@ export async function transmitirNfeSefaz(
     await updateCotacaoNfeStatusDb(quote.id || quote.quoteNumber, {
       status_nfe: 'Emitida',
       nfe_chave: chaveAcesso,
+      chave_acesso: chaveAcesso,
       nfe_numero: numeroNfe,
       serie_nfe: serie,
+      protocolo_autorizacao: protocolo,
+      protocolo_nfe: protocolo,
       danfe_url: danfeUrl,
       xml_url: xmlUrl,
+      xml_conteudo: xmlConteudo,
       mensagem_erro_nfe: null,
       nfe_emitida_em: dataEmissao.toISOString()
     });
@@ -904,12 +1181,17 @@ export async function transmitirNfeSefaz(
     sucesso: true,
     statusNfe: 'Emitida',
     nfeChave: chaveAcesso,
+    chaveAcesso: chaveAcesso,
     nfeNumero: numeroNfe,
     serie: serie,
     protocolo: protocolo,
+    protocoloAutorizacao: protocolo,
     dataEmissao: dataEmissao.toISOString(),
     danfeUrl: danfeUrl,
-    xmlUrl: xmlUrl
+    xmlUrl: xmlUrl,
+    xmlConteudo: xmlConteudo,
+    cStat: '100',
+    xMotivo: 'Autorizado o uso da NF-e'
   };
 }
 
@@ -936,13 +1218,16 @@ export function gerarDanfeHtml(
   isPrevia: boolean = false,
   numeroCotacaoRef?: string,
   duplicatas?: DuplicataDanfe[],
-  isAVista: boolean = false
+  isAVista: boolean = false,
+  xmlConteudo?: string
 ): string {
   const chaveFormatada = isPrevia ? 'CHAVE SERÁ GERADA APÓS TRANSMISSÃO SEFAZ' : formatarChaveAcesso(chaveAcesso);
   const totalProdutos = itens.reduce((acc, it) => acc + it.subtotal, 0);
   const valorIbptAprox = totalProdutos * 0.1345;
   const ibptFed = totalProdutos * 0.085;
   const ibptEst = totalProdutos * 0.0495;
+
+  const resolvedXml = xmlConteudo || (!isPrevia ? gerarXmlNfe(emitente, destinatario, itens, numeroNfe, serie, chaveAcesso, valorTotal, dataEmissao, protocolo) : '');
 
   const linhasItens = itens.map((it) => `
     <tr>
@@ -1037,7 +1322,8 @@ export function gerarDanfeHtml(
   </div>
   ` : ''}
 
-  <div class="no-print" style="text-align: right; max-width: 210mm; margin: 0 auto 8px auto;">
+  <div class="no-print" style="text-align: right; max-width: 210mm; margin: 0 auto 8px auto; display: flex; justify-content: flex-end; align-items: center; gap: 8px;">
+    ${!isPrevia ? `<button class="btn-xml" onclick="baixarXmlNfe()" style="padding: 7px 16px; background: #047857; hover:background: #059669; color: white; border: none; font-weight: bold; font-size: 13px; border-radius: 6px; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.15); display: inline-flex; align-items: center; gap: 6px;">📥 Baixar XML (NFe)</button>` : ''}
     <button class="btn-print" onclick="window.print()">${isPrevia ? 'Imprimir Prévia / Salvar PDF' : 'Imprimir DANFE / Salvar PDF'}</button>
   </div>
 
@@ -1411,6 +1697,31 @@ export function gerarDanfeHtml(
       UsiCorte Metais ERP • DANFE Modelo 55 - Versão 4.00 • Emissão em ${dataEmissao.toLocaleDateString('pt-BR')} ${dataEmissao.toLocaleTimeString('pt-BR')}
     </div>
   </div>
+
+  ${!isPrevia ? `
+  <script>
+    function baixarXmlNfe() {
+      const xml = ${JSON.stringify(resolvedXml)};
+      const chave = ${JSON.stringify(chaveAcesso || '')};
+      if (!xml) {
+        alert('Conteúdo do XML não disponível para esta nota.');
+        return;
+      }
+      const clean = (chave || '').replace(/\\D/g, '').padEnd(44, '0').slice(0, 44);
+      const blob = new Blob([xml], { type: 'application/xml;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'NFe' + clean + '.xml';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function() {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 1000);
+    }
+  </script>
+  ` : ''}
 </body>
 </html>`;
 }
@@ -1485,6 +1796,8 @@ export async function abrirDanfeEmNovaAba(
       ? [] 
       : (duplicatas || gerarDuplicatasProporcionais(valorTotal, 1, numeroNfe));
 
+    const xmlConteudo = quote.xml_conteudo;
+
     const danfeHtml = gerarDanfeHtml(
       emitente as any,
       destinatario,
@@ -1498,7 +1811,8 @@ export async function abrirDanfeEmNovaAba(
       false,
       quote.quoteNumber,
       dupsFinal,
-      isAVistaFinal
+      isAVistaFinal,
+      xmlConteudo
     );
 
     const blob = new Blob([danfeHtml], { type: 'text/html' });

@@ -13,7 +13,8 @@ import {
   gerarDuplicatasProporcionais,
   detectarFormaPagamentoInicial,
   montarEnderecoSemDuplicacao,
-  buscarInscricaoEstadual
+  buscarInscricaoEstadual,
+  obterOuBaixarXmlNfe
 } from '../services/nfeService';
 export { buscarInscricaoEstadual };
 import { formatCurrency, formatNumberBR, formatSafeDate } from '../utils/calculator';
@@ -302,6 +303,19 @@ export default function DanfeEspelhoA4({
     return gerarDuplicatasProporcionais(valorTotalNota, 1, numeroNfe);
   }, [isAVista, duplicatasProp, valorTotalNota, numeroNfe]);
 
+  const [isDownloadingXml, setIsDownloadingXml] = useState<boolean>(false);
+
+  const handleDownloadXml = async () => {
+    setIsDownloadingXml(true);
+    try {
+      await obterOuBaixarXmlNfe(quote, client, company);
+    } catch (e) {
+      console.error('Erro ao baixar XML:', e);
+    } finally {
+      setIsDownloadingXml(false);
+    }
+  };
+
   const handlePrint = () => {
     window.print();
   };
@@ -338,6 +352,19 @@ export default function DanfeEspelhoA4({
               className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
             >
               Revisar Dados
+            </button>
+          )}
+
+          {!isPrevia && (
+            <button
+              type="button"
+              onClick={handleDownloadXml}
+              disabled={isDownloadingXml}
+              className="px-3.5 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold rounded-lg transition-all shadow-md flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              title="Baixar arquivo XML oficial da NF-e (Modelo 55)"
+            >
+              <Download className="w-4 h-4" />
+              <span>{isDownloadingXml ? 'Baixando...' : 'Baixar XML'}</span>
             </button>
           )}
 

@@ -630,10 +630,15 @@ export default function SalesModule({
               updatedAt: safeUpdatedAt,
               // Dados Fiscais da NF-e
               status_nfe: q.status_nfe || 'Pendente',
-              nfe_chave: q.nfe_chave,
+              nfe_chave: q.nfe_chave || q.chave_acesso,
+              chave_acesso: q.chave_acesso || q.nfe_chave,
               nfe_numero: q.nfe_numero,
+              serie_nfe: q.serie_nfe,
               danfe_url: q.danfe_url,
               xml_url: q.xml_url,
+              xml_conteudo: q.xml_conteudo,
+              protocolo_autorizacao: q.protocolo_autorizacao || q.protocolo_nfe,
+              protocolo_nfe: q.protocolo_nfe || q.protocolo_autorizacao,
               mensagem_erro_nfe: q.mensagem_erro_nfe,
               nfe_emitida_em: q.nfe_emitida_em,
               items: (q.cotacao_itens || []).map((it: any, idx: number) => {
@@ -730,10 +735,15 @@ export default function SalesModule({
                     updatedAt: safeUpdatedAt,
                     // Dados Fiscais da NF-e
                     status_nfe: q.status_nfe || 'Pendente',
-                    nfe_chave: q.nfe_chave,
+                    nfe_chave: q.nfe_chave || q.chave_acesso,
+                    chave_acesso: q.chave_acesso || q.nfe_chave,
                     nfe_numero: q.nfe_numero,
+                    serie_nfe: q.serie_nfe,
                     danfe_url: q.danfe_url,
                     xml_url: q.xml_url,
+                    xml_conteudo: q.xml_conteudo,
+                    protocolo_autorizacao: q.protocolo_autorizacao || q.protocolo_nfe,
+                    protocolo_nfe: q.protocolo_nfe || q.protocolo_autorizacao,
                     mensagem_erro_nfe: q.mensagem_erro_nfe,
                     nfe_emitida_em: q.nfe_emitida_em,
                     items: (q.cotacao_itens || []).map((it, idx) => ({

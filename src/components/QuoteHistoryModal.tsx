@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Quote, Client } from '../types';
 import { formatCurrency, formatSafeDate } from '../utils/calculator';
 import EmissaoNfeModal from './EmissaoNfeModal';
-import { abrirDanfeEmNovaAba } from '../services/nfeService';
+import { abrirDanfeEmNovaAba, obterOuBaixarXmlNfe } from '../services/nfeService';
 import { 
   History, 
   Search, 
@@ -390,6 +390,22 @@ export default function QuoteHistoryModal({
                           >
                             <Printer className="w-3.5 h-3.5" />
                             <span>Imprimir DANFE</span>
+                          </button>
+
+                          <button
+                            onClick={async () => {
+                              const resolvedClient = clients.find(c => 
+                                (quote.clientId && c.id === quote.clientId) || 
+                                (quote.clientDocument && c.document && c.document.replace(/\D/g, '') === quote.clientDocument.replace(/\D/g, '')) ||
+                                (c.name || (c as any).nome) === quote.clientName
+                              );
+                              await obterOuBaixarXmlNfe(quote, resolvedClient);
+                            }}
+                            className="px-3 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors"
+                            title="Baixar arquivo XML autorizado pela SEFAZ (NFe[CHAVE].xml)"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                            <span>Baixar XML</span>
                           </button>
 
                           <button

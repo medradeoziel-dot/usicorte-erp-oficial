@@ -228,10 +228,14 @@ export interface SupabaseCotacao {
   // Módulo Fiscal (NF-e):
   status_nfe?: string;
   nfe_chave?: string;
+  chave_acesso?: string;
   nfe_numero?: string;
   serie_nfe?: string;
+  protocolo_autorizacao?: string;
+  protocolo_nfe?: string;
   danfe_url?: string;
   xml_url?: string;
+  xml_conteudo?: string;
   mensagem_erro_nfe?: string;
   nfe_emitida_em?: string;
 }
@@ -941,10 +945,15 @@ export async function saveCotacaoDb(quote: Quote): Promise<{ data: any; error: a
       valor_total: quote.grandTotal || quote.subtotalTotal || 0,
       cliente_id: quote.clientId && isUuid(quote.clientId) ? quote.clientId : undefined,
       status_nfe: quote.status_nfe || 'Pendente',
-      nfe_chave: quote.nfe_chave,
+      nfe_chave: quote.nfe_chave || quote.chave_acesso,
+      chave_acesso: quote.chave_acesso || quote.nfe_chave,
       nfe_numero: quote.nfe_numero,
+      serie_nfe: quote.serie_nfe,
+      protocolo_autorizacao: quote.protocolo_autorizacao || quote.protocolo_nfe,
+      protocolo_nfe: quote.protocolo_nfe || quote.protocolo_autorizacao,
       danfe_url: quote.danfe_url,
       xml_url: quote.xml_url,
+      xml_conteudo: quote.xml_conteudo,
       mensagem_erro_nfe: quote.mensagem_erro_nfe,
       nfe_emitida_em: quote.nfe_emitida_em
     };
@@ -1174,10 +1183,14 @@ export async function updateCotacaoNfeStatusDb(
   payload: {
     status_nfe: 'Pendente' | 'Processando' | 'Emitida' | 'Erro' | string;
     nfe_chave?: string;
+    chave_acesso?: string;
     nfe_numero?: string;
     serie_nfe?: string;
+    protocolo_autorizacao?: string;
+    protocolo_nfe?: string;
     danfe_url?: string;
     xml_url?: string;
+    xml_conteudo?: string;
     mensagem_erro_nfe?: string | null;
     nfe_emitida_em?: string;
   }
@@ -1185,17 +1198,39 @@ export async function updateCotacaoNfeStatusDb(
   try {
     if (!cotacaoIdOrNumber) return { success: false, error: 'Identificador não fornecido' };
 
+    const chaveFinal = payload.chave_acesso || payload.nfe_chave;
+    const protoFinal = payload.protocolo_autorizacao || payload.protocolo_nfe;
+
     const updateObj: any = {
       status_nfe: payload.status_nfe,
       updated_at: new Date().toISOString()
     };
-    if (payload.nfe_chave !== undefined) updateObj.nfe_chave = payload.nfe_chave;
+    if (chaveFinal !== undefined) {
+      updateObj.nfe_chave = chaveFinal;
+      updateObj.chave_acesso = chaveFinal;
+    }
     if (payload.nfe_numero !== undefined) updateObj.nfe_numero = payload.nfe_numero;
     if (payload.serie_nfe !== undefined) updateObj.serie_nfe = payload.serie_nfe;
+    if (protoFinal !== undefined) {
+      updateObj.protocolo_autorizacao = protoFinal;
+      updateObj.protocolo_nfe = protoFinal;
+    }
     if (payload.danfe_url !== undefined) updateObj.danfe_url = payload.danfe_url;
     if (payload.xml_url !== undefined) updateObj.xml_url = payload.xml_url;
+    if (payload.xml_conteudo !== undefined) updateObj.xml_conteudo = payload.xml_conteudo;
     if (payload.mensagem_erro_nfe !== undefined) updateObj.mensagem_erro_nfe = payload.mensagem_erro_nfe;
     if (payload.nfe_emitida_em !== undefined) updateObj.nfe_emitida_em = payload.nfe_emitida_em;
+
+    // Persistência local garantida como redundância segura
+    try {
+      const cleanChave = (chaveFinal || '').replace(/\D/g, '');
+      if (cleanChave && payload.xml_conteudo) {
+        localStorage.setItem(`usicorte_nfe_xml_${cleanChave}`, payload.xml_conteudo);
+      }
+      if (payload.xml_conteudo) {
+        localStorage.setItem(`usicorte_nfe_xml_cot_${cotacaoIdOrNumber}`, payload.xml_conteudo);
+      }
+    } catch {}
 
     const isIdUuid = isUuid(cotacaoIdOrNumber);
     let query = db.from('cotacoes').update(updateObj);
@@ -1206,7 +1241,32 @@ export async function updateCotacaoNfeStatusDb(
       query = query.or(`id.eq.${cotacaoIdOrNumber},numero.eq.${cotacaoIdOrNumber}`);
     }
 
-    const { error } = await query;
+    let { error } = await query;
+
+    // Se o banco acusar que alguma coluna nova não existe na tabela (ex: 42703), tenta sem ela
+    if (error && (error.code === '42703' || error.message?.includes('does not exist'))) {
+      const safeFallback: any = {
+        status_nfe: payload.status_nfe,
+        updated_at: new Date().toISOString()
+      };
+      if (chaveFinal !== undefined) safeFallback.nfe_chave = chaveFinal;
+      if (payload.nfe_numero !== undefined) safeFallback.nfe_numero = payload.nfe_numero;
+      if (payload.serie_nfe !== undefined) safeFallback.serie_nfe = payload.serie_nfe;
+      if (payload.danfe_url !== undefined) safeFallback.danfe_url = payload.danfe_url;
+      if (payload.xml_url !== undefined) safeFallback.xml_url = payload.xml_url;
+      if (payload.mensagem_erro_nfe !== undefined) safeFallback.mensagem_erro_nfe = payload.mensagem_erro_nfe;
+      if (payload.nfe_emitida_em !== undefined) safeFallback.nfe_emitida_em = payload.nfe_emitida_em;
+
+      let retryQuery = db.from('cotacoes').update(safeFallback);
+      if (isIdUuid) {
+        retryQuery = retryQuery.eq('id', cotacaoIdOrNumber);
+      } else {
+        retryQuery = retryQuery.or(`id.eq.${cotacaoIdOrNumber},numero.eq.${cotacaoIdOrNumber}`);
+      }
+      const retry = await retryQuery;
+      error = retry.error;
+    }
+
     if (error) {
       console.warn('Aviso ao atualizar status_nfe no Supabase:', error.message);
       return { success: false, error };
