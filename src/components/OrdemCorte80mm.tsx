@@ -202,7 +202,25 @@ export function gerarHtmlCupom80mm(dadosOrdem: any): string {
  * Garante que o navegador imprima estritamente no rolo térmico sem assumir folha A4
  */
 export function imprimirCupom80mm(dadosOrdem: any, onAfterPrint?: () => void): void {
-  const janela = window.open('', '_blank', 'width=400,height=600');
+  const larguraTela = window.screen.availWidth || 1024;
+  const alturaTela = window.screen.availHeight || 768;
+
+  const janela = window.open(
+    '',
+    '_blank',
+    `width=${larguraTela},height=${alturaTela},top=0,left=0,resizable=yes,scrollbars=yes`
+  );
+
+  if (janela) {
+    try {
+      janela.moveTo(0, 0);
+      janela.resizeTo(screen.width, screen.height);
+      janela.focus();
+    } catch (e) {
+      console.warn('Erro ao posicionar/maximizar janela:', e);
+    }
+  }
+
   const corpoHtml = gerarHtmlCupom80mm(dadosOrdem);
   const numCotacao = dadosOrdem?.quoteNumber || dadosOrdem?.numeroPedido || dadosOrdem?.id || '';
 
@@ -218,12 +236,12 @@ export function imprimirCupom80mm(dadosOrdem: any, onAfterPrint?: () => void): v
             margin: 0mm;
           }
           html, body {
-            width: 80mm;
             margin: 0;
-            padding: 4px;
+            padding: 0;
+            min-height: 100vh;
+            background-color: #f1f5f9;
             font-family: monospace, sans-serif;
             color: #000;
-            background: #fff;
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
           }
@@ -231,6 +249,25 @@ export function imprimirCupom80mm(dadosOrdem: any, onAfterPrint?: () => void): v
             box-sizing: border-box;
             color: #000 !important;
             border-color: #000 !important;
+          }
+          /* Contêiner do cupom térmico centralizado na tela maximizada */
+          .cupom-tela-wrapper {
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            min-height: 100vh;
+            width: 100%;
+            padding: 24px 16px;
+            box-sizing: border-box;
+          }
+          .cupom-card {
+            width: 80mm;
+            max-width: 80mm;
+            background: #ffffff;
+            padding: 4mm;
+            border-radius: 4px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            box-sizing: border-box;
           }
           .hr-line {
             border-bottom: 2px dashed #000;
@@ -280,11 +317,30 @@ export function imprimirCupom80mm(dadosOrdem: any, onAfterPrint?: () => void): v
               size: 80mm auto;
               margin: 0mm;
             }
-            body {
+            html, body {
+              width: 80mm !important;
+              max-width: 80mm !important;
+              min-height: auto !important;
+              margin: 0 !important;
+              padding: 0 !important;
+              background: #ffffff !important;
+            }
+            .cupom-tela-wrapper {
+              display: block !important;
+              width: 80mm !important;
+              max-width: 80mm !important;
+              min-height: auto !important;
+              padding: 0 !important;
+              margin: 0 !important;
+            }
+            .cupom-card {
               width: 80mm !important;
               max-width: 80mm !important;
               margin: 0 !important;
               padding: 3mm !important;
+              box-shadow: none !important;
+              border: none !important;
+              border-radius: 0 !important;
             }
             .card-item {
               page-break-inside: avoid !important;
@@ -298,20 +354,33 @@ export function imprimirCupom80mm(dadosOrdem: any, onAfterPrint?: () => void): v
         </style>
       </head>
       <body>
-        ${corpoHtml}
+        <div class="cupom-tela-wrapper">
+          <div class="cupom-card">
+            ${corpoHtml}
+          </div>
+        </div>
         <script>
           function dispararImpressao() {
-            window.focus();
-            window.print();
+            try {
+              window.moveTo(0, 0);
+              window.resizeTo(screen.width, screen.height);
+              window.focus();
+            } catch(e) {}
+
+            // Garante que a janela já esteja totalmente expandida e com o layout pronto antes do diálogo de impressão
             setTimeout(function() {
-              try { window.close(); } catch(e) {}
-            }, 600);
+              window.focus();
+              window.print();
+              setTimeout(function() {
+                try { window.close(); } catch(e) {}
+              }, 800);
+            }, 250);
           }
           if (document.readyState === 'complete') {
-            setTimeout(dispararImpressao, 150);
+            dispararImpressao();
           } else {
             window.onload = function() {
-              setTimeout(dispararImpressao, 100);
+              dispararImpressao();
             };
           }
         </script>
