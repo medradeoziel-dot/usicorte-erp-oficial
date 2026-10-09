@@ -1079,21 +1079,19 @@ export function gerarDanfeHtml(
     <div class="box">
       <table>
         <tr>
-          <td style="width: 44%; padding: 6px; border-right: 1px solid #000; vertical-align: middle;">
-            <table style="width: 100%; border-collapse: collapse; margin: 0; padding: 0;">
-              <tr>
-                <td style="width: 80px; vertical-align: middle; text-align: center; padding-right: 8px;">
-                  <img src="/logo-usicorte.png" alt="Logo" style="max-height: 48px; height: 48px; width: auto; object-fit: contain; display: block; margin: 0 auto;" onerror="this.style.display='none'" />
-                </td>
-                <td style="vertical-align: middle; text-align: left;">
-                  <div style="font-size: 10.5px; font-weight: 900; text-transform: uppercase; color: #000; line-height: 1.2;">${emitente.razaoSocial}</div>
-                  <div style="font-size: 9px; font-weight: 800; color: #b91c1c; text-transform: uppercase; margin-top: 1px; line-height: 1.2;">${emitente.nomeFantasia}</div>
-                  <div style="font-size: 7px; color: #333; margin-top: 3px; line-height: 1.2; word-break: break-word;">
-                    ${montarEnderecoSemDuplicacao(emitente.endereco, emitente.numero, (emitente as any).complemento, emitente.bairro)}${emitente.cidade && emitente.uf ? ` • ${emitente.cidade}/${emitente.uf}` : ''}${emitente.cep ? ` • CEP: ${emitente.cep}` : ''}${emitente.telefone ? ` • Tel: ${emitente.telefone}` : ''}${emitente.email ? ` • E-mail: ${emitente.email}` : ''}
-                  </div>
-                </td>
-              </tr>
-            </table>
+          <td style="width: 44%; padding: 6px; border-right: 1px solid #000; vertical-align: middle; text-align: center;">
+            <div style="text-align: center; margin-bottom: 4px;">
+              <img src="/logo-usicorte.png" alt="Logo UsiCorte Metais" style="max-height: 38px; height: 36px; width: auto; margin: 0 auto; display: block;" onerror="this.style.display='none'" />
+            </div>
+            <div style="font-size: 11px; font-weight: 900; text-transform: uppercase; color: #000; line-height: 1.2;">L. M. BANZATTO METAIS</div>
+            <div style="font-size: 9.5px; font-weight: 800; color: #b91c1c; text-transform: uppercase; margin-top: 2px; line-height: 1.2;">USICORTE METAIS</div>
+            <div style="margin: 6px 0;"></div>
+            <div style="font-size: 7.5px; color: #222; line-height: 1.35; text-align: center;">
+              <div>RUA CORONEL INON CESAR PIMENTEL, 3-41</div>
+              <div>PARQUE PAULISTA</div>
+              <div>BAURU - SP - CEP: 17031-350</div>
+              <div style="font-weight: 600; color: #000;">Fone: (14) 99880-9362 • Email: financeiro@usicorte.com.br</div>
+            </div>
           </td>
           <td style="width: 22%; text-align: center; padding: 4px; border-right: 1px solid #000; vertical-align: middle; background: #fafafa;">
             <div style="font-size: 14px; font-weight: 900; letter-spacing: 1px;">DANFE</div>

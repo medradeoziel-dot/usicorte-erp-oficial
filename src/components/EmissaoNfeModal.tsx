@@ -13,6 +13,7 @@ import {
 import { updateCotacaoNfeStatusDb } from '../lib/db';
 import { fetchCompanyData, CompanyFiscalData, DEFAULT_COMPANY_DATA } from '../services/companyService';
 import { formatCurrency } from '../utils/calculator';
+import Logo from './Logo';
 import { 
   Building2, 
   User, 
@@ -624,28 +625,23 @@ export default function EmissaoNfeModal({
 
                 {/* 1. Cabeçalho DANFE */}
                 <div className="grid grid-cols-12 border border-black mb-1.5">
-                  {/* Emitente */}
-                  <div className="col-span-6 p-2 border-r border-black flex items-center gap-2.5 overflow-hidden">
-                    <div className="flex items-center justify-center shrink-0 w-20 h-12">
-                      <img 
-                        src="/logo-usicorte.png" 
-                        alt="Logo UsiCorte" 
-                        className="max-h-12 h-12 w-auto object-contain shrink-0"
-                        onError={(e) => {
-                          (e.currentTarget as HTMLElement).style.display = 'none';
-                        }}
-                      />
+                  {/* Emitente (Prévia Centralizada DANFE) */}
+                  <div className="col-span-6 p-2 border-r border-black flex flex-col items-center justify-center text-center overflow-hidden">
+                    <div className="flex items-center justify-center w-full mb-1">
+                      <Logo variant="print" className="h-8.5 w-auto max-h-10 mx-auto" />
                     </div>
-                    <div className="flex-1 min-w-0 flex flex-col justify-center">
-                      <h2 className="font-extrabold text-[11px] leading-tight uppercase text-black truncate">
-                        {company.corporateName || company.razao_social || 'L. M. BANZATTO METAIS'}
-                      </h2>
-                      <h3 className="font-bold text-[9px] text-red-700 leading-snug uppercase mt-0.5 truncate">
-                        {company.tradeName || company.nome_fantasia || 'USICORTE METAIS'}
-                      </h3>
-                      <p className="text-[7.5px] text-gray-700 mt-1 leading-tight truncate">
-                        {montarEnderecoSemDuplicacao(company.street || company.endereco, company.number || company.numero, company.complement || (company as any).complemento, company.neighborhood || company.bairro)} • {company.city || company.cidade}/{company.state || company.uf || 'SP'} • CEP: {company.cep || '17031-190'} • Tel: {company.phone || company.telefone || '(14) 3203-2000'} • {company.email || 'contato@usicorte.com.br'}
-                      </p>
+                    <h2 className="font-extrabold text-[11px] leading-tight uppercase text-black">
+                      L. M. BANZATTO METAIS
+                    </h2>
+                    <h3 className="font-bold text-[9.5px] text-red-700 leading-snug uppercase mt-0.5">
+                      USICORTE METAIS
+                    </h3>
+                    <div className="my-1.5 w-full" />
+                    <div className="text-[7.5px] leading-snug text-gray-800 font-normal space-y-0.5 w-full">
+                      <div>RUA CORONEL INON CESAR PIMENTEL, 3-41</div>
+                      <div>PARQUE PAULISTA</div>
+                      <div>BAURU - SP - CEP: 17031-350</div>
+                      <div className="font-medium text-gray-900">Fone: (14) 99880-9362 • Email: financeiro@usicorte.com.br</div>
                     </div>
                   </div>
 

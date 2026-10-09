@@ -439,45 +439,32 @@ export default function DanfeEspelhoA4({
             2. CABEÇALHO DA EMISSÃO
             ========================================================================= */}
         <div className="grid grid-cols-12 border border-black mb-1 overflow-hidden">
-          {/* Coluna 1: Emitente & Logo */}
-          <div className="col-span-5 p-2 border-r border-black flex items-center gap-2.5 overflow-hidden">
-            {/* LADO ESQUERDO: Imagem do Logo com altura máxima fixa (height: 48px / max-h-12), centralizada verticalmente */}
-            <div className="flex items-center justify-center shrink-0 w-24 h-12">
-              <img 
-                src="/logo-usicorte.png" 
-                alt="Logo UsiCorte Metais" 
-                className="max-h-12 h-12 w-auto object-contain shrink-0"
-                onError={(e) => {
-                  const target = e.currentTarget;
-                  target.style.display = 'none';
-                  const fallback = target.nextElementSibling as HTMLElement;
-                  if (fallback) fallback.style.display = 'block';
-                }}
-              />
-              <div style={{ display: 'none' }} className="w-full">
-                <Logo variant="print" className="max-h-12 h-12 w-auto" />
-              </div>
+          {/* Coluna 1: Emitente & Logo (Hierarquia Centralizada Exclusiva do DANFE) */}
+          <div className="col-span-5 p-2 border-r border-black flex flex-col items-center justify-center text-center overflow-hidden">
+            {/* 1. Logo Usicorte Metais (com 'Usi' em preto e 'corte' em vermelho) perfeitamente centralizado no topo */}
+            <div className="flex items-center justify-center w-full mb-1">
+              <Logo variant="print" className="h-8.5 w-auto max-h-10 mx-auto" />
             </div>
 
-            {/* LADO DIREITO (Dados do Emitente) */}
-            <div className="flex-1 min-w-0 flex flex-col justify-center">
-              {/* Linha 1: L. M. BANZATTO METAIS (Razão Social em negrito e destaque, fonte de tamanho adequado) */}
-              <h1 className="font-black text-[10.5px] uppercase leading-tight tracking-tight text-black truncate">
-                {emitente.razaoSocial}
-              </h1>
+            {/* 2. Razão Social em negrito: "L. M. BANZATTO METAIS" (caixa alta, fonte destaque) */}
+            <h1 className="font-extrabold text-[11px] sm:text-[11.5px] uppercase tracking-tight text-black leading-tight">
+              L. M. BANZATTO METAIS
+            </h1>
 
-              {/* Linha 2: USICORTE METAIS (Nome Fantasia com fonte ligeiramente menor e sem sobrepor a linha de cima) */}
-              <h2 className="font-bold text-[9px] text-red-700 uppercase leading-snug mt-0.5 truncate">
-                {emitente.nomeFantasia}
-              </h2>
+            {/* 3. Nome Fantasia em vermelho e negrito: "USICORTE METAIS" (caixa alta, ligeiramente menor) */}
+            <h2 className="font-bold text-[9.5px] text-red-700 uppercase leading-snug tracking-normal mt-0.5">
+              USICORTE METAIS
+            </h2>
 
-              {/* Linha 3 em diante: Endereço completo formatado em uma única linha limpa (Rua, Número, Bairro, CEP, Telefone e E-mail) */}
-              <p 
-                className="text-[7px] text-gray-800 leading-tight mt-1 truncate print:whitespace-normal print:overflow-visible"
-                title={enderecoEmitenteLinhaUnica}
-              >
-                {enderecoEmitenteLinhaUnica}
-              </p>
+            {/* [ESPAÇAMENTO VERTICAL ADEQUADO ENTRE O NOME FANTASIA E O ENDEREÇO] */}
+            <div className="my-1.5 w-full" />
+
+            {/* 4. BLOCO DO ENDEREÇO E CONTATO (FONTE MENOR E UNIFORME, CENTRALIZADO) */}
+            <div className="text-[7.5px] leading-snug text-gray-800 font-normal space-y-0.5 w-full">
+              <div>RUA CORONEL INON CESAR PIMENTEL, 3-41</div>
+              <div>PARQUE PAULISTA</div>
+              <div>BAURU - SP - CEP: 17031-350</div>
+              <div className="text-gray-900 font-medium">Fone: (14) 99880-9362 • Email: financeiro@usicorte.com.br</div>
             </div>
           </div>
 
