@@ -175,56 +175,45 @@
   body.print-empresa .secao-proposta { display: none !important; }
   body.print-empresa .secao-proposta-resumida { display: block !important; }
 
-  /* Modo Corte: */
-  body.print-corte .secao-etiqueta { display: none !important; }
-  body.print-corte .secao-pedido { display: none !important; }
-  body.print-corte .secao-proposta { display: none !important; }
-  body.print-corte .secao-proposta-resumida { display: none !important; }
-  body.print-corte .secao-corte-80mm { display: none !important; }
-  body.print-corte .secao-corte { display: block !important; }
-
-  /* Modo Corte Térmico 80mm (Cupom): */
-  body.print-corte-80 {
-    width: 80mm !important;
-    max-width: 80mm !important;
-    margin: 0 !important;
-    padding: 3mm !important;
-    box-sizing: border-box !important;
-    background: #ffffff !important;
-    color: #000000 !important;
-  }
-  body.print-corte-80 #print-area,
-  body.print-corte-80 #container-impressao,
-  body.print-corte-80 #container-impressao-vendas,
-  body.print-corte-80 .print-container,
-  body.print-corte-80 .secao-corte-80mm {
+  /* Modo Corte A4 (Ordem de Corte Produção): Ocupa toda a folha A4 em modo paisagem/horizontal (100% largura) */
+  body.print-corte {
     width: 100% !important;
-    max-width: 80mm !important;
-    margin: 0 auto !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  body.print-corte #print-area,
+  body.print-corte #container-impressao,
+  body.print-corte #container-impressao-vendas,
+  body.print-corte .print-container,
+  body.print-corte .secao-corte,
+  body.print-corte #doc-corte {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 100% !important;
+    margin: 0 !important;
     padding: 0 !important;
     box-sizing: border-box !important;
     display: block !important;
     visibility: visible !important;
   }
-  body.print-corte-80 * {
-    color: #000000 !important;
-    border-color: #000000 !important;
-    -webkit-print-color-adjust: exact !important;
-    print-color-adjust: exact !important;
+  body.print-corte .secao-etiqueta,
+  body.print-corte .secao-pedido,
+  body.print-corte .secao-proposta,
+  body.print-corte .secao-proposta-resumida,
+  body.print-corte .secao-corte-80mm {
+    display: none !important;
   }
-  body.print-corte-80 .secao-etiqueta { display: none !important; }
-  body.print-corte-80 .secao-pedido { display: none !important; }
-  body.print-corte-80 .secao-proposta { display: none !important; }
-  body.print-corte-80 .secao-proposta-resumida { display: none !important; }
-  body.print-corte-80 .secao-corte { display: none !important; }
-  body.print-corte-80 .secao-corte-80mm { display: block !important; visibility: visible !important; }
 
-  body.print-pedido .secao-corte-80mm { display: none !important; }
-  body.print-etiqueta .secao-corte-80mm { display: none !important; }
+  /* Oculta cupom térmico 80mm de todas as impressões normais do sistema */
+  body.print-pedido .secao-corte-80mm,
+  body.print-etiqueta .secao-corte-80mm,
   body.print-proposta .secao-corte-80mm,
-  body.print-geral .secao-corte-80mm { display: none !important; }
-  body.print-empresa .secao-corte-80mm { display: none !important; }
-  body.print-fechamento .secao-corte-80mm { display: none !important; }
+  body.print-geral .secao-corte-80mm,
+  body.print-empresa .secao-corte-80mm,
+  body.print-fechamento .secao-corte-80mm {
+    display: none !important;
+  }
 
   /* Modo Fechamento & Extrato de Cotações (Isolado) */
   body.print-fechamento .secao-etiqueta,

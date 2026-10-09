@@ -3175,7 +3175,7 @@ export default function ReportsModule({
            =================================================== */}
       <div
         id="doc-corte"
-        className={`documento-modelo secao-corte bg-white text-slate-900 p-6 rounded-xl shadow-2xl font-sans w-full max-w-4xl mx-auto ${
+        className={`documento-modelo secao-corte bg-white text-slate-900 p-6 rounded-xl shadow-2xl font-sans w-full max-w-4xl print:max-w-none print:w-full print:p-0 mx-auto ${
           activeModel === 'corte' ? 'block' : 'hidden'
         }`}
       >
@@ -3278,8 +3278,14 @@ export default function ReportsModule({
   return (
     <div id="screen-relatorios" className="space-y-6">
 
-      {/* Tamanho de página: A4 RETRATO para todos os modelos, exceto ETIQUETAS e CORTE 80MM */}
-      <style>{activeModel === 'etiqueta-80'
+      {/* Tamanho de página: A4 PAISAGEM para Ordem de Corte A4, auto/5mm para ETIQUETAS, A4 RETRATO para os demais */}
+      <style>{activeModel === 'corte'
+        ? `@page { size: A4 landscape; margin: 8mm; }
+           @media print {
+             html, body, #root, #app-root, main, .print-container { width: 100% !important; max-width: 100% !important; margin: 0 !important; padding: 0 !important; }
+             .documento-modelo.secao-corte, #doc-corte { width: 100% !important; max-width: 100% !important; margin: 0 auto !important; box-shadow: none !important; border: none !important; }
+           }`
+        : activeModel === 'etiqueta-80'
         ? `@page { size: auto; margin: 5mm; }
            @media print {
              .etiqueta-card {
@@ -3290,19 +3296,10 @@ export default function ReportsModule({
                padding: 8px !important;
              }
            }`
-        : activeModel === 'corte-80'
-        ? `@page { size: 80mm auto; margin: 0; }
-           @media print {
-             body, .print-container { width: 80mm !important; max-width: 80mm !important; margin: 0 !important; padding: 3mm !important; box-sizing: border-box !important; }
-             body.print-corte-80, body.print-corte-80 .print-container, body.print-corte-80 .ordem-corte-80mm-root { width: 80mm !important; max-width: 80mm !important; margin: 0 !important; padding: 3mm !important; box-sizing: border-box !important; background: #ffffff !important; color: #000000 !important; }
-             body.print-corte-80 .secao-corte-80mm { width: 100% !important; max-width: 80mm !important; margin: 0 auto !important; padding: 0 !important; box-sizing: border-box !important; }
-             .bloco-item-corte { width: 100% !important; box-sizing: border-box !important; break-inside: avoid !important; page-break-inside: avoid !important; }
-             * { color: #000000 !important; border-color: #000000 !important; }
-           }`
         : `@page { size: A4 portrait; margin: 8mm; }
            @media print {
              html, body { width: 100%; height: 100%; margin: 0; padding: 0; }
-             .documento-modelo:not(.secao-etiqueta):not(.secao-corte-80mm) { width: 100% !important; max-width: 100% !important; margin: 0 auto !important; box-shadow: none !important; border: none !important; border-top: none !important; }
+             .documento-modelo:not(.secao-etiqueta) { width: 100% !important; max-width: 100% !important; margin: 0 auto !important; box-shadow: none !important; border: none !important; border-top: none !important; }
            }`}</style>
 
       {/* Regras de impressão de todos os modelos */}
@@ -3344,17 +3341,15 @@ export default function ReportsModule({
           body.print-corte .tabela-container,
           body.print-corte .screen-header,
           body.print-corte .documento-modelo:not(.secao-corte) { display: none !important; }
-          body.print-corte #doc-corte { display: block !important; box-shadow: none !important; padding: 0 !important; }
-          body.print-corte #doc-corte table { page-break-inside: auto; }
+          body.print-corte #doc-corte { 
+            display: block !important; 
+            box-shadow: none !important; 
+            padding: 0 !important; 
+            width: 100% !important; 
+            max-width: 100% !important; 
+          }
+          body.print-corte #doc-corte table { page-break-inside: auto; width: 100% !important; }
           body.print-corte #doc-corte tr { page-break-inside: avoid; }
-
-          body.print-corte-80 .btn-no-print,
-          body.print-corte-80 .filtros-bar,
-          body.print-corte-80 .tabela-container,
-          body.print-corte-80 .screen-header,
-          body.print-corte-80 .documento-modelo:not(.secao-corte-80mm) { display: none !important; }
-          body.print-corte-80 #doc-corte-80 { display: block !important; box-shadow: none !important; padding: 0 !important; width: 100% !important; max-width: 80mm !important; margin: 0 auto !important; box-sizing: border-box !important; }
-          body.print-corte-80 * { color: #000000 !important; border-color: #000000 !important; }
 
           body.print-pedido .btn-no-print,
           body.print-pedido .filtros-bar,

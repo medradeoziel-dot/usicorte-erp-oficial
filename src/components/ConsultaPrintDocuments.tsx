@@ -152,6 +152,16 @@ export function ConsultaPrintDocuments({ quote, tipo }: ConsultaPrintDocumentsPr
       id="print-area" 
       className="print-area container-impressao-vendas print-container w-full overflow-x-hidden bg-slate-900/60 p-2 sm:p-6 rounded-2xl border border-slate-800 print:bg-transparent print:p-0 print:m-0 print:border-none print:shadow-none print:overflow-visible print:h-auto print:max-h-none"
     >
+      {/* Regra dinâmica de página: A4 Paisagem quando tipo === 'CORTE' */}
+      {tipo === 'CORTE' && (
+        <style>{`
+          @page { size: A4 landscape; margin: 8mm; }
+          @media print {
+            body.print-corte #doc-corte { width: 100% !important; max-width: 100% !important; }
+          }
+        `}</style>
+      )}
+
       {/* ===================================================
            1. GERAL: RELATÓRIO A4 INTEIRO
            =================================================== */}
@@ -646,7 +656,7 @@ export function ConsultaPrintDocuments({ quote, tipo }: ConsultaPrintDocumentsPr
            =================================================== */}
       <div
         id="doc-corte"
-        className={`documento-modelo secao-corte bg-white text-slate-900 p-6 rounded-xl shadow-2xl font-sans w-full max-w-4xl mx-auto ${
+        className={`documento-modelo secao-corte bg-white text-slate-900 p-6 rounded-xl shadow-2xl font-sans w-full max-w-4xl print:max-w-none print:w-full print:p-0 mx-auto ${
           tipo === 'CORTE' ? 'block' : 'hidden'
         }`}
       >

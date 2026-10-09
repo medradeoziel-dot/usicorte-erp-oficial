@@ -10,6 +10,8 @@ export interface OrdemCorte80mmProps {
   quoteNumber?: string;
   data?: string;
   date?: string;
+  operador?: string;
+  operator?: string;
   className?: string;
 }
 
@@ -21,6 +23,26 @@ function escapeHtml(str: any): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+/**
+ * Obtém o nome do operador responsável ativo (do pedido ou utilizador logado no sistema)
+ */
+export function getOperadorResponsavel(dadosOrdem?: any): string {
+  let op = dadosOrdem?.operador || dadosOrdem?.operator || dadosOrdem?.vendedor || dadosOrdem?.responsavel || dadosOrdem?.usuario || '';
+  if (!op && typeof window !== 'undefined') {
+    try {
+      op = sessionStorage.getItem('usuario_logado') || localStorage.getItem('usuario_logado') || '';
+      if (!op) {
+        const perfilStr = sessionStorage.getItem('usuario_perfil');
+        if (perfilStr) {
+          const p = JSON.parse(perfilStr);
+          op = p?.nome || p?.nome_completo || p?.name || '';
+        }
+      }
+    } catch {}
+  }
+  return String(op || '').trim().toUpperCase();
 }
 
 /**
@@ -85,6 +107,7 @@ export function gerarHtmlCupom80mm(dadosOrdem: any): string {
 
   const totalTiposItens = listaItens.length;
   const totalPecas = listaItens.reduce((acc: number, it: any) => acc + (Number(it?.qtd ?? it?.quantity) || 1), 0);
+  const operador = getOperadorResponsavel(dadosOrdem);
 
   const itensHtml = listaItens.length === 0
     ? `
@@ -95,39 +118,62 @@ export function gerarHtmlCupom80mm(dadosOrdem: any): string {
     : listaItens.map((item: any, idx: number) => {
         const numItem = idx + 1;
         const qtd = Number(item?.qtd ?? item?.quantity) || 1;
-        const material = item?.material || item?.constanteNome || item?.constantName || item?.produto || 'MATERIAL';
-        const medidas = formatarMedidasLimpa(item) || item?.medida || item?.dimensions || item?.medidas || '—';
+
+        // Cotação específica do item ou cotação geral da ordem
+        const itemCotacao = (
+          item?.quoteNumber ||
+          item?.numeroPedido ||
+          item?.cotacao ||
+          numCotacao ||
+          'S/N'
+        ).toString().trim();
+        const cotacaoFormatada = itemCotacao.startsWith('#') ? itemCotacao : `#${itemCotacao}`;
+
+        // Cliente específico do item ou cliente geral da ordem
+        const clienteItem = (
+          item?.cliente?.nome ||
+          item?.cliente ||
+          item?.clientName ||
+          item?.client?.name ||
+          item?.empresa ||
+          nomeCliente ||
+          'CLIENTE BALCÃO'
+        ).toString().trim().toUpperCase();
+
+        const medidasLimpa = (formatarMedidasLimpa(item) || item?.medida || item?.dimensions || item?.medidas || '').trim();
         const forma = resolverFormaItem(item);
+        const medidasForma = medidasLimpa && medidasLimpa !== '—'
+          ? `${medidasLimpa} - ${forma}`
+          : forma;
+
         const obsEspecifica = getObservacaoEspecificaItem(item);
-        const obsCod = obsEspecifica || item?.observacao || item?.notes || item?.descricao || item?.description || '-';
+        const baseObs = obsEspecifica || item?.observacao || item?.notes || item?.descricao || item?.description || item?.codigo || item?.code || '';
+        const material = (item?.material || item?.constanteNome || item?.constantName || item?.produto || '').trim();
+        const descInf = baseObs
+          ? (material && material !== 'MATERIAL' && !baseObs.toUpperCase().includes(material.toUpperCase()) ? `${material} - ${baseObs}` : baseObs)
+          : (material && material !== 'MATERIAL' ? material : '-');
 
         return `
           <div class="card-item">
-            <div class="flex-between" style="border-bottom: 2px solid #000; padding-bottom: 4px; margin-bottom: 6px; font-weight: 900;">
-              <div style="display: flex; align-items: center; gap: 6px;">
-                <span style="display: inline-block; width: 14px; height: 14px; border: 2px solid #000; background: #fff; flex-shrink: 0;"></span>
-                <span style="font-size: 13px; font-weight: 900;">CORTADO</span>
-                <span style="margin: 0 2px;">|</span>
-                <span style="font-size: 14px; font-weight: 900;">ITEM #${numItem}</span>
-              </div>
-              <span style="font-size: 14px; font-weight: 900; text-align: right; text-transform: uppercase;">QTD: ${qtd} PÇS</span>
+            <!-- TOPO DO QUADRADO DO ITEM COM A COTAÇÃO -->
+            <div class="flex-between" style="border-bottom: 2px solid #000; padding-bottom: 4px; margin-bottom: 6px; font-weight: 900; font-size: 12px; line-height: 1.2;">
+              <span style="font-size: 12px; font-weight: 900; font-family: monospace;">COTAÇÃO: ${escapeHtml(cotacaoFormatada)}</span>
+              <span style="font-size: 12px; font-weight: 900; text-transform: uppercase;">${totalTiposItens > 1 ? `ITEM #${numItem} | ` : ''}QTD: ${qtd} PÇS</span>
             </div>
-            <div style="display: flex; flex-direction: column; gap: 4px; width: 100%;">
+
+            <!-- CAMPOS INTERNOS DO QUADRADO DO ITEM (ALINHADOS À ESQUERDA SEM ESPAÇAMENTO EXCESSIVO) -->
+            <div style="display: flex; flex-direction: column; gap: 3px; width: 100%;">
               <div class="row-field">
-                <span class="field-label">MATERIAL:</span>
-                <span class="field-value">${escapeHtml(material)}</span>
+                <span class="field-label">CLIENTE:</span>
+                <span class="field-value">${escapeHtml(clienteItem)}</span>
               </div>
               <div class="row-field">
                 <span class="field-label">MEDIDAS:</span>
-                <span class="field-value" style="font-family: monospace;">${escapeHtml(medidas)}</span>
+                <span class="field-value" style="font-family: monospace;">${escapeHtml(medidasForma)}</span>
               </div>
               <div class="row-field">
-                <span class="field-label">FORMA:</span>
-                <span class="field-value">${escapeHtml(forma)}</span>
-              </div>
-              <div class="row-field">
-                <span class="field-label">OBS/COD:</span>
-                <span class="field-value">${escapeHtml(obsCod)}</span>
+                <span class="field-label">DESC / INF:</span>
+                <span class="field-value">${escapeHtml(descInf)}</span>
               </div>
             </div>
           </div>
@@ -136,7 +182,7 @@ export function gerarHtmlCupom80mm(dadosOrdem: any): string {
 
   return `
     <div style="width: 100%; max-width: 80mm; margin: 0 auto; box-sizing: border-box; text-align: left;">
-      <!-- CABEÇALHO COMPACTO -->
+      <!-- CABEÇALHO SUPERIOR (TOPO DO CUPOM): Apenas título, empresa e Data/Hora -->
       <header style="text-align: center; width: 100%; margin-bottom: 4px;">
         <h1 style="font-size: 18px; font-weight: 900; margin: 0; padding: 0; text-align: center; text-transform: uppercase; letter-spacing: 0.5px;">
           === ORDEM DE CORTE ===
@@ -148,14 +194,6 @@ export function gerarHtmlCupom80mm(dadosOrdem: any): string {
         <div class="hr-line"></div>
 
         <div style="width: 100%; display: flex; flex-direction: column; gap: 4px; text-align: left;">
-          <div class="flex-between" style="align-items: flex-start;">
-            <span style="font-weight: bold; min-width: 80px; font-size: 13px;">CLIENTE:</span>
-            <span style="font-weight: 900; font-size: 14px; text-align: right; flex: 1; text-transform: uppercase; word-break: break-word;">${escapeHtml(nomeCliente)}</span>
-          </div>
-          <div class="flex-between" style="align-items: center;">
-            <span style="font-weight: bold; min-width: 80px; font-size: 13px;">COTAÇÃO:</span>
-            <span style="font-weight: 900; font-size: 14px; text-align: right; flex: 1; font-family: monospace;">#${escapeHtml(numCotacao)}</span>
-          </div>
           <div class="flex-between" style="align-items: center;">
             <span style="font-weight: bold; min-width: 80px; font-size: 13px;">DATA/HORA:</span>
             <span style="font-weight: 900; font-size: 13px; text-align: right; flex: 1;">${escapeHtml(dataHoraImpressao)}</span>
@@ -170,7 +208,7 @@ export function gerarHtmlCupom80mm(dadosOrdem: any): string {
         ${itensHtml}
       </main>
 
-      <!-- RODAPÉ DO CUPOM -->
+      <!-- RESUMO E IDENTIFICAÇÃO DO OPERADOR (SEM RODAPÉ FINAL DE ASSINATURA) -->
       <footer style="width: 100%; margin-top: 4px; page-break-inside: avoid; break-inside: avoid;">
         <div class="hr-line"></div>
 
@@ -179,18 +217,15 @@ export function gerarHtmlCupom80mm(dadosOrdem: any): string {
           <span>TOTAL: ${totalPecas} ${totalPecas === 1 ? 'PEÇA' : 'PEÇAS'}</span>
         </div>
 
-        <div style="width: 100%; margin-top: 10px; margin-bottom: 12px;">
-          <div style="font-size: 13px; font-weight: 900; text-transform: uppercase; margin-bottom: 4px;">
-            VISTO DO OPERADOR:
-          </div>
-          <div style="border-bottom: 2px solid #000; width: 100%; margin-top: 22px; margin-bottom: 4px;"></div>
-        </div>
+        <div class="hr-line"></div>
 
-        <div style="text-align: center; font-size: 16px; font-weight: 900; text-transform: uppercase; letter-spacing: 1.5px; margin-top: 10px;">
-          USICORTE METAIS
-        </div>
-        <div style="text-align: center; font-size: 11px; font-weight: 900; text-transform: uppercase; margin-top: 2px;">
-          CORTE CNC & USINAGEM
+        <div style="width: 100%; margin-top: 6px; margin-bottom: 6px;">
+          <div class="flex-between" style="align-items: center; font-size: 13px; font-weight: 900; text-transform: uppercase;">
+            <span style="font-weight: bold; min-width: 80px;">OPERADOR:</span>
+            <span style="font-weight: 900; font-size: 13px; text-align: right; flex: 1;">
+              ${operador ? escapeHtml(operador) : '___________________________'}
+            </span>
+          </div>
         </div>
       </footer>
     </div>
@@ -292,23 +327,25 @@ export function imprimirCupom80mm(dadosOrdem: any, onAfterPrint?: () => void): v
           }
           .row-field {
             display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
+            justify-content: flex-start;
+            align-items: baseline;
+            gap: 6px;
             width: 100%;
-            padding: 1px 0;
+            padding: 1.5px 0;
             line-height: 1.3;
+            text-align: left;
           }
           .field-label {
             font-weight: bold;
-            min-width: 90px;
+            font-size: 12.5px;
             flex-shrink: 0;
-            font-size: 13px;
+            white-space: nowrap;
           }
           .field-value {
             font-weight: 900;
-            text-align: right;
+            text-align: left;
             flex: 1;
-            font-size: 14px;
+            font-size: 13px;
             word-break: break-word;
             text-transform: uppercase;
           }
@@ -448,6 +485,8 @@ export default function OrdemCorte80mm({
   quoteNumber,
   data,
   date,
+  operador: propOperador,
+  operator: propOperator,
   className = ''
 }: OrdemCorte80mmProps) {
   const listaItens = itens || items || [];
@@ -463,6 +502,7 @@ export default function OrdemCorte80mm({
   // Totais calculados
   const totalTiposItens = listaItens.length;
   const totalPecas = listaItens.reduce((acc, it) => acc + (Number(it?.qtd ?? it?.quantity) || 1), 0);
+  const operador = (propOperador || propOperator || getOperadorResponsavel({ quoteNumber, numeroPedido })).trim();
 
   return (
     <div
@@ -480,55 +520,6 @@ export default function OrdemCorte80mm({
         printColorAdjust: 'exact'
       }}
     >
-      {/* Estilos específicos de impressão incorporados diretamente no cupom */}
-      <style>{`
-        @media print {
-          @page {
-            size: 80mm auto;
-            margin: 0;
-          }
-          body, .print-container {
-            width: 80mm !important;
-            max-width: 80mm !important;
-            margin: 0 !important;
-            padding: 3mm !important;
-            box-sizing: border-box !important;
-            background: #ffffff !important;
-            color: #000000 !important;
-          }
-          body.print-corte-80,
-          body.print-corte-80 .print-container,
-          body.print-corte-80 .ordem-corte-80mm-root {
-            width: 80mm !important;
-            max-width: 80mm !important;
-            margin: 0 !important;
-            padding: 3mm !important;
-            box-sizing: border-box !important;
-            background: #ffffff !important;
-            color: #000000 !important;
-          }
-          * {
-            color: #000000 !important;
-            border-color: #000000 !important;
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
-          }
-          .ordem-corte-80mm-root {
-            width: 100% !important;
-            max-width: 80mm !important;
-            margin: 0 auto !important;
-            padding: 0 !important;
-            box-sizing: border-box !important;
-          }
-          .bloco-item-corte {
-            width: 100% !important;
-            box-sizing: border-box !important;
-            page-break-inside: avoid !important;
-            break-inside: avoid !important;
-          }
-        }
-      `}</style>
-
       {/* Botão de Impressão Direta em Janela Isolada (Visível apenas em tela / Oculto na impressão) */}
       <div className="w-full mb-3 print:hidden no-print">
         <button
@@ -539,6 +530,7 @@ export default function OrdemCorte80mm({
               cliente: nomeCliente,
               numeroPedido: numCotacao,
               data: dataRef,
+              operador: operador,
             })
           }
           className="w-full py-2.5 px-3 bg-black hover:bg-neutral-800 text-white font-mono font-bold text-xs rounded uppercase tracking-wider flex items-center justify-center gap-2 shadow-md cursor-pointer transition-all border border-black"
@@ -550,7 +542,7 @@ export default function OrdemCorte80mm({
       </div>
 
       {/* =========================================================================
-          1. CABEÇALHO COMPACTO (CUPOM TÉRMICO 80MM)
+          1. CABEÇALHO COMPACTO (CUPOM TÉRMICO 80MM): Apenas título, marca e Data/Hora
           ========================================================================= */}
       <header className="w-full text-center pb-1">
         <h1 
@@ -569,26 +561,8 @@ export default function OrdemCorte80mm({
         {/* Linha Divisória de Largura Total */}
         <div className="w-full border-b-2 border-dashed border-black my-2" />
 
-        {/* Dados do Pedido / Destino com Flexbox de Largura Total */}
+        {/* Dados de Data/Hora (Cliente e Cotação foram transferidos para os cards dos itens) */}
         <div className="w-full text-left space-y-1.5" style={{ color: '#000000' }}>
-          <div className="flex justify-between items-start w-full leading-snug">
-            <span className="font-bold min-w-[80px] shrink-0 text-black" style={{ fontSize: '13px' }}>
-              CLIENTE:
-            </span>
-            <span className="font-bold uppercase break-words text-right flex-1 text-black" style={{ fontSize: '14px', fontWeight: 900 }}>
-              {nomeCliente.toUpperCase()}
-            </span>
-          </div>
-
-          <div className="flex justify-between items-center w-full leading-snug">
-            <span className="font-bold min-w-[80px] shrink-0 text-black" style={{ fontSize: '13px' }}>
-              COTAÇÃO:
-            </span>
-            <span className="font-bold font-mono text-right flex-1 text-black" style={{ fontSize: '14px', fontWeight: 900 }}>
-              #{numCotacao}
-            </span>
-          </div>
-
           <div className="flex justify-between items-center w-full leading-snug">
             <span className="font-bold min-w-[80px] shrink-0 text-black" style={{ fontSize: '13px' }}>
               DATA/HORA:
@@ -618,11 +592,40 @@ export default function OrdemCorte80mm({
           listaItens.map((item: any, idx: number) => {
             const numItem = idx + 1;
             const qtd = Number(item?.qtd ?? item?.quantity) || 1;
-            const material = item?.material || item?.constanteNome || item?.constantName || item?.produto || 'MATERIAL';
-            const medidas = formatarMedidasLimpa(item) || item?.medida || item?.dimensions || item?.medidas || '—';
+
+            // Cotação específica do item ou cotação geral da ordem
+            const itemCotacao = (
+              item?.quoteNumber ||
+              item?.numeroPedido ||
+              item?.cotacao ||
+              numCotacao ||
+              'S/N'
+            ).toString().trim();
+            const cotacaoFormatada = itemCotacao.startsWith('#') ? itemCotacao : `#${itemCotacao}`;
+
+            // Cliente específico do item ou cliente geral da ordem
+            const clienteItem = (
+              item?.cliente?.nome ||
+              item?.cliente ||
+              item?.clientName ||
+              item?.client?.name ||
+              item?.empresa ||
+              nomeCliente ||
+              'CLIENTE BALCÃO'
+            ).toString().trim().toUpperCase();
+
+            const medidasLimpa = (formatarMedidasLimpa(item) || item?.medida || item?.dimensions || item?.medidas || '').trim();
             const forma = resolverFormaItem(item);
+            const medidasForma = medidasLimpa && medidasLimpa !== '—'
+              ? `${medidasLimpa} - ${forma}`
+              : forma;
+
             const obsEspecifica = getObservacaoEspecificaItem(item);
-            const obsCod = obsEspecifica || item?.observacao || item?.notes || item?.descricao || item?.description || '-';
+            const baseObs = obsEspecifica || item?.observacao || item?.notes || item?.descricao || item?.description || item?.codigo || item?.code || '';
+            const material = (item?.material || item?.constanteNome || item?.constantName || item?.produto || '').trim();
+            const descInf = baseObs
+              ? (material && material !== 'MATERIAL' && !baseObs.toUpperCase().includes(material.toUpperCase()) ? `${material} - ${baseObs}` : baseObs)
+              : (material && material !== 'MATERIAL' ? material : '-');
 
             return (
               <section
@@ -637,98 +640,67 @@ export default function OrdemCorte80mm({
                   boxSizing: 'border-box'
                 }}
               >
-                {/* ┌────────────────────────────────────────┐
-                    │ [  ] CORTADO  |  ITEM #1   |  QTD: 2 PÇS│
-                    └────────────────────────────────────────┘ */}
+                {/* ┌────────────────────────────────────────────────────────┐
+                    │ COTAÇÃO: #COT-2026-000538                  QTD: 1 PÇS  │
+                    └────────────────────────────────────────────────────────┘ */}
                 <div 
-                  className="flex justify-between items-center w-full pb-1.5 font-black"
+                  className="flex justify-between items-center w-full pb-1.5 font-black leading-tight"
                   style={{
                     borderBottom: '2px solid #000000',
-                    color: '#000000'
+                    color: '#000000',
+                    fontSize: '12px'
                   }}
                 >
-                  {/* Lado Esquerdo: Checkbox + Cortado + Item # */}
-                  <div className="flex items-center gap-1.5">
-                    <span 
-                      className="inline-block bg-white shrink-0" 
-                      style={{ 
-                        width: '14px', 
-                        height: '14px', 
-                        border: '2px solid #000000',
-                        backgroundColor: '#ffffff'
-                      }} 
-                    />
-                    <span style={{ fontSize: '13px', fontWeight: 900 }}>CORTADO</span>
-                    <span className="text-black font-black mx-0.5">|</span>
-                    <span style={{ fontSize: '14px', fontWeight: 900 }}>
-                      ITEM #{numItem}
-                    </span>
-                  </div>
-
-                  {/* Lado Direito: Quantidade Empurrada para a Borda Direita */}
-                  <span 
-                    className="font-black uppercase text-right"
-                    style={{ fontSize: '14px', fontWeight: 900 }}
-                  >
-                    QTD: {qtd} PÇS
+                  <span style={{ fontSize: '12px', fontWeight: 900, fontFamily: 'monospace' }}>
+                    COTAÇÃO: {cotacaoFormatada}
+                  </span>
+                  <span className="font-black uppercase text-right" style={{ fontSize: '12px', fontWeight: 900 }}>
+                    {totalTiposItens > 1 ? `ITEM #${numItem} | ` : ''}QTD: {qtd} PÇS
                   </span>
                 </div>
 
-                {/* ┌────────────────────────────────────────┐
-                    │ MATERIAL: OXICORTE A36                 │
-                    │ MEDIDAS:  1" x 50 x 195 mm             │
-                    │ FORMA:    RETANGULO                    │
-                    │ OBS/COD:  PCM 055                      │
-                    └────────────────────────────────────────┘ */}
+                {/* ┌────────────────────────────────────────────────────────┐
+                    │ CLIENTE: MM SERVICE                                    │
+                    │ MEDIDAS: 1.3/4 X 70 MM - RETÂNGULO                     │
+                    │ DESC / INF: TM 23 BRONZE - BRONZE                      │
+                    └────────────────────────────────────────────────────────┘ */}
                 <div 
-                  className="w-full pt-1.5 space-y-1 leading-snug bg-white"
+                  className="w-full pt-1.5 space-y-0.5 leading-snug bg-white text-left"
                   style={{ color: '#000000' }}
                 >
-                  <div className="flex justify-between items-start w-full py-0.5">
-                    <span className="font-bold min-w-[90px] shrink-0 text-black" style={{ fontSize: '13px' }}>
-                      MATERIAL:
+                  <div className="flex justify-start items-baseline gap-1.5 w-full py-0.5 text-left">
+                    <span className="font-bold shrink-0 text-black whitespace-nowrap" style={{ fontSize: '12.5px' }}>
+                      CLIENTE:
                     </span>
                     <span 
-                      className="font-black uppercase break-words text-right flex-1 text-black" 
-                      style={{ fontSize: '14px', fontWeight: 900 }}
+                      className="font-black uppercase break-words text-left flex-1 text-black" 
+                      style={{ fontSize: '13px', fontWeight: 900 }}
                     >
-                      {material}
+                      {clienteItem}
                     </span>
                   </div>
 
-                  <div className="flex justify-between items-start w-full py-0.5">
-                    <span className="font-bold min-w-[90px] shrink-0 text-black" style={{ fontSize: '13px' }}>
+                  <div className="flex justify-start items-baseline gap-1.5 w-full py-0.5 text-left">
+                    <span className="font-bold shrink-0 text-black whitespace-nowrap" style={{ fontSize: '12.5px' }}>
                       MEDIDAS:
                     </span>
                     <span 
-                      className="font-black uppercase font-mono break-words text-right flex-1 text-black" 
-                      style={{ fontSize: '14px', fontWeight: 900 }}
-                    >
-                      {medidas}
-                    </span>
-                  </div>
-
-                  <div className="flex justify-between items-start w-full py-0.5">
-                    <span className="font-bold min-w-[90px] shrink-0 text-black" style={{ fontSize: '13px' }}>
-                      FORMA:
-                    </span>
-                    <span 
-                      className="font-black uppercase break-words text-right flex-1 text-black" 
+                      className="font-black uppercase font-mono break-words text-left flex-1 text-black" 
                       style={{ fontSize: '13px', fontWeight: 900 }}
                     >
-                      {forma}
+                      {medidasForma}
                     </span>
                   </div>
 
-                  <div className="flex justify-between items-start w-full py-0.5">
-                    <span className="font-bold min-w-[90px] shrink-0 text-black" style={{ fontSize: '13px' }}>
-                      OBS/COD:
+                  <div className="flex justify-start items-baseline gap-1.5 w-full py-0.5 text-left">
+                    <span className="font-bold shrink-0 text-black whitespace-nowrap" style={{ fontSize: '12.5px' }}>
+                      DESC / INF:
                     </span>
                     <span 
-                      className="font-black uppercase break-words text-right flex-1 text-black" 
-                      style={{ fontSize: '13.5px', fontWeight: 900 }}
+                      className="font-black uppercase break-words text-left flex-1 text-black" 
+                      style={{ fontSize: '13px', fontWeight: 900 }}
                     >
-                      {obsCod}
+                      {descInf}
                     </span>
                   </div>
                 </div>
@@ -739,7 +711,7 @@ export default function OrdemCorte80mm({
       </main>
 
       {/* =========================================================================
-          3. RODAPÉ DO CUPOM TÉRMICO (80MM)
+          3. RESUMO E IDENTIFICAÇÃO DO OPERADOR (SEM RODAPÉ FINAL DE ASSINATURA)
           ========================================================================= */}
       <footer className="w-full pt-1" style={{ color: '#000000', pageBreakInside: 'avoid', breakInside: 'avoid' }}>
         {/* Linha Divisória de Largura Total */}
@@ -754,35 +726,17 @@ export default function OrdemCorte80mm({
           <span>TOTAL: {totalPecas} {totalPecas === 1 ? 'PEÇA' : 'PEÇAS'}</span>
         </div>
 
-        {/* Campo para Visto do Operador no Chão de Fábrica */}
-        <div className="pt-3 pb-1 w-full">
-          <div 
-            className="flex justify-between items-center w-full font-black uppercase mb-1" 
-            style={{ fontSize: '13px', color: '#000000', fontWeight: 900 }}
-          >
-            <span>VISTO DO OPERADOR:</span>
-          </div>
-          <div 
-            className="w-full border-b-2 border-black mt-4 mb-2" 
-            style={{ 
-              borderBottom: '2px solid #000000', 
-              width: '100%' 
-            }} 
-          />
-        </div>
+        {/* Linha Divisória */}
+        <div className="w-full border-b-2 border-dashed border-black my-2" />
 
-        {/* Assinatura Final da Marca Centralizada */}
-        <div 
-          className="w-full text-center pt-2 font-black uppercase tracking-widest"
-          style={{ fontSize: '16px', color: '#000000', fontWeight: 900 }}
-        >
-          USICORTE METAIS
-        </div>
-        <div 
-          className="w-full text-center font-bold text-xs mt-0.5"
-          style={{ color: '#000000', fontWeight: 900 }}
-        >
-          CORTE CNC & USINAGEM
+        {/* Identificação do Operador */}
+        <div className="w-full my-1.5" style={{ fontSize: '13px', color: '#000000' }}>
+          <div className="flex justify-between items-center w-full font-black uppercase">
+            <span className="font-bold min-w-[80px]">OPERADOR:</span>
+            <span className="font-black text-right flex-1" style={{ fontSize: '13px', fontWeight: 900 }}>
+              {operador || '___________________________'}
+            </span>
+          </div>
         </div>
       </footer>
     </div>
