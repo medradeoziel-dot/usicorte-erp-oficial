@@ -97,11 +97,14 @@ export interface QuoteItem {
   unidade_medida?: string;
   unidadeMedida?: string;
   csosn?: string;
+  cotacaoOrigem?: string;
 }
 
 export interface Quote {
   id: string; // Ex: ORC-2026-001
   quoteNumber: string;
+  origemCotacoes?: string[];
+  origemCotacaoIds?: string[];
   clientId?: string;
   clientName: string;
   clientDocument?: string;

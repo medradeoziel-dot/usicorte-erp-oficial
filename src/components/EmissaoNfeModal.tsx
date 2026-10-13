@@ -81,6 +81,80 @@ export default function EmissaoNfeModal({
     // CONSULTA INTEGRAL NO SUPABASE: Busca SEM LIMITES todos os itens pertencentes a esta cotação na tabela cotacao_itens
     let isMounted = true;
     async function carregarItensIntegrais() {
+      // Se for cotação agrupada (multi-cotação), unifica os itens de todas as cotações sem sobrescrever
+      if (quote.origemCotacoes && quote.origemCotacoes.length > 1) {
+        try {
+          setIsLoadingItems(true);
+          const todosIds = quote.origemCotacaoIds || quote.origemCotacoes;
+          const itensDbPorCotacao = await Promise.all(
+            todosIds.map(id => fetchItensByCotacaoId(String(id)))
+          );
+          if (!isMounted) return;
+
+          const itensDbAgrupados: any[] = [];
+          itensDbPorCotacao.forEach((itensArr, qIdx) => {
+            const qNum = quote.origemCotacoes?.[qIdx] || todosIds[qIdx];
+            if (itensArr && itensArr.length > 0) {
+              itensArr.forEach((it: any) => {
+                itensDbAgrupados.push({
+                  ...it,
+                  cotacaoOrigemRef: qNum
+                });
+              });
+            }
+          });
+
+          if (itensDbAgrupados.length >= (quote.items?.length || 0) && itensDbAgrupados.length > 0) {
+            let idxGlobal = 1;
+            const mappedItems: QuoteItem[] = itensDbAgrupados.map((it: any) => ({
+              id: String(it.id || idxGlobal++),
+              date: it.created_at?.slice(0, 10) || quote.date || new Date().toISOString().slice(0, 10),
+              companyName: quote.clientName || 'Cliente Selecionado',
+              constant: '1.0',
+              diameter: it.medida || '',
+              description: it.descricao || it.produto || `Item #${idxGlobal}`,
+              descricao: it.descricao || it.produto || `Item #${idxGlobal}`,
+              material: it.material || it.produto || 'Aço Carbono',
+              constanteNome: it.material || it.produto || 'Material',
+              measure: it.medida || 'Conforme desenho',
+              widthLength: it.medida || '',
+              quantity: Number(it.quantidade) || 1,
+              qtd: Number(it.quantidade) || 1,
+              unitPrice: Number(it.valor_unitario) || 0,
+              valorUnitario: Number(it.valor_unitario) || 0,
+              subtotal: Number(it.valor_total) || ((Number(it.valor_unitario) || 0) * (Number(it.quantidade) || 1)),
+              notes: it.observacao || '',
+              observacao: it.observacao || '',
+              drawingImage: it.desenho_url || undefined,
+              fotoDesenho: it.desenho_url || undefined,
+              ncm: it.ncm,
+              cfop: it.cfop,
+              cfop_interno: it.cfop_interno,
+              cfop_externo: it.cfop_externo,
+              csosn: it.csosn,
+              unidade_medida: it.unidade_medida,
+              totalWeightKg: Number((it as any).peso_total || 0),
+              pesoTotal: Number((it as any).peso_total || 0),
+              unitWeightKg: Number((it as any).peso_unitario || 0),
+              cotacaoOrigem: it.cotacaoOrigemRef
+            }));
+
+            const calcTotal = mappedItems.reduce((acc, it) => acc + (it.subtotal || 0), 0);
+            setCurrentQuoteState(prev => ({
+              ...prev,
+              items: mappedItems,
+              subtotalTotal: calcTotal || prev.subtotalTotal,
+              grandTotal: calcTotal || prev.grandTotal
+            }));
+          }
+        } catch (err) {
+          console.warn('Aviso ao sincronizar itens de multi-cotações na modal de NF-e:', err);
+        } finally {
+          if (isMounted) setIsLoadingItems(false);
+        }
+        return;
+      }
+
       const targetId = quote.id || quote.quoteNumber;
       if (!targetId) return;
 
@@ -148,7 +222,7 @@ export default function EmissaoNfeModal({
 
     carregarItensIntegrais();
     return () => { isMounted = false; };
-  }, [quote.id, quote.quoteNumber]);
+  }, [quote.id, quote.quoteNumber, quote.origemCotacoes]);
 
   const isCancelada = isNfeCancelada(currentQuoteState.status_nfe);
   const isAutorizada = isNfeAutorizada(currentQuoteState.status_nfe);
@@ -260,6 +334,15 @@ export default function EmissaoNfeModal({
       await updateCotacaoNfeStatusDb(currentQuoteState.id || currentQuoteState.quoteNumber, {
         status_nfe: 'Processando'
       });
+      if (currentQuoteState.origemCotacaoIds && currentQuoteState.origemCotacaoIds.length > 0) {
+        for (const cid of currentQuoteState.origemCotacaoIds) {
+          if (cid && cid !== (currentQuoteState.id || currentQuoteState.quoteNumber)) {
+            try {
+              await updateCotacaoNfeStatusDb(cid, { status_nfe: 'Processando' });
+            } catch {}
+          }
+        }
+      }
       onSuccess({
         ...currentQuoteState,
         status_nfe: 'Processando'
@@ -386,17 +469,34 @@ export default function EmissaoNfeModal({
                 <h3 className="font-bold text-slate-100 text-base">
                   Revisão Fiscal & Emissão de NF-e
                 </h3>
-                <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                  Cotação {quote.quoteNumber}
-                </span>
+                {currentQuoteState.origemCotacoes && currentQuoteState.origemCotacoes.length > 1 ? (
+                  <span className="px-2.5 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1 shadow-xs">
+                    ⚡ Multi-Cotação ({currentQuoteState.origemCotacoes.length} Agrupadas)
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                    Cotação {quote.quoteNumber}
+                  </span>
+                )}
                 <span className="px-2.5 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1 shadow-xs">
                   <FileText className="w-3 h-3 text-emerald-400" />
                   NF-e Nº {proximoNumeroNfe} - Série {serieNfe}
                 </span>
               </div>
-              <p className="text-xs text-slate-400">
-                Conferência cadastral e tributária antes da transmissão para a SEFAZ
-              </p>
+              {currentQuoteState.origemCotacoes && currentQuoteState.origemCotacoes.length > 1 ? (
+                <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                  <span className="text-[11px] text-slate-400 font-semibold">Cotações agrupadas:</span>
+                  {currentQuoteState.origemCotacoes.map((cNum) => (
+                    <span key={cNum} className="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold bg-slate-800 text-amber-200 border border-slate-700">
+                      {cNum}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-slate-400">
+                  Conferência cadastral e tributária antes da transmissão para a SEFAZ
+                </p>
+              )}
             </div>
           </div>
           <button
@@ -641,7 +741,14 @@ export default function EmissaoNfeModal({
                           {it.ordem}
                         </td>
                         <td className="py-2 px-3">
-                          <span className="font-bold text-slate-200 block">{it.descricao}</span>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-bold text-slate-200">{it.descricao}</span>
+                            {it.cotacaoOrigem && (
+                              <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 font-bold">
+                                Ref: {it.cotacaoOrigem}
+                              </span>
+                            )}
+                          </div>
                           <span className="text-[10px] text-slate-400 font-mono">Cód: {it.codigo}</span>
                         </td>
                         <td className="py-2 px-3 text-center font-mono font-bold text-slate-300">
@@ -707,6 +814,43 @@ export default function EmissaoNfeModal({
               <span className="text-xl font-mono font-extrabold text-emerald-400">
                 {formatCurrency(valorTotal)}
               </span>
+            </div>
+          </div>
+
+          {/* 4. Dados Adicionais e Informações Complementares da NF-e (infAdic / infCpl) */}
+          <div className="p-3.5 rounded-xl bg-slate-800/60 border border-slate-700/70 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-slate-200 flex items-center gap-1.5 text-xs">
+                <Info className="w-4 h-4 text-blue-400" />
+                Informações Complementares / Observações da NF-e (infAdic / infCpl)
+              </span>
+              {currentQuoteState.origemCotacoes && currentQuoteState.origemCotacoes.length > 1 && (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                  Agrupamento de {currentQuoteState.origemCotacoes.length} Cotações
+                </span>
+              )}
+            </div>
+            <div className="p-3 rounded-lg bg-slate-950/70 border border-slate-800 text-[11px] leading-relaxed space-y-1 font-mono">
+              <p className="text-slate-300 font-sans">
+                • <strong className="text-slate-100 font-semibold">DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL.</strong> {creditoIcms.textoCredito}
+              </p>
+              <p className="text-slate-400">
+                • Trib aprox: R$ {(valorTotal * 0.085).toFixed(2).replace('.', ',')} Fed (8,50%), R$ {(valorTotal * 0.0495).toFixed(2).replace('.', ',')} Est (4,95%) e R$ 0,00 Mun - Fonte: IBPT.
+              </p>
+              {currentQuoteState.origemCotacoes && currentQuoteState.origemCotacoes.length > 1 ? (
+                <p className="text-amber-300 font-bold bg-amber-500/10 px-2 py-1 rounded border border-amber-500/20 font-sans">
+                  • Ref. Cotações: {currentQuoteState.origemCotacoes.join(', ')}
+                </p>
+              ) : (
+                <p className="text-slate-400">
+                  • Pedido de Venda / Cotação UsiCorte Ref: Nº {currentQuoteState.quoteNumber}.
+                </p>
+              )}
+              {currentQuoteState.observations && !currentQuoteState.observations.includes('Ref. Cotações') && (
+                <p className="text-slate-400 italic font-sans text-[10px]">
+                  • Observações adicionais: {currentQuoteState.observations}
+                </p>
+              )}
             </div>
           </div>
 
@@ -1087,7 +1231,12 @@ export default function EmissaoNfeModal({
                     DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL. {creditoIcms.textoCredito}
                   </p>
                   <p className="text-gray-600">
-                    Trib aprox: R$ {(valorTotal * 0.085).toFixed(2).replace('.', ',')} Fed, R$ {(valorTotal * 0.0495).toFixed(2).replace('.', ',')} Est e R$ 0,00 Mun - Fonte: IBPT. Cotação de Venda Ref: Nº {quote.quoteNumber}.
+                    Trib aprox: R$ {(valorTotal * 0.085).toFixed(2).replace('.', ',')} Fed, R$ {(valorTotal * 0.0495).toFixed(2).replace('.', ',')} Est e R$ 0,00 Mun - Fonte: IBPT.{' '}
+                    {currentQuoteState.origemCotacoes && currentQuoteState.origemCotacoes.length > 1 ? (
+                      <strong className="text-slate-900">Ref. Cotações: {currentQuoteState.origemCotacoes.join(', ')}.</strong>
+                    ) : (
+                      <>Cotação de Venda Ref: Nº {currentQuoteState.quoteNumber}.</>
+                    )}
                   </p>
                   <p className="text-red-700 font-bold mt-1">
                     ATENÇÃO: MODO DE CONFERÊNCIA. ESTE DOCUMENTO É UMA PRÉVIA E NÃO POSSUI VALIDADE JURÍDICA OU FISCAL.

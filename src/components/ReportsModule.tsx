@@ -1270,34 +1270,263 @@ export default function ReportsModule({
     }
   };
 
-  // Disparo de emissão de NF-e a partir da barra superior
-  const handleEmitirNfeTopBar = async () => {
-    const selectedItem = filteredConsultaItems.find(it => selectedIds.includes(it.idVer)) || 
-      (selectedIds.length === 0 && filteredConsultaItems.length === 1 ? filteredConsultaItems[0] : null);
+  /**
+   * Processa e agrupa cotações selecionadas para emissão/conferência de NF-e,
+   * unificando itens, recalculando totais, validando cliente e formatando observações fiscais.
+   */
+  const processarCotacoesMultiplasParaNfe = async (
+    itensSelecionados: ConsultaItem[]
+  ): Promise<{ quote: Quote; client: Client | null } | null> => {
+    // 1. Mapeia itens por cotação distinta
+    const mapCotacoes = new Map<string, ConsultaItem[]>();
+    itensSelecionados.forEach(it => {
+      const chave = (it.cotacaoId || it.cotacao || String(it.idVer)).trim();
+      if (!mapCotacoes.has(chave)) {
+        mapCotacoes.set(chave, []);
+      }
+      mapCotacoes.get(chave)!.push(it);
+    });
 
-    if (!selectedItem) {
-      setDeleteFeedback({
-        message: 'Selecione uma cotação/pedido na tabela (marcando a caixa de seleção) para emitir a NF-e.',
-        type: 'error'
-      });
-      return;
+    const chavesDistintas = Array.from(mapCotacoes.keys());
+    if (chavesDistintas.length === 0) return null;
+
+    // Se houver apenas 1 cotação distinta selecionada, retorna ela diretamente
+    if (chavesDistintas.length === 1) {
+      const primeiroItem = mapCotacoes.get(chavesDistintas[0])![0];
+      const q = await resolveQuoteForNfe(primeiroItem);
+      if (!q) {
+        setDeleteFeedback({
+          message: 'Não foi possível carregar os dados desta cotação para emissão fiscal.',
+          type: 'error'
+        });
+        return null;
+      }
+      return { quote: q, client: resolveClientForQuote(q) };
     }
-    await handleAbrirEmissaoNfe(selectedItem);
+
+    // ========================================================
+    // 2 OU MAIS COTAÇÕES DISTINTAS: AGRUPAMENTO FISCAL
+    // ========================================================
+    setIsLoadingNfeQuote(true);
+    try {
+      // Carrega cada uma das cotações selecionadas com seus respectivos itens
+      const cotacoesPromises = chavesDistintas.map(ch => {
+        const amostra = mapCotacoes.get(ch)![0];
+        return resolveQuoteForNfe(amostra);
+      });
+      const resolvedCotacoes = await Promise.all(cotacoesPromises);
+      const cotacoesValidas = resolvedCotacoes.filter((q): q is Quote => q !== null);
+
+      if (cotacoesValidas.length < 2) {
+        setDeleteFeedback({
+          message: 'Não foi possível recuperar os dados de todas as cotações selecionadas para agrupamento.',
+          type: 'error'
+        });
+        return null;
+      }
+
+      // 2. VALIDAÇÃO DO CLIENTE:
+      // Valide se todas as cotações selecionadas pertencem ao MESMO cliente (mesmo CNPJ/CPF).
+      // Se houver cotações de clientes diferentes selecionadas juntas, exiba um alerta:
+      // "Para emitir uma nota fiscal agrupada, selecione apenas cotações do mesmo cliente."
+      const extrairInfoCliente = (q: Quote) => {
+        const docDireto = (q.clientDocument || (q as any).cliente_documento || (q as any).cnpj_cpf || (q as any).cpf_cnpj || '').replace(/\D/g, '');
+        const cId = q.clientId || (q as any).cliente_id || '';
+        const cNome = (q.clientName || (q as any).cliente_nome || '').trim().toLowerCase();
+
+        const cliEncontrado = clients.find(c => 
+          (cId && c.id === cId) ||
+          (docDireto && c.document && c.document.replace(/\D/g, '') === docDireto) ||
+          (cNome && c.name && c.name.trim().toLowerCase() === cNome) ||
+          (cNome && c.fantasyName && c.fantasyName.trim().toLowerCase() === cNome)
+        );
+
+        const docFinal = docDireto || (cliEncontrado?.document ? cliEncontrado.document.replace(/\D/g, '') : '');
+        const idFinal = cId || cliEncontrado?.id || '';
+        const nomeFinal = cNome || (cliEncontrado?.name ? cliEncontrado.name.trim().toLowerCase() : '');
+
+        return { doc: docFinal, id: idFinal, nome: nomeFinal, clientObj: cliEncontrado };
+      };
+
+      const infosClientes = cotacoesValidas.map(q => extrairInfoCliente(q));
+      const refCliente = infosClientes[0];
+
+      let mesmoCliente = true;
+      for (let i = 1; i < infosClientes.length; i++) {
+        const atual = infosClientes[i];
+        if (refCliente.doc && atual.doc) {
+          if (refCliente.doc !== atual.doc) {
+            mesmoCliente = false;
+            break;
+          }
+        } else if (refCliente.id && atual.id) {
+          if (refCliente.id !== atual.id) {
+            mesmoCliente = false;
+            break;
+          }
+        } else if (refCliente.nome && atual.nome) {
+          if (refCliente.nome !== atual.nome) {
+            mesmoCliente = false;
+            break;
+          }
+        } else {
+          mesmoCliente = false;
+          break;
+        }
+      }
+
+      if (!mesmoCliente) {
+        setDeleteFeedback({
+          message: 'Para emitir uma nota fiscal agrupada, selecione apenas cotações do mesmo cliente.',
+          type: 'error'
+        });
+        return null;
+      }
+
+      // Validação extra: se alguma cotação já estiver cancelada na SEFAZ
+      const cotacaoCancelada = cotacoesValidas.find(q => isNfeCancelada(q.status_nfe));
+      if (cotacaoCancelada) {
+        setDeleteFeedback({
+          message: `A cotação Nº ${cotacaoCancelada.quoteNumber} possui NF-e CANCELADA na SEFAZ e não pode ser agrupada para emissão.`,
+          type: 'error'
+        });
+        return null;
+      }
+
+      // 1. AGRUPAMENTO DE ITENS E VALORES:
+      // Unifique TODOS os itens de cada uma dessas cotações na listagem de itens da nota (Itens Fiscais da NF-e).
+      // Recalcule o valor total da NF-e somando os subtotais de todos os itens agrupados.
+      const itensUnificados: QuoteItem[] = [];
+      let seqItem = 1;
+
+      cotacoesValidas.forEach(q => {
+        const refCot = q.quoteNumber || q.id;
+        (q.items || []).forEach(it => {
+          itensUnificados.push({
+            ...it,
+            id: `AGRUP-${seqItem++}-${it.id || ''}`,
+            cotacaoOrigem: refCot,
+            notes: it.notes 
+              ? `${it.notes} (Ref. ${refCot})`
+              : `Ref. ${refCot}`
+          });
+        });
+      });
+
+      if (itensUnificados.length === 0) {
+        setDeleteFeedback({
+          message: 'Nenhum item válido encontrado nas cotações selecionadas para emissão fiscal.',
+          type: 'error'
+        });
+        return null;
+      }
+
+      const totalRecalculado = itensUnificados.reduce(
+        (sum, it) => sum + (Number(it.subtotal) || ((Number(it.unitPrice || it.valorUnitario || 0)) * (Number(it.quantity || it.qtd || 1)))),
+        0
+      );
+
+      const pesoRecalculado = itensUnificados.reduce(
+        (sum, it) => sum + (Number(it.totalWeightKg || it.pesoTotal) || 0),
+        0
+      );
+
+      // 3. OBSERVAÇÕES E REFERÊNCIA NO RODAPÉ / XML:
+      // Exemplo: "Ref. Cotações: COT-2026-000563, COT-2026-000564"
+      const listaNumeros = cotacoesValidas.map(q => q.quoteNumber || q.id);
+      const listaIds = cotacoesValidas.map(q => q.id || q.quoteNumber);
+      const textoRefCotacoes = `Ref. Cotações: ${listaNumeros.join(', ')}`;
+
+      const baseQuote = cotacoesValidas[0];
+      const obsOriginais = cotacoesValidas
+        .map(q => q.observations)
+        .filter(Boolean)
+        .join(' | ');
+
+      const observacoesFinais = obsOriginais 
+        ? `${textoRefCotacoes}. ${obsOriginais}`
+        : textoRefCotacoes;
+
+      const unifiedQuote: Quote = {
+        ...baseQuote,
+        id: `MULTI-${Date.now()}`,
+        quoteNumber: listaNumeros.join(', '),
+        origemCotacoes: listaNumeros,
+        origemCotacaoIds: listaIds,
+        items: itensUnificados,
+        subtotalTotal: totalRecalculado,
+        grandTotal: totalRecalculado,
+        totalWeightKg: pesoRecalculado,
+        discount: 0,
+        shipping: 0,
+        observations: observacoesFinais,
+        status: 'Aprovado',
+        status_nfe: 'Pendente',
+        nfe_chave: undefined,
+        nfe_numero: undefined,
+        danfe_url: undefined,
+        xml_url: undefined,
+        xml_conteudo: undefined,
+        protocolo_nfe: undefined,
+        mensagem_erro_nfe: undefined
+      };
+
+      const clientObj = refCliente.clientObj || resolveClientForQuote(baseQuote);
+
+      return { quote: unifiedQuote, client: clientObj };
+    } finally {
+      setIsLoadingNfeQuote(false);
+    }
   };
 
-  // Disparo de visualização de DANFE a partir da barra superior
-  const handleVisualizarDanfeTopBar = async () => {
-    const selectedItem = filteredConsultaItems.find(it => selectedIds.includes(it.idVer)) || 
-      (selectedIds.length === 0 && filteredConsultaItems.length === 1 ? filteredConsultaItems[0] : null);
+  // Disparo de emissão de NF-e a partir da barra superior (suporta seleção de 1 ou múltiplas cotações)
+  const handleEmitirNfeTopBar = async () => {
+    const selectedRows = filteredConsultaItems.filter(it => selectedIds.includes(it.idVer));
+    const itensParaProcessar = selectedRows.length > 0 
+      ? selectedRows 
+      : (filteredConsultaItems.length === 1 ? [filteredConsultaItems[0]] : []);
 
-    if (!selectedItem) {
+    if (itensParaProcessar.length === 0) {
       setDeleteFeedback({
-        message: 'Selecione uma cotação/pedido na tabela (marcando a caixa de seleção) para visualizar a DANFE.',
+        message: 'Selecione uma ou mais cotações na tabela (marcando a caixa de seleção) para emitir a NF-e.',
         type: 'error'
       });
       return;
     }
-    await handleAbrirVisualizacaoDanfe(selectedItem);
+
+    const resultado = await processarCotacoesMultiplasParaNfe(itensParaProcessar);
+    if (!resultado) return;
+
+    if (isNfeCancelada(resultado.quote.status_nfe)) {
+      setDeleteFeedback({
+        message: `Esta NF-e (Nº ${resultado.quote.nfe_numero || ''}) foi CANCELADA na SEFAZ (Status 101). A emissão de novo DANFE com valor fiscal está permanentemente desativada.`,
+        type: 'error'
+      });
+      return;
+    }
+
+    setQuoteForNfeModal(resultado.quote);
+  };
+
+  // Disparo de visualização de DANFE a partir da barra superior (suporta seleção de 1 ou múltiplas cotações)
+  const handleVisualizarDanfeTopBar = async () => {
+    const selectedRows = filteredConsultaItems.filter(it => selectedIds.includes(it.idVer));
+    const itensParaProcessar = selectedRows.length > 0 
+      ? selectedRows 
+      : (filteredConsultaItems.length === 1 ? [filteredConsultaItems[0]] : []);
+
+    if (itensParaProcessar.length === 0) {
+      setDeleteFeedback({
+        message: 'Selecione uma ou mais cotações na tabela (marcando a caixa de seleção) para visualizar a DANFE.',
+        type: 'error'
+      });
+      return;
+    }
+
+    const resultado = await processarCotacoesMultiplasParaNfe(itensParaProcessar);
+    if (!resultado) return;
+
+    setQuoteForDanfeModal(resultado.quote);
   };
 
   // Disparo de download do arquivo XML da NF-e
@@ -1431,7 +1660,11 @@ export default function ReportsModule({
         (item.cotacao && item.cotacao === updatedQuote.quoteNumber) ||
         (item.cotacaoId && item.cotacaoId === updatedQuote.id) ||
         (item.cotacao && item.cotacao === updatedQuote.id);
-      if (match) {
+      const isMultiMatch = Boolean(
+        (updatedQuote.origemCotacoes && item.cotacao && updatedQuote.origemCotacoes.includes(item.cotacao)) ||
+        (updatedQuote.origemCotacaoIds && item.cotacaoId && updatedQuote.origemCotacaoIds.includes(item.cotacaoId))
+      );
+      if (match || isMultiMatch) {
         return {
           ...item,
           status_nfe: updatedQuote.status_nfe,

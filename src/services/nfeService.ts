@@ -32,6 +32,7 @@ export interface ItemFiscalNfe {
   valorUnitario: number;
   subtotal: number;
   csosn: string;
+  cotacaoOrigem?: string;
 }
 
 export interface DadosEmitenteNfe {
@@ -842,6 +843,25 @@ export async function transmitirCancelamentoNfeSefaz(
       clienteId: quote.clientId || (quote as any).cliente_id,
       valorTotal
     });
+
+    if (quote.origemCotacaoIds && quote.origemCotacaoIds.length > 0) {
+      for (const origId of quote.origemCotacaoIds) {
+        if (origId && origId !== idOrNum) {
+          try {
+            await cancelarNotaFiscalSupabase({
+              cotacaoIdOrNumber: origId,
+              chaveAcesso: chaveAcesso,
+              numeroNfe: numNfe,
+              protocoloCancelamento,
+              xmlCancelamento,
+              justificativa: just,
+              clienteId: quote.clientId || (quote as any).cliente_id,
+              valorTotal
+            });
+          } catch {}
+        }
+      }
+    }
   } catch (saveErr) {
     console.error('Erro ao persistir cancelamento no Supabase via cancelarNotaFiscalSupabase:', saveErr);
   }
@@ -1318,7 +1338,8 @@ export function prepararItensFiscais(items: QuoteItem[], ufDestinatario: string)
       quantidade: qty,
       valorUnitario: vUnit,
       subtotal: subtotal,
-      csosn: rawCsosn
+      csosn: rawCsosn,
+      cotacaoOrigem: it.cotacaoOrigem || (it as any).cotacao_origem
     };
   });
 }
@@ -1335,7 +1356,8 @@ export function gerarXmlNfe(
   chaveAcesso: string,
   valorTotal: number,
   dataEmissao: Date,
-  protocolo?: string
+  protocolo?: string,
+  observacoesAdicionais?: string
 ): string {
   const dtIso = dataEmissao.toISOString();
   const cNF = chaveAcesso.slice(35, 43);
@@ -1472,7 +1494,7 @@ export function gerarXmlNfe(
       </detPag>
     </pag>
     <infAdic>
-      <infCpl>DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL. ${creditoInfo.textoCredito} REF. ORCAMENTO/PEDIDO USICORTE.</infCpl>
+      <infCpl>DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL. ${creditoInfo.textoCredito} ${observacoesAdicionais ? `${observacoesAdicionais}. ` : ''}REF. ORCAMENTO/PEDIDO USICORTE.</infCpl>
     </infAdic>
   </infNFe>
 </NFe>`;
@@ -1633,6 +1655,10 @@ export async function transmitirNfeSefaz(
   const protocolo = `135${anoMesDia(dataEmissao)}${String(Math.floor(100000000 + Math.random() * 900000000))}`;
 
   // 6. Geração do XML e DANFE (Status 100 - Autorizado o uso da NF-e)
+  const refOrigemXml = quote.origemCotacoes && quote.origemCotacoes.length > 1
+    ? `Ref. Cotações: ${quote.origemCotacoes.join(', ')}`
+    : (quote.quoteNumber ? `Ref. Cotação: ${quote.quoteNumber}` : '');
+
   const xmlConteudo = gerarXmlNfe(
     emitente,
     destinatario,
@@ -1642,11 +1668,16 @@ export async function transmitirNfeSefaz(
     chaveAcesso,
     valorTotal,
     dataEmissao,
-    protocolo
+    protocolo,
+    refOrigemXml
   );
 
   const xmlBlob = new Blob([xmlConteudo], { type: 'application/xml;charset=utf-8' });
   const xmlUrl = URL.createObjectURL(xmlBlob);
+
+  const refDanfeTexto = quote.origemCotacoes && quote.origemCotacoes.length > 1
+    ? `Ref. Cotações: ${quote.origemCotacoes.join(', ')}`
+    : quote.quoteNumber;
 
   // Simulação de transmissão bem sucedida com autorização da SEFAZ
   const danfeHtml = gerarDanfeHtml(
@@ -1660,7 +1691,7 @@ export async function transmitirNfeSefaz(
     dataEmissao,
     valorTotal,
     false,
-    quote.quoteNumber,
+    refDanfeTexto,
     undefined,
     false,
     xmlConteudo
@@ -1684,6 +1715,32 @@ export async function transmitirNfeSefaz(
       mensagem_erro_nfe: null,
       nfe_emitida_em: dataEmissao.toISOString()
     });
+
+    // Se for multi-cotação (agrupamento), atualiza simultaneamente todas as cotações de origem
+    if (quote.origemCotacaoIds && quote.origemCotacaoIds.length > 0) {
+      for (const origId of quote.origemCotacaoIds) {
+        if (origId && origId !== (quote.id || quote.quoteNumber)) {
+          try {
+            await updateCotacaoNfeStatusDb(origId, {
+              status_nfe: 'Emitida',
+              nfe_chave: chaveAcesso,
+              chave_acesso: chaveAcesso,
+              nfe_numero: numeroNfe,
+              serie_nfe: serie,
+              protocolo_autorizacao: protocolo,
+              protocolo_nfe: protocolo,
+              danfe_url: danfeUrl,
+              xml_url: xmlUrl,
+              xml_conteudo: xmlConteudo,
+              mensagem_erro_nfe: null,
+              nfe_emitida_em: dataEmissao.toISOString()
+            });
+          } catch (eOrig) {
+            console.warn(`Aviso ao atualizar cotação de origem ${origId} para Emitida:`, eOrig);
+          }
+        }
+      }
+    }
 
     // Inserção do registro completo na nova tabela 'notas_fiscais' do Supabase
     try {
@@ -2256,7 +2313,9 @@ export function gerarDanfeHtml(
             <div style="font-size: 7.5px; line-height: 1.3;">
               <strong>DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL. ${creditoInfo.textoCredito}</strong><br>
               Valor aprox. tributos: R$ ${ibptFed.toFixed(2).replace('.', ',')} Federal (8,50%), R$ ${ibptEst.toFixed(2).replace('.', ',')} Estadual (4,95%) e R$ 0,00 Municipal. Fonte: IBPT.<br>
-              Pedido de Venda / Cotação UsiCorte Ref: Nº ${numeroCotacaoRef || 'COT-1'}.<br>
+              ${numeroCotacaoRef && (numeroCotacaoRef.includes('Ref. Cotações') || numeroCotacaoRef.includes(','))
+                ? (numeroCotacaoRef.startsWith('Ref. Cotações:') ? `<strong>${numeroCotacaoRef}.</strong>` : `<strong>Ref. Cotações: ${numeroCotacaoRef}.</strong>`)
+                : `Pedido de Venda / Cotação UsiCorte Ref: Nº ${numeroCotacaoRef || 'COT-1'}.`}<br>
               ${isPrevia ? '<strong style="color: #b91c1c;">⚠️ ATENÇÃO: MODO DE CONFERÊNCIA. ESTE DOCUMENTO É UMA PRÉVIA E NÃO POSSUI VALIDADE JURÍDICA OU FISCAL.</strong>' : ''}
             </div>
           </td>
@@ -2271,7 +2330,7 @@ export function gerarDanfeHtml(
     </div>
 
     <div style="text-align: center; font-size: 6.5px; color: #666; margin-top: 4px; border-top: 1px solid #eee; padding-top: 2px;">
-      UsiCorte Metais ERP • DANFE Modelo 55 - Versão 4.00 • Emissão em ${dataEmissao.toLocaleDateString('pt-BR')} ${dataEmissao.toLocaleTimeString('pt-BR')}
+      UsiCorte Metais ERP • DANFE Modelo 55 - Versão 4.00 • ${numeroCotacaoRef && (numeroCotacaoRef.includes('Ref. Cotações') || numeroCotacaoRef.includes(',')) ? (numeroCotacaoRef.startsWith('Ref. Cotações:') ? `${numeroCotacaoRef} • ` : `Ref. Cotações: ${numeroCotacaoRef} • `) : ''}Emissão em ${dataEmissao.toLocaleDateString('pt-BR')} ${dataEmissao.toLocaleTimeString('pt-BR')}
     </div>
   </div>
 
@@ -2393,6 +2452,10 @@ export async function abrirDanfeEmNovaAba(
       }
     }
 
+    const refDanfeTexto = quote.origemCotacoes && quote.origemCotacoes.length > 1
+      ? `Ref. Cotações: ${quote.origemCotacoes.join(', ')}`
+      : quote.quoteNumber;
+
     const danfeHtml = gerarDanfeHtml(
       emitente as any,
       destinatario,
@@ -2404,7 +2467,7 @@ export async function abrirDanfeEmNovaAba(
       dataEmissao,
       valorTotal,
       false,
-      quote.quoteNumber,
+      refDanfeTexto,
       dupsFinal,
       isAVistaFinal,
       xmlConteudo,
@@ -2474,6 +2537,10 @@ export async function gerarPreDanfeHtml(
     ? [] 
     : (duplicatas || gerarDuplicatasProporcionais(valorTotal, 1, numeroNfe));
 
+  const refDanfeTexto = quote.origemCotacoes && quote.origemCotacoes.length > 1
+    ? `Ref. Cotações: ${quote.origemCotacoes.join(', ')}`
+    : quote.quoteNumber;
+
   return gerarDanfeHtml(
     emitente as any,
     destinatario,
@@ -2485,7 +2552,7 @@ export async function gerarPreDanfeHtml(
     dataEmissao,
     valorTotal,
     true, // isPrevia = true
-    quote.quoteNumber,
+    refDanfeTexto,
     dupsFinal,
     isAVistaFinal
   );

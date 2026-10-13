@@ -1228,9 +1228,16 @@ export default function DanfeEspelhoA4({
                 <p className="text-gray-800 mt-0.5">
                   Valor aproximado dos tributos: R$ {ibptFed.toFixed(2).replace('.', ',')} Federal (8,50%), R$ {ibptEst.toFixed(2).replace('.', ',')} Estadual (4,95%) e R$ 0,00 Municipal. Fonte: IBPT.
                 </p>
-                <p className="text-gray-800 mt-0.5 truncate">
-                  Pedido de Venda / Cotação UsiCorte Ref: Nº {quote.quoteNumber || 'COT-1'}. {quote.observations ? `Observações: ${quote.observations}.` : ''}
-                </p>
+                {quote.origemCotacoes && quote.origemCotacoes.length > 1 ? (
+                  <p className="text-gray-900 mt-0.5 font-bold">
+                    Ref. Cotações: <span className="font-semibold text-black">{quote.origemCotacoes.join(', ')}</span>.
+                    {quote.observations && !quote.observations.includes('Ref. Cotações') ? ` Observações: ${quote.observations}.` : ''}
+                  </p>
+                ) : (
+                  <p className="text-gray-800 mt-0.5 truncate">
+                    Pedido de Venda / Cotação UsiCorte Ref: Nº {quote.quoteNumber || 'COT-1'}. {quote.observations ? `Observações: ${quote.observations}.` : ''}
+                  </p>
+                )}
               </div>
               
               {isPrevia && (
@@ -1253,6 +1260,11 @@ export default function DanfeEspelhoA4({
           {/* Rodapé da Folha A4 */}
           <div className="mt-1 text-center text-[6px] text-gray-500 font-mono flex items-center justify-between border-t border-gray-200 pt-0.5">
             <span>UsiCorte Metais ERP • Sistema de Emissão e Gestão Industrial</span>
+            {quote.origemCotacoes && quote.origemCotacoes.length > 1 && (
+              <span className="font-bold text-gray-800">
+                Ref. Cotações: {quote.origemCotacoes.join(', ')}
+              </span>
+            )}
             <span>DANFE Modelo 55 - Versão 4.00</span>
             <span>Data de Impressão: {new Date().toLocaleDateString('pt-BR')} {new Date().toLocaleTimeString('pt-BR')}</span>
           </div>
