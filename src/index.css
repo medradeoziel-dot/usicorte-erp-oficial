@@ -222,6 +222,66 @@
     padding: 0 !important;
     margin: 0 !important;
   }
+
+  /* Garante que o documento, telas e modais permaneçam no fluxo visível da impressão A4 */
+  body.print-danfe html,
+  body.print-danfe body,
+  body.print-danfe #root,
+  body.print-danfe #app-root,
+  body.print-danfe main,
+  body.print-danfe #screen-clientes,
+  body.print-danfe #screen-produtos,
+  body.print-danfe #screen-orcamento,
+  body.print-danfe #screen-vendas,
+  body.print-danfe #screen-calculadora,
+  body.print-danfe #screen-ordem-servico,
+  body.print-danfe #screen-movimentacoes,
+  body.print-danfe #screen-estoque,
+  body.print-danfe #screen-financeiro,
+  body.print-danfe #screen-empresa,
+  body.print-danfe #screen-php,
+  body.print-danfe #screen-dashboard,
+  body.print-danfe #screen-relatorios,
+  body.print-danfe .danfe-modal-overlay,
+  body.print-danfe .danfe-modal-dialog,
+  body.print-danfe .danfe-modal-scroll,
+  body.print-danfe .danfe-inner-overlay,
+  body:has(.danfe-print-container) html,
+  body:has(.danfe-print-container) body,
+  body:has(.danfe-print-container) #root,
+  body:has(.danfe-print-container) #app-root,
+  body:has(.danfe-print-container) main,
+  body:has(.danfe-print-container) #screen-clientes,
+  body:has(.danfe-print-container) #screen-produtos,
+  body:has(.danfe-print-container) #screen-orcamento,
+  body:has(.danfe-print-container) #screen-vendas,
+  body:has(.danfe-print-container) #screen-calculadora,
+  body:has(.danfe-print-container) #screen-ordem-servico,
+  body:has(.danfe-print-container) #screen-movimentacoes,
+  body:has(.danfe-print-container) #screen-estoque,
+  body:has(.danfe-print-container) #screen-financeiro,
+  body:has(.danfe-print-container) #screen-empresa,
+  body:has(.danfe-print-container) #screen-php,
+  body:has(.danfe-print-container) #screen-dashboard,
+  body:has(.danfe-print-container) #screen-relatorios,
+  body:has(.danfe-print-container) .danfe-modal-overlay,
+  body:has(.danfe-print-container) .danfe-modal-dialog,
+  body:has(.danfe-print-container) .danfe-modal-scroll,
+  body:has(.danfe-print-container) .danfe-inner-overlay {
+    display: block !important;
+    position: static !important;
+    overflow: visible !important;
+    height: auto !important;
+    max-height: none !important;
+    min-height: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    transform: none !important;
+  }
+
   body.print-danfe #container-impressao,
   body.print-danfe #container-impressao-vendas,
   body.print-danfe #print-area,
@@ -276,6 +336,14 @@
     border: none !important;
     box-sizing: border-box !important;
     z-index: 99999 !important;
+  }
+  body.print-danfe .danfe-print-container .danfe-print-container,
+  body:has(.danfe-print-container) .danfe-print-container .danfe-print-container {
+    position: relative !important;
+    left: auto !important;
+    top: auto !important;
+    width: 100% !important;
+    margin: 0 auto !important;
   }
 
   /* Modo Fechamento & Extrato de Cotações (Isolado) */

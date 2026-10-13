@@ -306,8 +306,8 @@ export default function DanfeEspelhoA4Modal({
   };
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-2 sm:p-4 bg-slate-950/85 backdrop-blur-xs">
-      <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl max-w-5xl w-full max-h-[96vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+    <div className="danfe-modal-overlay fixed inset-0 z-[60] flex items-center justify-center p-2 sm:p-4 bg-slate-950/85 backdrop-blur-xs print:static print:z-auto print:inset-auto print:p-0 print:m-0 print:bg-transparent print:overflow-visible print:h-auto print:max-h-none print:block">
+      <div className="danfe-modal-dialog bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl max-w-5xl w-full max-h-[96vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200 print:static print:border-none print:shadow-none print:bg-transparent print:max-w-none print:max-h-none print:w-full print:h-auto print:overflow-visible print:block print:m-0 print:p-0">
         
         {/* Modal Header */}
         <div className="p-4 bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 border-b border-slate-700 flex items-center justify-between shrink-0 no-print">
@@ -639,9 +639,42 @@ export default function DanfeEspelhoA4Modal({
               margin: 4mm 5mm;
             }
 
+            /* Reseta os containers pais para fluxo normal da folha A4 */
+            html, body {
+              width: 100% !important;
+              height: auto !important;
+              min-height: 100% !important;
+              margin: 0 !important;
+              padding: 0 !important;
+              background: #ffffff !important;
+              overflow: visible !important;
+            }
+
+            #root, #app-root, main,
+            #screen-clientes, #screen-produtos, #screen-orcamento, #screen-vendas,
+            #screen-calculadora, #screen-ordem-servico, #screen-movimentacoes,
+            #screen-estoque, #screen-financeiro, #screen-empresa, #screen-php,
+            #screen-dashboard, #screen-relatorios,
+            .danfe-modal-overlay, .danfe-modal-dialog, .danfe-modal-scroll,
+            .danfe-inner-overlay {
+              display: block !important;
+              position: static !important;
+              overflow: visible !important;
+              height: auto !important;
+              max-height: none !important;
+              min-height: auto !important;
+              margin: 0 !important;
+              padding: 0 !important;
+              border: none !important;
+              box-shadow: none !important;
+              background: transparent !important;
+              transform: none !important;
+              float: none !important;
+            }
+
             /* 1. Esconder todos os elementos de fundo da página */
             body * {
-              visibility: hidden !important;
+              visibility: hidden;
             }
 
             /* Ocultar explicitamente outros relatórios, resumos de pedidos, propostas e componentes da tela */
@@ -677,12 +710,15 @@ export default function DanfeEspelhoA4Modal({
             aside,
             sidebar,
             header,
-            footer {
+            footer,
+            .topbar,
+            .sidebar,
+            .footerbar {
               display: none !important;
               visibility: hidden !important;
             }
 
-            /* 2. Tornar visível apenas o container do DANFE */
+            /* 2. Tornar visível exclusivamente o container do DANFE e seus elementos filhos */
             .danfe-print-container,
             .danfe-print-container *,
             #container-impressao-danfe,
@@ -692,7 +728,7 @@ export default function DanfeEspelhoA4Modal({
               visibility: visible !important;
             }
 
-            /* 3. Garantir que o DANFE ocupe 100% da largura da folha A4 na vertical (portrait) sem cortar as bordas nem sobrepor o espelho da cotação */
+            /* 3. Posicionar o container do DANFE em absolute (left: 0, top: 0, width: 100%) para ocupar 100% da folha A4 */
             .danfe-print-container,
             #container-impressao-danfe {
               display: block !important;
@@ -711,33 +747,36 @@ export default function DanfeEspelhoA4Modal({
               z-index: 99999 !important;
             }
 
-            #folha-danfe-a4 {
+            /* Quando houver aninhamento de .danfe-print-container, o interno fica relativo */
+            .danfe-print-container .danfe-print-container {
+              position: relative !important;
+              left: auto !important;
+              top: auto !important;
+              width: 100% !important;
+              margin: 0 auto !important;
+            }
+
+            #folha-danfe-a4,
+            .danfe-folha-a4 {
               display: block !important;
               width: 100% !important;
               max-width: 100% !important;
               min-height: auto !important;
               margin: 0 auto !important;
-              padding: 2.5mm 3.5mm !important;
+              padding: 2mm 3mm !important;
               box-shadow: none !important;
               border: 1px solid #000000 !important;
               box-sizing: border-box !important;
               background: #ffffff !important;
               page-break-inside: avoid !important;
               break-inside: avoid !important;
-            }
-
-            html, body {
-              background: #ffffff !important;
-              overflow: visible !important;
-              height: auto !important;
-              margin: 0 !important;
-              padding: 0 !important;
+              visibility: visible !important;
             }
           }
         `}</style>
 
         {/* Conteúdo com Scroll da Folha A4 */}
-        <div className="p-4 sm:p-6 overflow-y-auto flex-1 bg-slate-950/60 flex justify-center print:p-0 print:bg-transparent print:overflow-visible print:block">
+        <div className="danfe-modal-scroll p-4 sm:p-6 overflow-y-auto flex-1 bg-slate-950/60 flex justify-center print:static print:p-0 print:m-0 print:bg-transparent print:overflow-visible print:h-auto print:max-h-none print:block print:w-full">
           <div id="container-impressao-danfe" className="danfe-print-container w-full max-w-[820px] print:max-w-none print:w-full print:m-0 print:p-0">
             <DanfeEspelhoA4
               quote={quote}
