@@ -49,6 +49,7 @@ export interface DadosEmitenteNfe {
   telefone: string;
   email?: string;
   regimeTributario: string;
+  aliquotaIcmsSimples?: number;
 }
 
 export interface DadosDestinatarioNfe {
@@ -212,6 +213,51 @@ export function gerarDuplicatasProporcionais(
 
   return resultado;
 }
+
+/**
+ * Obtém a alíquota de ICMS do Simples Nacional configurada no emitente (padrão: 2,75%)
+ */
+export function obterAliquotaIcmsSimples(company?: any): number {
+  if (!company) return 2.75;
+  const aliq = company.aliquotaIcmsSimples ?? company.aliquota_icms_simples;
+  if (typeof aliq === 'number' && !isNaN(aliq) && aliq >= 0) return aliq;
+  if (typeof aliq === 'string' && aliq.trim() !== '') {
+    const parsed = parseFloat(aliq.replace(',', '.'));
+    if (!isNaN(parsed) && parsed >= 0) return parsed;
+  }
+  return 2.75;
+}
+
+/**
+ * Calcula o crédito de ICMS do Simples Nacional (Art. 23 Lei Complementar nº 123/2006)
+ * Valor do Crédito = (Valor Total da Nota * Alíquota ICMS) / 100
+ * Retorna o valor calculado, a alíquota e a frase formatada obrigatória para DANFE e XML (<infAdic>)
+ */
+export function calcularCreditoIcmsSimples(valorTotal: number, aliquota: number = 2.75): {
+  aliquota: number;
+  valorCredito: number;
+  valorCreditoFormatado: string;
+  aliquotaFormatada: string;
+  textoCredito: string;
+} {
+  const safeValor = Math.max(0, Number(valorTotal) || 0);
+  const safeAliq = Math.max(0, Number(aliquota) || 0);
+  const valorCredito = Number(((safeValor * safeAliq) / 100).toFixed(2));
+
+  const valorCreditoFormatado = valorCredito.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const aliquotaFormatada = safeAliq.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  const textoCredito = `Permite o aproveitamento do Credito de ICMS no valor de R$ ${valorCreditoFormatado}; Correspondente a aliquota de ${aliquotaFormatada}%, nos termos do Art. 23 Lei complementar N 123, DE 2006". ( 1 , 2 e 6 ; art. 26, inciso I e 4 ).`;
+
+  return {
+    aliquota: safeAliq,
+    valorCredito,
+    valorCreditoFormatado,
+    aliquotaFormatada,
+    textoCredito
+  };
+}
+
 
 /**
  * 1. CORREÇÃO DEFINITIVA DA BUSCA DO CLIENTE (SUPABASE):
@@ -1294,6 +1340,7 @@ export function gerarXmlNfe(
   const dtIso = dataEmissao.toISOString();
   const cNF = chaveAcesso.slice(35, 43);
   const cDV = chaveAcesso.slice(43, 44);
+  const creditoInfo = calcularCreditoIcmsSimples(valorTotal, emitente.aliquotaIcmsSimples || 2.75);
 
   const xmlItens = itens.map((item, index) => `
     <det nItem="${index + 1}">
@@ -1425,7 +1472,7 @@ export function gerarXmlNfe(
       </detPag>
     </pag>
     <infAdic>
-      <infCpl>DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL. NAO GERA DIREITO A CREDITO FISCAL DE IPI E ICMS. REF. ORCAMENTO/PEDIDO USICORTE.</infCpl>
+      <infCpl>DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL. ${creditoInfo.textoCredito} REF. ORCAMENTO/PEDIDO USICORTE.</infCpl>
     </infAdic>
   </infNFe>
 </NFe>`;
@@ -1490,7 +1537,8 @@ export async function transmitirNfeSefaz(
     uf: (companyData.state || companyData.uf || 'SP').toUpperCase(),
     cep: companyData.cep || '17031-350',
     telefone: companyData.phone || companyData.telefone || '(14) 99880-9362',
-    regimeTributario: companyData.taxRegime || companyData.regime_tributario || 'Simples Nacional'
+    regimeTributario: companyData.taxRegime || companyData.regime_tributario || 'Simples Nacional',
+    aliquotaIcmsSimples: obterAliquotaIcmsSimples(companyData)
   };
 
   // 2. Dados do Destinatário
@@ -1732,6 +1780,7 @@ export function gerarDanfeHtml(
   const valorIbptAprox = totalProdutos * 0.1345;
   const ibptFed = totalProdutos * 0.085;
   const ibptEst = totalProdutos * 0.0495;
+  const creditoInfo = calcularCreditoIcmsSimples(valorTotal, emitente.aliquotaIcmsSimples || 2.75);
 
   const resolvedXml = xmlConteudo || (!isPrevia ? gerarXmlNfe(emitente, destinatario, itens, numeroNfe, serie, chaveAcesso, valorTotal, dataEmissao, protocolo) : '');
 
@@ -2141,29 +2190,30 @@ export function gerarDanfeHtml(
     <div class="box">
       <table style="border-bottom: 1px solid #000;">
         <tr>
-          <td style="width: 45%; padding: 2px; border-right: 1px solid #000;"><div class="title">RAZÃO SOCIAL</div><div class="val">NOSSO CARRO / RETIRA NO BALCÃO</div></td>
-          <td style="width: 25%; padding: 2px; border-right: 1px solid #000;"><div class="title">FRETE POR CONTA</div><div class="val">9 - SEM FRETE</div></td>
+          <td style="width: 35%; padding: 2px; border-right: 1px solid #000;"><div class="title">RAZÃO SOCIAL</div><div class="val">-</div></td>
+          <td style="width: 20%; padding: 2px; border-right: 1px solid #000;"><div class="title">FRETE POR CONTA</div><div class="val">9 - SEM FRETE</div></td>
           <td style="width: 10%; padding: 2px; border-right: 1px solid #000;"><div class="title">CÓDIGO ANTT</div><div class="val">-</div></td>
-          <td style="width: 15%; padding: 2px; border-right: 1px solid #000;"><div class="title">PLACA DO VEÍCULO</div><div class="val">-</div></td>
-          <td style="width: 5%; padding: 2px; text-align: center;"><div class="title">UF</div><div class="val">SP</div></td>
+          <td style="width: 10%; padding: 2px; border-right: 1px solid #000;"><div class="title">PLACA DO VEÍCULO</div><div class="val">-</div></td>
+          <td style="width: 5%; padding: 2px; text-align: center; border-right: 1px solid #000;"><div class="title">UF</div><div class="val">-</div></td>
+          <td style="width: 20%; padding: 2px;"><div class="title">CNPJ / CPF</div><div class="val">-</div></td>
         </tr>
       </table>
       <table style="border-bottom: 1px solid #000;">
         <tr>
-          <td style="width: 50%; padding: 2px; border-right: 1px solid #000;"><div class="title">ENDEREÇO</div><div class="val">${montarEnderecoSemDuplicacao(emitente.endereco, emitente.numero, (emitente as any).complemento, emitente.bairro)}</div></td>
-          <td style="width: 30%; padding: 2px; border-right: 1px solid #000;"><div class="title">MUNICÍPIO</div><div class="val">${emitente.cidade}</div></td>
-          <td style="width: 5%; padding: 2px; text-align: center; border-right: 1px solid #000;"><div class="title">UF</div><div class="val">${emitente.uf}</div></td>
-          <td style="width: 15%; padding: 2px;"><div class="title">INSCRIÇÃO ESTADUAL</div><div class="val" style="font-family: monospace;">${emitente.ie}</div></td>
+          <td style="width: 50%; padding: 2px; border-right: 1px solid #000;"><div class="title">ENDEREÇO</div><div class="val">-</div></td>
+          <td style="width: 30%; padding: 2px; border-right: 1px solid #000;"><div class="title">MUNICÍPIO</div><div class="val">-</div></td>
+          <td style="width: 5%; padding: 2px; text-align: center; border-right: 1px solid #000;"><div class="title">UF</div><div class="val">-</div></td>
+          <td style="width: 15%; padding: 2px;"><div class="title">INSCRIÇÃO ESTADUAL</div><div class="val" style="font-family: monospace;">-</div></td>
         </tr>
       </table>
       <table>
         <tr>
-          <td style="width: 15%; padding: 2px; border-right: 1px solid #000;"><div class="title">QUANTIDADE</div><div class="val">${itens.length || 1}</div></td>
-          <td style="width: 15%; padding: 2px; border-right: 1px solid #000;"><div class="title">ESPÉCIE</div><div class="val">VOLUMES</div></td>
-          <td style="width: 20%; padding: 2px; border-right: 1px solid #000;"><div class="title">MARCA</div><div class="val">USICORTE</div></td>
+          <td style="width: 15%; padding: 2px; border-right: 1px solid #000;"><div class="title">QUANTIDADE</div><div class="val">-</div></td>
+          <td style="width: 15%; padding: 2px; border-right: 1px solid #000;"><div class="title">ESPÉCIE</div><div class="val">-</div></td>
+          <td style="width: 20%; padding: 2px; border-right: 1px solid #000;"><div class="title">MARCA</div><div class="val">-</div></td>
           <td style="width: 20%; padding: 2px; border-right: 1px solid #000;"><div class="title">NUMERAÇÃO</div><div class="val">-</div></td>
-          <td style="width: 15%; padding: 2px; border-right: 1px solid #000;"><div class="title">PESO BRUTO</div><div class="val">0,000 kg</div></td>
-          <td style="width: 15%; padding: 2px;"><div class="title">PESO LÍQUIDO</div><div class="val">0,000 kg</div></td>
+          <td style="width: 15%; padding: 2px; border-right: 1px solid #000;"><div class="title">PESO BRUTO</div><div class="val">-</div></td>
+          <td style="width: 15%; padding: 2px;"><div class="title">PESO LÍQUIDO</div><div class="val">-</div></td>
         </tr>
       </table>
     </div>
@@ -2203,7 +2253,7 @@ export function gerarDanfeHtml(
           <td style="width: 70%; padding: 4px; border-right: 1px solid #000; vertical-align: top;">
             <div class="title">INFORMAÇÕES COMPLEMENTARES</div>
             <div style="font-size: 7.5px; line-height: 1.3;">
-              <strong>DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL. NÃO GERA DIREITO A CRÉDITO FISCAL DE IPI E ICMS.</strong><br>
+              <strong>DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL. ${creditoInfo.textoCredito}</strong><br>
               Valor aprox. tributos: R$ ${ibptFed.toFixed(2).replace('.', ',')} Federal (8,50%), R$ ${ibptEst.toFixed(2).replace('.', ',')} Estadual (4,95%) e R$ 0,00 Municipal. Fonte: IBPT.<br>
               Pedido de Venda / Cotação UsiCorte Ref: Nº ${numeroCotacaoRef || 'COT-1'}.<br>
               ${isPrevia ? '<strong style="color: #b91c1c;">⚠️ ATENÇÃO: MODO DE CONFERÊNCIA. ESTE DOCUMENTO É UMA PRÉVIA E NÃO POSSUI VALIDADE JURÍDICA OU FISCAL.</strong>' : ''}

@@ -18,7 +18,9 @@ import {
   isNfeAutorizada,
   isNfeCancelada,
   obterNomePadraoDanfePdf,
-  formatarDescricaoCompletaItemNfe
+  formatarDescricaoCompletaItemNfe,
+  obterAliquotaIcmsSimples,
+  calcularCreditoIcmsSimples
 } from '../services/nfeService';
 export { buscarInscricaoEstadual, formatarDescricaoCompletaItemNfe };
 import { formatCurrency, formatNumberBR, formatSafeDate } from '../utils/calculator';
@@ -273,6 +275,10 @@ export default function DanfeEspelhoA4({
   const valorFrete = quote.shipping || 0;
   const valorDesconto = quote.discount || 0;
   const valorTotalNota = quote.grandTotal || (totalProdutos - valorDesconto + valorFrete);
+  const aliquotaIcmsSimples = obterAliquotaIcmsSimples(company);
+  const creditoIcms = useMemo(() => {
+    return calcularCreditoIcmsSimples(valorTotalNota, aliquotaIcmsSimples);
+  }, [valorTotalNota, aliquotaIcmsSimples]);
 
   const pesoTotal = quote.totalWeightKg || quote.items?.reduce((acc, it) => acc + (it.totalWeightKg || it.pesoTotal || 0), 0) || 0;
 
@@ -1037,25 +1043,29 @@ export default function DanfeEspelhoA4({
         <div className="border border-black mb-1 divide-y divide-black text-[8px] w-full" style={{ border: '1px solid #000' }}>
           {/* Linha 1 */}
           <div className="grid grid-cols-12 divide-x divide-black">
-            <div className="col-span-5 p-1">
+            <div className="col-span-4 p-1">
               <span className="block text-[6.5px] font-bold uppercase text-gray-600">RAZÃO SOCIAL</span>
-              <span className="uppercase font-semibold truncate block">NOSSO CARRO / RETIRA NO BALCÃO</span>
+              <span className="uppercase font-semibold truncate block">-</span>
             </div>
             <div className="col-span-3 p-1">
               <span className="block text-[6.5px] font-bold uppercase text-gray-600">FRETE POR CONTA</span>
-              <strong>{valorFrete > 0 ? '0 - EMITENTE (CIF)' : '9 - SEM FRETE'}</strong>
+              <strong>9 - SEM FRETE</strong>
             </div>
             <div className="col-span-1 p-1">
               <span className="block text-[6.5px] font-bold uppercase text-gray-600">CÓD. ANTT</span>
               <span>-</span>
             </div>
-            <div className="col-span-2 p-1">
-              <span className="block text-[6.5px] font-bold uppercase text-gray-600">PLACA DO VEÍCULO</span>
+            <div className="col-span-1 p-1">
+              <span className="block text-[6.5px] font-bold uppercase text-gray-600">PLACA VEÍCULO</span>
               <span className="font-mono">-</span>
             </div>
             <div className="col-span-1 p-1 text-center">
               <span className="block text-[6.5px] font-bold uppercase text-gray-600">UF</span>
-              <span>SP</span>
+              <span>-</span>
+            </div>
+            <div className="col-span-2 p-1">
+              <span className="block text-[6.5px] font-bold uppercase text-gray-600">CNPJ / CPF</span>
+              <span className="font-mono truncate block">-</span>
             </div>
           </div>
 
@@ -1063,19 +1073,19 @@ export default function DanfeEspelhoA4({
           <div className="grid grid-cols-12 divide-x divide-black">
             <div className="col-span-5 p-1">
               <span className="block text-[6.5px] font-bold uppercase text-gray-600">ENDEREÇO</span>
-              <span className="uppercase truncate block">{emitente.endereco}</span>
+              <span className="uppercase truncate block">-</span>
             </div>
             <div className="col-span-4 p-1">
               <span className="block text-[6.5px] font-bold uppercase text-gray-600">MUNICÍPIO</span>
-              <span className="uppercase">{emitente.cidade}</span>
+              <span className="uppercase">-</span>
             </div>
             <div className="col-span-1 p-1 text-center">
               <span className="block text-[6.5px] font-bold uppercase text-gray-600">UF</span>
-              <span>{emitente.uf}</span>
+              <span>-</span>
             </div>
             <div className="col-span-2 p-1">
               <span className="block text-[6.5px] font-bold uppercase text-gray-600">INSCRIÇÃO ESTADUAL</span>
-              <span className="font-mono">{emitente.ie}</span>
+              <span className="font-mono">-</span>
             </div>
           </div>
 
@@ -1083,15 +1093,15 @@ export default function DanfeEspelhoA4({
           <div className="grid grid-cols-12 divide-x divide-black">
             <div className="col-span-2 p-1">
               <span className="block text-[6.5px] font-bold uppercase text-gray-600">QUANTIDADE</span>
-              <strong className="font-mono">{itensFiscais.length || 1}</strong>
+              <span className="font-mono">-</span>
             </div>
             <div className="col-span-2 p-1">
               <span className="block text-[6.5px] font-bold uppercase text-gray-600">ESPÉCIE</span>
-              <span>VOLUMES</span>
+              <span>-</span>
             </div>
             <div className="col-span-2 p-1">
               <span className="block text-[6.5px] font-bold uppercase text-gray-600">MARCA</span>
-              <strong>USICORTE</strong>
+              <span>-</span>
             </div>
             <div className="col-span-2 p-1">
               <span className="block text-[6.5px] font-bold uppercase text-gray-600">NUMERAÇÃO</span>
@@ -1099,11 +1109,11 @@ export default function DanfeEspelhoA4({
             </div>
             <div className="col-span-2 p-1">
               <span className="block text-[6.5px] font-bold uppercase text-gray-600">PESO BRUTO</span>
-              <strong className="font-mono">{pesoTotal ? pesoTotal.toFixed(3) : '0,000'} kg</strong>
+              <span className="font-mono">-</span>
             </div>
             <div className="col-span-2 p-1">
               <span className="block text-[6.5px] font-bold uppercase text-gray-600">PESO LÍQUIDO</span>
-              <strong className="font-mono">{pesoTotal ? pesoTotal.toFixed(3) : '0,000'} kg</strong>
+              <span className="font-mono">-</span>
             </div>
           </div>
         </div>
@@ -1203,7 +1213,7 @@ export default function DanfeEspelhoA4({
                   INFORMAÇÕES COMPLEMENTARES
                 </span>
                 <p className="font-bold text-black uppercase">
-                  DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL. NÃO GERA DIREITO A CRÉDITO FISCAL DE IPI E ICMS.
+                  DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL. {creditoIcms.textoCredito}
                 </p>
                 <p className="text-gray-800 mt-0.5">
                   Valor aproximado dos tributos: R$ {ibptFed.toFixed(2).replace('.', ',')} Federal (8,50%), R$ {ibptEst.toFixed(2).replace('.', ',')} Estadual (4,95%) e R$ 0,00 Municipal. Fonte: IBPT.

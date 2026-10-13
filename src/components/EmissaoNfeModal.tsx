@@ -15,7 +15,9 @@ import {
   isNfeAutorizada,
   isNfeCancelada,
   downloadXmlCancelamento,
-  abrirDanfeEmNovaAba
+  abrirDanfeEmNovaAba,
+  obterAliquotaIcmsSimples,
+  calcularCreditoIcmsSimples
 } from '../services/nfeService';
 import CancelarNfeModal from './CancelarNfeModal';
 import DanfeEspelhoA4Modal from './DanfeEspelhoA4Modal';
@@ -131,6 +133,11 @@ export default function EmissaoNfeModal({
   const valorTotal = useMemo(() => {
     return quote.grandTotal || quote.subtotalTotal || itensFiscais.reduce((acc, it) => acc + it.subtotal, 0);
   }, [quote, itensFiscais]);
+
+  const aliquotaIcmsSimples = obterAliquotaIcmsSimples(company);
+  const creditoIcms = useMemo(() => {
+    return calcularCreditoIcmsSimples(valorTotal, aliquotaIcmsSimples);
+  }, [valorTotal, aliquotaIcmsSimples]);
 
   const isOperacaoInterestadual = clienteInfo.uf !== 'SP';
 
@@ -923,11 +930,11 @@ export default function EmissaoNfeModal({
                 {/* 5. Dados Adicionais / Observações ao Fisco */}
                 <div className="text-[9px] font-bold uppercase mb-0.5 text-gray-700">DADOS ADICIONAIS / INFORMAÇÕES COMPLEMENTARES</div>
                 <div className="border border-black p-2 text-[9px] leading-relaxed bg-gray-50/50">
-                  <p className="font-semibold">
-                    DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL. NÃO GERA DIREITO A CRÉDITO FISCAL DE IPI E ICMS.
+                  <p className="font-semibold text-slate-900">
+                    DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL. {creditoIcms.textoCredito}
                   </p>
                   <p className="text-gray-600">
-                    Trib aprox: R$ 0,00 Fed, R$ 0,00 Est e R$ 0,00 Mun - Fonte: IBPT. Cotação de Venda Ref: Nº {quote.quoteNumber}.
+                    Trib aprox: R$ {(valorTotal * 0.085).toFixed(2).replace('.', ',')} Fed, R$ {(valorTotal * 0.0495).toFixed(2).replace('.', ',')} Est e R$ 0,00 Mun - Fonte: IBPT. Cotação de Venda Ref: Nº {quote.quoteNumber}.
                   </p>
                   <p className="text-red-700 font-bold mt-1">
                     ATENÇÃO: MODO DE CONFERÊNCIA. ESTE DOCUMENTO É UMA PRÉVIA E NÃO POSSUI VALIDADE JURÍDICA OU FISCAL.

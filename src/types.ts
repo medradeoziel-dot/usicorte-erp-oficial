@@ -387,6 +387,8 @@ export interface CompanyFiscalData {
   im?: string; // Inscrição Municipal / IM (558747)
   cnae?: string; // CNAE Principal (4744001)
   taxRegime: string; // Regime Tributário (Simples Nacional, etc.)
+  aliquotaIcmsSimples?: number; // Alíquota ICMS Simples Nacional para aproveitamento de crédito (ex: 2.75)
+  aliquota_icms_simples?: number;
 
   // Endereço Completo
   cep: string; // CEP (17031-350)

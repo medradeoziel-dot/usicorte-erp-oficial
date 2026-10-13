@@ -13,6 +13,7 @@ export const DEFAULT_COMPANY_DATA: CompanyFiscalData = {
   im: '558747',
   cnae: '4744001',
   taxRegime: 'Simples Nacional',
+  aliquotaIcmsSimples: 2.75,
 
   // 2. Endereço Completo
   cep: '17031-350',
@@ -65,6 +66,7 @@ export const DEFAULT_COMPANY_DATA: CompanyFiscalData = {
   inscricao_estadual: '209632312114',
   inscricao_municipal: '558747',
   regime_tributario: 'Simples Nacional',
+  aliquota_icms_simples: 2.75,
   endereco: 'RUA CORONEL IVON CESAR PIMENTEL',
   numero: '3-41',
   complemento: '',
@@ -103,6 +105,16 @@ export function mapSupabaseToCompany(row: any): CompanyFiscalData {
     im: row.inscricao_municipal || row.im || DEFAULT_COMPANY_DATA.im,
     cnae: row.cnae || DEFAULT_COMPANY_DATA.cnae,
     taxRegime: row.regime_tributario || row.tax_regime || row.taxRegime || DEFAULT_COMPANY_DATA.taxRegime,
+    aliquotaIcmsSimples: row.aliquota_icms_simples !== undefined && row.aliquota_icms_simples !== null
+      ? Number(row.aliquota_icms_simples)
+      : (row.aliquotaIcmsSimples !== undefined && row.aliquotaIcmsSimples !== null
+        ? Number(row.aliquotaIcmsSimples)
+        : (DEFAULT_COMPANY_DATA.aliquotaIcmsSimples ?? 2.75)),
+    aliquota_icms_simples: row.aliquota_icms_simples !== undefined && row.aliquota_icms_simples !== null
+      ? Number(row.aliquota_icms_simples)
+      : (row.aliquotaIcmsSimples !== undefined && row.aliquotaIcmsSimples !== null
+        ? Number(row.aliquotaIcmsSimples)
+        : (DEFAULT_COMPANY_DATA.aliquota_icms_simples ?? 2.75)),
 
     cep: row.cep || DEFAULT_COMPANY_DATA.cep,
     street: row.endereco || row.logradouro || row.street || DEFAULT_COMPANY_DATA.street,
@@ -316,6 +328,12 @@ export async function fetchCompanyData(): Promise<CompanyFiscalData> {
         instrucoesPagamento: data.instrucoes_pagamento !== null && data.instrucoes_pagamento !== undefined ? data.instrucoes_pagamento : (mapped.instrucoesPagamento ?? local.instrucoesPagamento),
         ultimo_numero_nfe: data.ultimo_numero_nfe !== null && data.ultimo_numero_nfe !== undefined ? Number(data.ultimo_numero_nfe) : (mapped.ultimo_numero_nfe ?? local.ultimo_numero_nfe ?? 0),
         serie_nfe: data.serie_nfe !== null && data.serie_nfe !== undefined ? Number(data.serie_nfe) : (mapped.serie_nfe ?? local.serie_nfe ?? 1),
+        aliquotaIcmsSimples: (data as any).aliquota_icms_simples !== null && (data as any).aliquota_icms_simples !== undefined
+          ? Number((data as any).aliquota_icms_simples)
+          : (mapped.aliquotaIcmsSimples ?? local.aliquotaIcmsSimples ?? 2.75),
+        aliquota_icms_simples: (data as any).aliquota_icms_simples !== null && (data as any).aliquota_icms_simples !== undefined
+          ? Number((data as any).aliquota_icms_simples)
+          : (mapped.aliquota_icms_simples ?? local.aliquota_icms_simples ?? 2.75),
         updated_at: data.created_at || new Date().toISOString()
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));

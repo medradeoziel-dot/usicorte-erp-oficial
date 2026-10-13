@@ -391,6 +391,35 @@ export default function CompanySettingsModule({ onBackToDashboard }: CompanySett
                 <option value="MEI - Microempreendedor Individual">MEI - Microempreendedor Individual</option>
               </select>
             </div>
+
+            {/* Alíquota ICMS Simples Nacional */}
+            <div className="md:col-span-4 flex flex-col gap-1.5">
+              <label className="text-xs font-semibold text-slate-300 flex items-center justify-between">
+                <span>Alíquota ICMS Simples (%)</span>
+                <span className="text-[10px] text-blue-400 font-mono">Crédito DANFE</span>
+              </label>
+              <div className="relative">
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  max="100"
+                  value={formData.aliquotaIcmsSimples !== undefined ? formData.aliquotaIcmsSimples : 2.75}
+                  onChange={(e) => {
+                    const val = parseFloat(e.target.value);
+                    const safeVal = isNaN(val) ? 0 : val;
+                    handleInputChange('aliquotaIcmsSimples', safeVal);
+                    handleInputChange('aliquota_icms_simples', safeVal);
+                  }}
+                  placeholder="2.75"
+                  className="w-full pl-3.5 pr-8 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm outline-none focus:border-blue-500 text-slate-100 font-mono font-bold"
+                />
+                <span className="absolute right-3.5 top-2.5 text-slate-400 text-xs font-bold font-mono pointer-events-none">%</span>
+              </div>
+              <span className="text-[10px] text-slate-400">
+                Aproveitamento de crédito de ICMS no DANFE (Art. 23 LC 123/06). Padrão: 2,75%.
+              </span>
+            </div>
           </div>
         </div>
 
