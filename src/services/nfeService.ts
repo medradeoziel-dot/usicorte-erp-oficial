@@ -1301,7 +1301,7 @@ export function prepararItensFiscais(items: QuoteItem[], ufDestinatario: string)
       ? (it.cfop_interno || cfopPadrao) 
       : (it.cfop_externo || cfopPadrao);
     const rawUn = (it.unidade_medida || it.unidadeMedida || 'PC').trim().toUpperCase();
-    const rawCsosn = it.csosn || '102 - Sem permissão de crédito';
+    const rawCsosn = it.csosn || (it as any).csosn_cst || (it as any).cst || '101 - Com permissão de crédito';
 
     const qty = Number(it.quantity || it.qtd || 1);
     const vUnit = Number(it.unitPrice || it.valorUnitario || 0);

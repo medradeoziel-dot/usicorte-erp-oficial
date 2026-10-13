@@ -153,6 +153,15 @@ export default function EmissaoNfeModal({
     return String(quote.serie_nfe || company.serie_nfe || '1');
   }, [quote.serie_nfe, company.serie_nfe]);
 
+  // Identifica o CSOSN principal para exibição do cabeçalho e regras de crédito
+  const csosnPrincipal = useMemo(() => {
+    if (!itensFiscais || itensFiscais.length === 0) return '101';
+    const item101 = itensFiscais.find(it => (it.csosn || '').includes('101'));
+    if (item101) return '101';
+    const primeiro = (itensFiscais[0].csosn || '').split(' ')[0].replace(/\D/g, '');
+    return primeiro || '101';
+  }, [itensFiscais]);
+
   // 4. Confirmar & Transmitir SEFAZ
   const handleTransmitirSefaz = async () => {
     setIsTransmitting(true);
@@ -272,12 +281,16 @@ export default function EmissaoNfeModal({
               <FileText className="w-5 h-5" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="font-bold text-slate-100 text-base">
                   Revisão Fiscal & Emissão de NF-e
                 </h3>
                 <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
                   Cotação {quote.quoteNumber}
+                </span>
+                <span className="px-2.5 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1 shadow-xs">
+                  <FileText className="w-3 h-3 text-emerald-400" />
+                  NF-e Nº {proximoNumeroNfe} - Série {serieNfe}
                 </span>
               </div>
               <p className="text-xs text-slate-400">
@@ -450,6 +463,15 @@ export default function EmissaoNfeModal({
                     Indicador IE: <strong className="text-slate-300 font-mono">{clienteInfo.indicadorIe}</strong>
                   </span>
                 </div>
+                <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-slate-700/60 mt-1">
+                  <span className="text-slate-400 flex items-center gap-1">
+                    <FileText className="w-3.5 h-3.5 text-indigo-400" />
+                    Numeração Fiscal da Nota:
+                  </span>
+                  <strong className="text-emerald-400 font-mono font-bold bg-slate-900/80 px-2 py-0.5 rounded border border-emerald-500/30">
+                    NF-e Nº {proximoNumeroNfe} - Série {serieNfe}
+                  </strong>
+                </div>
               </div>
             </div>
 
@@ -481,8 +503,8 @@ export default function EmissaoNfeModal({
                 <FileText className="w-4 h-4 text-blue-400" />
                 Itens Fiscais da NF-e ({itensFiscais.length})
               </h4>
-              <span className="text-[11px] text-slate-400">
-                Tributação: Simples Nacional (CSOSN 102)
+              <span className="text-[11px] font-semibold text-indigo-300 bg-indigo-950/60 px-2.5 py-0.5 rounded-lg border border-indigo-500/30">
+                Tributação: Simples Nacional (CSOSN {csosnPrincipal})
               </span>
             </div>
 
@@ -494,6 +516,7 @@ export default function EmissaoNfeModal({
                       <th className="py-2.5 px-3 text-center w-10">Item</th>
                       <th className="py-2.5 px-3">Código & Descrição</th>
                       <th className="py-2.5 px-3 text-center">NCM</th>
+                      <th className="py-2.5 px-3 text-center">CSOSN/CST</th>
                       <th className="py-2.5 px-3 text-center">CFOP</th>
                       <th className="py-2.5 px-3 text-center">UN</th>
                       <th className="py-2.5 px-3 text-right">Qtd</th>
@@ -513,6 +536,11 @@ export default function EmissaoNfeModal({
                         </td>
                         <td className="py-2 px-3 text-center font-mono font-bold text-slate-300">
                           {it.ncm}
+                        </td>
+                        <td className="py-2 px-3 text-center">
+                          <span className="font-mono font-bold px-1.5 py-0.5 rounded text-[11px] text-indigo-300 bg-indigo-950/50 border border-indigo-500/30">
+                            {(it.csosn || '101').split(' ')[0]}
+                          </span>
                         </td>
                         <td className="py-2 px-3 text-center">
                           <span className={`font-mono font-bold px-1.5 py-0.5 rounded text-[11px] ${
@@ -543,9 +571,24 @@ export default function EmissaoNfeModal({
 
           {/* Resumo dos Valores */}
           <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800 flex items-center justify-between flex-wrap gap-4">
-            <div className="text-slate-400 text-xs space-y-0.5">
+            <div className="text-slate-400 text-xs space-y-1">
               <p>• Regime Tributário: <strong className="text-slate-200">Simples Nacional (ME/EPP)</strong></p>
-              <p>• Imposto ICMS / IPI destacado: <strong className="text-slate-200">R$ 0,00 (Sem permissão de crédito)</strong></p>
+              {csosnPrincipal === '101' ? (
+                <p className="text-emerald-400 font-medium">
+                  • Imposto ICMS (Simples Nacional - CSOSN 101):{' '}
+                  <strong className="text-emerald-300 font-bold">
+                    Permite crédito de R$ {creditoIcms.valorCreditoFormatado} (Alíquota de {creditoIcms.aliquotaFormatada}%)
+                  </strong>
+                </p>
+              ) : (
+                <p>
+                  • Imposto ICMS (Simples Nacional - CSOSN {csosnPrincipal}):{' '}
+                  <strong className="text-slate-200">R$ 0,00 (Sem permissão de crédito)</strong>
+                </p>
+              )}
+              <p className="text-[11px] text-slate-500">
+                • IPI: <strong className="text-slate-400">R$ 0,00 (Não tributado / Alíquota zero)</strong>
+              </p>
             </div>
             <div className="text-right">
               <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider block">
@@ -786,8 +829,8 @@ export default function EmissaoNfeModal({
                       0 - ENTRADA<br />
                       <strong>1 - SAÍDA [ 1 ]</strong>
                     </div>
-                    <span className="font-bold text-[11px]">Nº {quote.nfe_numero || String(quote.quoteNumber || '1').replace(/\D/g, '').slice(-6).padStart(6, '0') || '000001'}</span>
-                    <span className="text-[9px]">SÉRIE 1</span>
+                    <span className="font-bold text-[11px]">Nº {proximoNumeroNfe}</span>
+                    <span className="text-[9px]">SÉRIE {serieNfe}</span>
                   </div>
 
                   {/* Chave de Acesso / Protocolo */}
