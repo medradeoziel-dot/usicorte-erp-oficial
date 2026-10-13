@@ -120,7 +120,39 @@ export default function ExtratoCobrancaPrint({
   const hasPaymentInfo = hasPix || hasBank || Boolean(instrucoesPagamento);
 
   return (
-    <div className="secao-extrato bg-white text-black p-6 sm:p-8 max-w-[850px] mx-auto font-sans leading-relaxed text-xs print:p-0 print:m-0 print:max-w-none print:w-full">
+    <div className="secao-extrato bg-white text-black p-6 sm:p-8 max-w-[850px] mx-auto font-sans leading-relaxed text-xs print:p-0 print:m-0 print:max-w-none print:w-full print:h-auto print:overflow-visible">
+      {/* Regras de impressão específicas para garantir página única / sem páginas em branco extras */}
+      <style>{`
+        @media print {
+          .secao-extrato {
+            height: auto !important;
+            min-height: 0 !important;
+            max-height: none !important;
+            overflow: visible !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            page-break-after: avoid !important;
+            break-after: avoid !important;
+          }
+          .extrato-blocos-cotacoes,
+          .bloco-cotacao-extrato,
+          .extrato-total-geral-box,
+          .extrato-pagamento-box,
+          .extrato-assinaturas {
+            height: auto !important;
+            overflow: visible !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
+          .extrato-assinaturas {
+            margin-bottom: 0 !important;
+            padding-bottom: 0 !important;
+            page-break-after: avoid !important;
+            break-after: avoid !important;
+          }
+        }
+      `}</style>
+
       {/* ========================================================
           A) CABEÇALHO SUPERIOR FIXO
           ======================================================== */}
@@ -382,14 +414,14 @@ export default function ExtratoCobrancaPrint({
 
       {/* Observações Complementares */}
       {observacoesExtrato && (
-        <div className="border border-slate-300 rounded p-2.5 mb-4 text-xs text-slate-700 bg-white">
+        <div className="border border-slate-300 rounded p-2.5 mb-4 print:mb-2 print:p-2 text-xs text-slate-700 bg-white">
           <strong className="text-slate-900 block mb-0.5 text-[10.5px] uppercase">Observações Complementares:</strong>
           <p className="whitespace-pre-line">{observacoesExtrato}</p>
         </div>
       )}
 
       {/* Assinaturas / Termo de Conferência */}
-      <div className="extrato-assinaturas flex flex-row justify-between gap-8 pt-5 mt-4 border-t border-slate-300 text-center text-xs">
+      <div className="extrato-assinaturas flex flex-row justify-between gap-8 pt-5 mt-4 print:pt-3 print:mt-2 print:mb-0 border-t border-slate-300 text-center text-xs">
         <div className="flex-1">
           <div className="border-b border-slate-400 w-4/5 mx-auto mb-1"></div>
           <div className="font-bold text-slate-900">{companyData.tradeName || 'USICORTE METAIS'}</div>

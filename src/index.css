@@ -314,19 +314,21 @@
     left: auto !important;
     width: 100% !important;
     max-width: 202mm !important;
-    min-height: 285mm !important;
-    max-height: 289mm !important;
+    min-height: 0 !important;
+    max-height: none !important;
     height: auto !important;
     margin: 0 auto !important;
     margin-top: 0 !important;
-    padding: 0 1.5mm 1mm 1.5mm !important;
+    margin-bottom: 0 !important;
+    padding: 0 1.5mm 0 1.5mm !important;
     padding-top: 0 !important;
+    padding-bottom: 0 !important;
     box-sizing: border-box !important;
     background: #ffffff !important;
     font-family: Arial, Helvetica, sans-serif !important;
     font-size: 7pt !important;
     border: 1px solid #000000 !important;
-    overflow: hidden !important;
+    overflow: visible !important;
     box-shadow: none !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
@@ -334,6 +336,8 @@
     break-after: avoid !important;
     page-break-inside: avoid !important;
     break-inside: avoid !important;
+    page-break-before: avoid !important;
+    break-before: avoid !important;
   }
 
   /* Canhoto superior alinhado imediatamente ao topo */
@@ -475,14 +479,57 @@
     padding: 0 !important;
     margin: 0 !important;
     max-height: none !important;
+    height: auto !important;
     width: 100% !important;
     overflow: visible !important;
+  }
+
+  /* Contêiner principal e blocos do Extrato de Cobrança (sem altura fixa, sem margens sobrando) */
+  body.print-fechamento .secao-extrato,
+  body.print-extrato .secao-extrato,
+  .secao-extrato {
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    margin-bottom: 0 !important;
+    padding: 0 !important;
+    padding-bottom: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+    page-break-after: avoid !important;
+    break-after: avoid !important;
+    page-break-before: avoid !important;
+    break-before: avoid !important;
   }
 
   /* Evita que blocos de cotação sejam cortados entre páginas ao imprimir */
   .bloco-cotacao-extrato {
     page-break-inside: avoid !important;
     break-inside: avoid !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  /* Blocos de totais, dados bancários e assinaturas do Extrato de Cobrança */
+  .extrato-blocos-cotacoes,
+  .extrato-total-geral-box,
+  .extrato-pagamento-box,
+  .extrato-assinaturas {
+    height: auto !important;
+    overflow: visible !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  .extrato-assinaturas {
+    margin-bottom: 0 !important;
+    padding-bottom: 0 !important;
+    page-break-after: avoid !important;
+    break-after: avoid !important;
   }
 
   /* Relatório Geral de Fechamento (somente visível se ativado especificamente) */

@@ -388,7 +388,7 @@ export default function DanfeEspelhoA4({
           html, body {
             width: 100% !important;
             height: auto !important;
-            min-height: 100% !important;
+            min-height: 0 !important;
             max-height: none !important;
             margin: 0 !important;
             padding: 0 !important;
@@ -448,8 +448,10 @@ export default function DanfeEspelhoA4({
             max-width: 100% !important;
             margin: 0 auto !important;
             margin-top: 0 !important;
+            margin-bottom: 0 !important;
             padding: 0 !important;
             padding-top: 0 !important;
+            padding-bottom: 0 !important;
             background: transparent !important;
             overflow: visible !important;
             height: auto !important;
@@ -461,10 +463,14 @@ export default function DanfeEspelhoA4({
             display: block !important;
             position: static !important;
             width: 100% !important;
+            height: auto !important;
             margin: 0 !important;
             margin-top: 0 !important;
+            margin-bottom: 0 !important;
             padding: 0 !important;
             padding-top: 0 !important;
+            padding-bottom: 0 !important;
+            overflow: visible !important;
           }
 
           .danfe-print-container,
@@ -478,24 +484,28 @@ export default function DanfeEspelhoA4({
             left: auto !important;
             width: 100% !important;
             max-width: 202mm !important;
-            min-height: 285mm !important;
-            max-height: 289mm !important;
+            min-height: 0 !important;
+            max-height: none !important;
             height: auto !important;
             margin: 0 auto !important;
             margin-top: 0 !important;
-            padding: 0 1.5mm 1mm 1.5mm !important;
+            margin-bottom: 0 !important;
+            padding: 0 1.5mm 0 1.5mm !important;
             padding-top: 0 !important;
+            padding-bottom: 0 !important;
             box-sizing: border-box !important;
             background: #ffffff !important;
             font-family: Arial, Helvetica, sans-serif !important;
             font-size: 7pt !important;
             border: 1px solid #000000 !important;
-            overflow: hidden !important;
+            overflow: visible !important;
             box-shadow: none !important;
             page-break-after: avoid !important;
             break-after: avoid !important;
             page-break-inside: avoid !important;
             break-inside: avoid !important;
+            page-break-before: avoid !important;
+            break-before: avoid !important;
           }
 
           .danfe-canhoto-topo {
