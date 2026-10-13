@@ -365,7 +365,12 @@ export default function DanfeEspelhoA4({
         @media print {
           @page {
             size: A4 portrait;
-            margin: 5mm;
+            margin: 0mm !important;
+          }
+
+          body {
+            margin: 0 !important;
+            padding: 0 !important;
           }
 
           *, *:before, *:after {
@@ -373,14 +378,15 @@ export default function DanfeEspelhoA4({
             print-color-adjust: exact !important;
           }
 
-          /* Reseta os containers pais para fluxo normal */
+          /* Reseta os containers pais para fluxo limpo */
           html, body {
-            width: auto !important;
-            height: auto !important;
+            width: 210mm !important;
+            height: 297mm !important;
+            max-height: 297mm !important;
             margin: 0 !important;
             padding: 0 !important;
             background: #ffffff !important;
-            overflow: visible !important;
+            overflow: hidden !important;
           }
 
           #root, #app-root, main,
@@ -460,21 +466,28 @@ export default function DanfeEspelhoA4({
             visibility: visible !important;
           }
 
-          /* 3. Posicionar o container do DANFE em absolute (left: 0, top: 0) sem esticar ou alterar proporções */
+          /* 3. Container da folha A4 em formato exato */
           .danfe-print-container {
             position: absolute !important;
             top: 0 !important;
             left: 0 !important;
-            width: 100% !important;
-            max-width: 100% !important;
-            height: auto !important;
+            width: 210mm !important;
+            max-width: 210mm !important;
+            height: 297mm !important;
+            max-height: 297mm !important;
+            min-height: 297mm !important;
             margin: 0 !important;
-            padding: 0 !important;
+            padding: 5mm !important;
             box-sizing: border-box !important;
             background: #ffffff !important;
+            font-family: Arial, Helvetica, sans-serif !important;
+            font-size: 7pt !important;
+            display: flex !important;
+            flex-direction: column !important;
+            justify-content: space-between !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
-            overflow: visible !important;
+            overflow: hidden !important;
             border: none !important;
             box-shadow: none !important;
             z-index: 99999 !important;
@@ -483,28 +496,91 @@ export default function DanfeEspelhoA4({
           .danfe-print-container .danfe-print-container {
             position: static !important;
             width: 100% !important;
-            height: auto !important;
+            height: 100% !important;
             max-width: 100% !important;
+            max-height: 100% !important;
             padding: 0 !important;
             margin: 0 !important;
           }
 
           #folha-danfe-a4,
           .danfe-folha-a4 {
-            display: block !important;
-            width: 100% !important;
-            max-width: 100% !important;
-            height: auto !important;
+            display: flex !important;
+            flex-direction: column !important;
+            justify-content: space-between !important;
+            width: 210mm !important;
+            max-width: 210mm !important;
+            height: 297mm !important;
+            max-height: 297mm !important;
+            min-height: 297mm !important;
             margin: 0 !important;
-            padding: 0 !important;
+            padding: 5mm !important;
             box-sizing: border-box !important;
             background: #ffffff !important;
+            font-family: Arial, Helvetica, sans-serif !important;
+            font-size: 7pt !important;
             visibility: visible !important;
-            overflow: visible !important;
+            overflow: hidden !important;
             border: none !important;
             box-shadow: none !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
+          }
+
+          /* Canhoto superior com exatamente 15mm */
+          .danfe-canhoto-topo {
+            height: 15mm !important;
+            min-height: 15mm !important;
+            max-height: 15mm !important;
+            overflow: hidden !important;
+            box-sizing: border-box !important;
+          }
+
+          /* Bloco do Emitente com 85mm fixos */
+          .danfe-bloco-emitente {
+            width: 85mm !important;
+            min-width: 85mm !important;
+            max-width: 85mm !important;
+            box-sizing: border-box !important;
+          }
+
+          /* Quadro central DANFE com 35mm fixos */
+          .danfe-bloco-danfe {
+            width: 35mm !important;
+            min-width: 35mm !important;
+            max-width: 35mm !important;
+            box-sizing: border-box !important;
+          }
+
+          /* Quadro da Chave de Acesso + Código de barras com 80mm fixos */
+          .danfe-bloco-chave {
+            width: 80mm !important;
+            min-width: 80mm !important;
+            max-width: 80mm !important;
+            box-sizing: border-box !important;
+          }
+
+          /* Tabela de produtos preenche o restante central */
+          .danfe-secao-produtos {
+            flex: 1 1 auto !important;
+            min-height: 20mm !important;
+            display: flex !important;
+            flex-direction: column !important;
+            overflow: hidden !important;
+          }
+
+          /* Bloco Dados Adicionais fixado no rodapé com 35mm de altura */
+          .danfe-bloco-rodape {
+            margin-top: auto !important;
+            flex-shrink: 0 !important;
+          }
+
+          .danfe-bloco-rodape-quadro {
+            height: 35mm !important;
+            min-height: 35mm !important;
+            max-height: 35mm !important;
+            overflow: hidden !important;
+            box-sizing: border-box !important;
           }
         }
       `}</style>
@@ -622,8 +698,18 @@ export default function DanfeEspelhoA4({
       <div 
         ref={printRef}
         id="folha-danfe-a4"
-        className="danfe-print-container danfe-folha-a4 w-full max-w-[210mm] bg-white text-black p-4 sm:p-5 shadow-2xl relative select-text border border-gray-300 font-sans print:shadow-none print:border-none print:p-0 print:m-0 print:w-full print:max-w-none text-[8.5px] leading-tight"
-        style={{ fontFamily: 'Arial, Helvetica, sans-serif' }}
+        className="danfe-print-container danfe-folha-a4 bg-white text-black shadow-2xl relative select-text font-sans print:shadow-none print:border-none print:m-0 flex flex-col justify-between leading-tight"
+        style={{
+          width: '210mm',
+          height: '297mm',
+          minHeight: '297mm',
+          maxHeight: '297mm',
+          padding: '5mm',
+          boxSizing: 'border-box',
+          fontFamily: 'Arial, Helvetica, sans-serif',
+          fontSize: '7pt',
+          border: '1px solid #000'
+        }}
       >
         
         {/* Marca d'água Diagonal Central */}
@@ -648,109 +734,117 @@ export default function DanfeEspelhoA4({
         ) : null}
 
         {/* =========================================================================
-            1. CANHOTO SUPERIOR (Declaração de Recebimento)
+            1. CANHOTO SUPERIOR (Declaração de Recebimento - Fixo em 15mm)
             ========================================================================= */}
-        <div className="border border-black mb-1">
-          <div className="grid grid-cols-12">
-            <div className="col-span-10 p-1 border-r border-black flex flex-col justify-between">
-              <div className="text-[7.5px] uppercase font-semibold leading-tight text-gray-800">
+        <div 
+          className="danfe-canhoto-topo border border-black mb-1 overflow-hidden" 
+          style={{ height: '15mm', minHeight: '15mm', maxHeight: '15mm', width: '200mm', border: '1px solid #000' }}
+        >
+          <div className="flex h-full">
+            <div className="p-1 border-r border-black flex flex-col justify-between" style={{ width: '165mm', borderRight: '1px solid #000' }}>
+              <div className="text-[6.5pt] uppercase font-semibold leading-tight text-gray-800">
                 RECEBEMOS DE <strong>{emitente.razaoSocial}</strong> OS PRODUTOS E/OU SERVIÇOS CONSTANTES DA NOTA FISCAL ELETRÔNICA INDICADA AO LADO.
               </div>
-              <div className="grid grid-cols-12 gap-1 mt-2 pt-1 border-t border-black">
-                <div className="col-span-4 border-r border-black pr-1">
-                  <span className="block text-[6.5px] font-bold uppercase text-gray-600">DATA DE RECEBIMENTO</span>
-                  <div className="h-5 flex items-end font-mono text-[8px] text-gray-400">___ / ___ / ______</div>
+              <div className="flex gap-2 pt-0.5 border-t border-black text-[5.5pt]" style={{ borderTop: '1px solid #000' }}>
+                <div className="border-r border-black pr-2" style={{ width: '45mm', borderRight: '1px solid #000' }}>
+                  <span className="block font-bold uppercase text-gray-600">DATA DE RECEBIMENTO</span>
+                  <div className="font-mono text-gray-400">___ / ___ / ______</div>
                 </div>
-                <div className="col-span-8 pl-1">
-                  <span className="block text-[6.5px] font-bold uppercase text-gray-600">IDENTIFICAÇÃO E ASSINATURA DO RECEBEDOR</span>
-                  <div className="h-5 flex items-end font-mono text-[8px] text-gray-400">________________________________________________________________</div>
+                <div className="flex-1">
+                  <span className="block font-bold uppercase text-gray-600">IDENTIFICAÇÃO E ASSINATURA DO RECEBEDOR</span>
+                  <div className="font-mono text-gray-400 truncate">___________________________________________________</div>
                 </div>
               </div>
             </div>
 
-            <div className="col-span-2 p-1 text-center flex flex-col justify-center items-center bg-gray-50/50">
-              <span className="font-extrabold text-[12px] leading-tight">NF-e</span>
-              <span className="font-bold text-[9px] mt-0.5">Nº {formatarNumeroDanfe(numeroNfe)}</span>
-              <span className="text-[7.5px] text-gray-700">SÉRIE {serie}</span>
+            <div className="p-1 text-center flex flex-col justify-center items-center bg-gray-50/50" style={{ width: '35mm' }}>
+              <span className="font-extrabold text-[10pt] leading-none">NF-e</span>
+              <span className="font-bold text-[7.5pt] mt-0.5 leading-tight">Nº {formatarNumeroDanfe(numeroNfe)}</span>
+              <span className="text-[6pt] text-gray-700 leading-none">SÉRIE {serie}</span>
             </div>
           </div>
         </div>
 
         {/* Linha pontilhada de destaque com tesourinha */}
-        <div className="relative flex items-center justify-center my-1 border-b border-dashed border-gray-500">
-          <span className="absolute bg-white px-2 text-[7px] text-gray-500 uppercase tracking-widest flex items-center gap-1 font-mono">
+        <div className="relative flex items-center justify-center my-0.5 border-b border-dashed border-gray-500" style={{ width: '200mm' }}>
+          <span className="absolute bg-white px-2 text-[6pt] text-gray-500 uppercase tracking-widest flex items-center gap-1 font-mono">
             <Scissors className="w-2.5 h-2.5 rotate-90" /> Destaque aqui
           </span>
         </div>
 
         {/* =========================================================================
-            2. CABEÇALHO DA EMISSÃO
+            2. CABEÇALHO DA EMISSÃO (Emitente 85mm + DANFE 35mm + Chave 80mm = 200mm)
             ========================================================================= */}
-        <div className="grid grid-cols-12 border border-black mb-1 overflow-hidden">
-          {/* Coluna 1: Emitente & Logo (Hierarquia Centralizada Exclusiva do DANFE) */}
-          <div className="col-span-5 p-2 border-r border-black flex flex-col items-center justify-center text-center overflow-hidden">
-            {/* 1. Logo Usicorte Metais (com 'Usi' em preto e 'corte' em vermelho) perfeitamente centralizado no topo */}
-            <div className="flex items-center justify-center w-full mb-1">
-              <Logo variant="print" className="h-8.5 w-auto max-h-10 mx-auto" />
+        <div className="flex border border-black mb-1 overflow-hidden" style={{ width: '200mm', border: '1px solid #000' }}>
+          {/* Coluna 1: Emitente & Logo (85mm fixos) */}
+          <div 
+            className="danfe-bloco-emitente border-r border-black flex flex-col items-center justify-center text-center p-1.5 shrink-0 overflow-hidden"
+            style={{ width: '85mm', minWidth: '85mm', maxWidth: '85mm', borderRight: '1px solid #000' }}
+          >
+            {/* 1. Logo Usicorte Metais */}
+            <div className="flex items-center justify-center w-full mb-0.5">
+              <Logo variant="print" className="h-7 w-auto max-h-8 mx-auto" />
             </div>
 
-            {/* 2. Razão Social em negrito: "L. M. BANZATTO METAIS" (caixa alta, fonte destaque) */}
-            <h1 className="font-extrabold text-[11px] sm:text-[11.5px] uppercase tracking-tight text-black leading-tight">
+            {/* 2. Razão Social: "L. M. BANZATTO METAIS" */}
+            <h1 className="font-extrabold text-[8.5pt] uppercase tracking-tight text-black leading-tight">
               L. M. BANZATTO METAIS
             </h1>
 
-            {/* 3. Nome Fantasia em vermelho e negrito: "USICORTE METAIS" (caixa alta, ligeiramente menor) */}
-            <h2 className="font-bold text-[9.5px] text-red-700 uppercase leading-snug tracking-normal mt-0.5">
+            {/* 3. Nome Fantasia: "USICORTE METAIS" */}
+            <h2 className="font-bold text-[7.5pt] text-red-700 uppercase leading-snug tracking-normal mt-0.5">
               USICORTE METAIS
             </h2>
 
-            {/* [ESPAÇAMENTO VERTICAL ADEQUADO ENTRE O NOME FANTASIA E O ENDEREÇO] */}
-            <div className="my-1.5 w-full" />
-
-            {/* 4. BLOCO DO ENDEREÇO E CONTATO (FONTE MENOR E UNIFORME, CENTRALIZADO) */}
-            <div className="text-[7.5px] leading-snug text-gray-800 font-normal space-y-0.5 w-full">
+            {/* 4. BLOCO DO ENDEREÇO E CONTATO */}
+            <div className="text-[6pt] leading-tight text-gray-800 font-normal space-y-0.5 w-full mt-1">
               <div>RUA CORONEL INON CESAR PIMENTEL, 3-41</div>
-              <div>PARQUE PAULISTA</div>
-              <div>BAURU - SP - CEP: 17031-350</div>
+              <div>PARQUE PAULISTA - BAURU - SP - CEP: 17031-350</div>
               <div className="text-gray-900 font-medium">Fone: (14) 99880-9362 • Email: financeiro@usicorte.com.br</div>
             </div>
           </div>
 
-          {/* Coluna 2: DANFE Box */}
-          <div className="col-span-3 p-1.5 border-r border-black text-center flex flex-col justify-between items-center bg-gray-50/30 overflow-hidden">
+          {/* Coluna 2: DANFE Box (35mm fixos) */}
+          <div 
+            className="danfe-bloco-danfe border-r border-black text-center flex flex-col justify-between items-center bg-gray-50/30 p-1 shrink-0 overflow-hidden"
+            style={{ width: '35mm', minWidth: '35mm', maxWidth: '35mm', borderRight: '1px solid #000' }}
+          >
             <div>
-              <span className="font-black text-sm tracking-widest block leading-none">DANFE</span>
-              <span className="text-[7px] leading-tight block text-gray-700 mt-0.5">
+              <span className="font-black text-[11pt] tracking-widest block leading-none">DANFE</span>
+              <span className="text-[5.5pt] leading-tight block text-gray-700 mt-0.5">
                 Documento Auxiliar da<br />Nota Fiscal Eletrônica
               </span>
             </div>
 
-            <div className="border border-black px-2 py-0.5 my-1 text-[8px] font-bold inline-block leading-tight">
+            <div className="border border-black px-1.5 py-0.5 my-0.5 text-[6.5pt] font-bold inline-block leading-tight" style={{ border: '1px solid #000' }}>
               <span className="text-gray-500">0 - ENTRADA</span><br />
               <strong className="text-black">1 - SAÍDA [ 1 ]</strong>
             </div>
 
             <div>
-              <div className="font-bold text-[10px] leading-tight">Nº {formatarNumeroDanfe(numeroNfe)}</div>
-              <div className="text-[8px] font-semibold text-gray-800">SÉRIE {serie}</div>
-              <div className="text-[7.5px] text-gray-600">FOLHA 1 / 1</div>
+              <div className="font-bold text-[8pt] leading-tight">Nº {formatarNumeroDanfe(numeroNfe)}</div>
+              <div className="text-[6.5pt] font-semibold text-gray-800">SÉRIE {serie}</div>
+              <div className="text-[6pt] text-gray-600">FOLHA 1 / 1</div>
             </div>
           </div>
 
-          {/* Coluna 3: Código de Barras & Chave de Acesso */}
-          <div className="col-span-4 p-1.5 flex flex-col justify-between overflow-hidden">
+          {/* Coluna 3: Código de Barras & Chave de Acesso (80mm fixos) */}
+          <div 
+            className="danfe-bloco-chave flex flex-col justify-between p-1 shrink-0 overflow-hidden"
+            style={{ width: '80mm', minWidth: '80mm', maxWidth: '80mm' }}
+          >
             <div className="min-w-0">
               <BarcodeSimulado chave={chaveAcessoRaw} />
               
               <div className="mt-0.5">
-                <span className="block text-[6.5px] font-bold uppercase text-gray-600">CHAVE DE ACESSO</span>
-                <div className="font-mono text-[7px] font-bold text-black tracking-normal break-all leading-tight">
+                <span className="block text-[5.5pt] font-bold uppercase text-gray-600">CHAVE DE ACESSO</span>
+                <div className="font-mono text-[6pt] font-bold text-black tracking-normal break-all leading-tight">
                   {chaveFormatada}
                 </div>
               </div>
             </div>
 
-            <div className="border-t border-gray-300 pt-0.5 mt-0.5 text-[6.5px] text-gray-700 leading-tight">
+            <div className="border-t border-gray-300 pt-0.5 text-[5.5pt] text-gray-700 leading-tight">
               {isPrevia ? (
                 <span className="text-red-700 font-semibold block">
                   Documento emitido exclusivamente para prévia e conferência tributária.
@@ -762,9 +856,9 @@ export default function DanfeEspelhoA4({
               )}
             </div>
 
-            <div className="border-t border-black pt-0.5 mt-0.5">
-              <span className="block text-[6.5px] font-bold uppercase text-gray-600">PROTOCOLO DE AUTORIZAÇÃO DE USO</span>
-              <div className="font-bold text-[8px] text-black truncate leading-tight">
+            <div className="border-t border-black pt-0.5" style={{ borderTop: '1px solid #000' }}>
+              <span className="block text-[5.5pt] font-bold uppercase text-gray-600">PROTOCOLO DE AUTORIZAÇÃO DE USO</span>
+              <div className="font-bold text-[6.5pt] text-black truncate leading-tight">
                 {protocolo}
               </div>
             </div>
@@ -772,7 +866,7 @@ export default function DanfeEspelhoA4({
         </div>
 
         {/* Natureza da Operação / Inscrição Estadual / CNPJ */}
-        <div className="border border-black mb-1 grid grid-cols-12 divide-x divide-black text-[8px]">
+        <div className="border border-black mb-1 grid grid-cols-12 divide-x divide-black text-[8px]" style={{ width: '200mm', border: '1px solid #000' }}>
           <div className="col-span-6 p-1">
             <span className="block text-[6.5px] font-bold uppercase text-gray-600">NATUREZA DA OPERAÇÃO</span>
             <strong className="text-[9px] uppercase">{isPrevia ? 'VENDA DE MERCADORIA (MODO DE CONFERÊNCIA)' : 'VENDA DE PRODUÇÃO DO ESTABELECIMENTO / MERCADORIA'}</strong>
@@ -790,10 +884,10 @@ export default function DanfeEspelhoA4({
         {/* =========================================================================
             3. DESTINATÁRIO / REMETENTE
             ========================================================================= */}
-        <div className="text-[7.5px] font-black uppercase tracking-wider text-gray-800 mb-0.5">
+        <div className="text-[7.5px] font-black uppercase tracking-wider text-gray-800 mb-0.5" style={{ width: '200mm' }}>
           DESTINATÁRIO / REMETENTE
         </div>
-        <div className="border border-black mb-1 divide-y divide-black text-[8px]">
+        <div className="border border-black mb-1 divide-y divide-black text-[8px]" style={{ width: '200mm', border: '1px solid #000' }}>
           {/* Linha 1 */}
           <div className="grid grid-cols-12 divide-x divide-black">
             <div className="col-span-7 p-1">
@@ -858,10 +952,10 @@ export default function DanfeEspelhoA4({
         {/* =========================================================================
             4. FATURA / DUPLICATAS
             ========================================================================= */}
-        <div className="text-[7.5px] font-black uppercase tracking-wider text-gray-800 mb-0.5">
+        <div className="text-[7.5px] font-black uppercase tracking-wider text-gray-800 mb-0.5" style={{ width: '200mm' }}>
           FATURA / DUPLICATAS
         </div>
-        <div className="border border-black mb-1 p-1 min-h-[28px] flex items-center">
+        <div className="border border-black mb-1 p-1 min-h-[28px] flex items-center" style={{ width: '200mm', border: '1px solid #000' }}>
           {isAVista || duplicatasExibir.length === 0 ? (
             <div className="w-full h-4">
               {/* Quadro rigorosamente vazio para Pagamento À Vista (indPag: 0) */}
@@ -891,10 +985,10 @@ export default function DanfeEspelhoA4({
         {/* =========================================================================
             5. CÁLCULO DO IMPOSTO (GRADE OFICIAL COMPLETA)
             ========================================================================= */}
-        <div className="text-[7.5px] font-black uppercase tracking-wider text-gray-800 mb-0.5">
+        <div className="text-[7.5px] font-black uppercase tracking-wider text-gray-800 mb-0.5" style={{ width: '200mm' }}>
           CÁLCULO DO IMPOSTO
         </div>
-        <div className="border border-black mb-1 divide-y divide-black text-[8px]">
+        <div className="border border-black mb-1 divide-y divide-black text-[8px]" style={{ width: '200mm', border: '1px solid #000' }}>
           {/* Linha 1 */}
           <div className="grid grid-cols-6 divide-x divide-black text-center">
             <div className="p-1">
@@ -955,10 +1049,10 @@ export default function DanfeEspelhoA4({
         {/* =========================================================================
             6. TRANSPORTADOR / VOLUMES TRANSPORTADOS
             ========================================================================= */}
-        <div className="text-[7.5px] font-black uppercase tracking-wider text-gray-800 mb-0.5">
+        <div className="text-[7.5px] font-black uppercase tracking-wider text-gray-800 mb-0.5" style={{ width: '200mm' }}>
           TRANSPORTADOR / VOLUMES TRANSPORTADOS
         </div>
-        <div className="border border-black mb-1 divide-y divide-black text-[8px]">
+        <div className="border border-black mb-1 divide-y divide-black text-[8px]" style={{ width: '200mm', border: '1px solid #000' }}>
           {/* Linha 1 */}
           <div className="grid grid-cols-12 divide-x divide-black">
             <div className="col-span-5 p-1">
@@ -1035,53 +1129,53 @@ export default function DanfeEspelhoA4({
         {/* =========================================================================
             7. TABELA COMPLETA DE DADOS DO PRODUTO / SERVIÇOS
             ========================================================================= */}
-        <div className="danfe-secao-produtos mb-1">
-          <div className="text-[7.5px] font-black uppercase tracking-wider text-gray-800 mb-0.5">
+        <div className="danfe-secao-produtos flex-1 flex flex-col min-h-[20mm] mb-1 overflow-hidden" style={{ width: '200mm' }}>
+          <div className="text-[7.5px] font-black uppercase tracking-wider text-gray-800 mb-0.5 shrink-0">
             DADOS DO PRODUTO / SERVIÇOS
           </div>
-          <div className="border border-black overflow-hidden">
-            <table className="w-full text-left border-collapse text-[7.5px] leading-tight">
-              <thead className="bg-gray-100 border-b border-black text-center font-bold text-[6.5px]">
+          <div className="border border-black overflow-hidden flex-1 flex flex-col" style={{ border: '1px solid #000' }}>
+            <table className="w-full text-left border-collapse text-[7px] leading-tight">
+              <thead className="bg-gray-100 border-b border-black text-center font-bold text-[6px]" style={{ borderBottom: '1px solid #000' }}>
                 <tr>
-                  <th className="p-0.5 border-r border-black w-10">CÓD. PROD.</th>
-                  <th className="p-0.5 border-r border-black text-left">DESCRIÇÃO DO PRODUTO / SERVIÇO</th>
-                  <th className="p-0.5 border-r border-black w-14">NCM/SH</th>
-                  <th className="p-0.5 border-r border-black w-10">CST</th>
-                  <th className="p-0.5 border-r border-black w-10">CFOP</th>
-                  <th className="p-0.5 border-r border-black w-7">UNID.</th>
-                  <th className="p-0.5 border-r border-black w-10 text-right">QUANT.</th>
-                  <th className="p-0.5 border-r border-black w-14 text-right">V. UNIT.</th>
-                  <th className="p-0.5 border-r border-black w-14 text-right">V. TOTAL</th>
-                  <th className="p-0.5 border-r border-black w-10 text-right">DESC.</th>
-                  <th className="p-0.5 border-r border-black w-12 text-right">B. CÁLC. ICMS</th>
-                  <th className="p-0.5 border-r border-black w-10 text-right">V. ICMS</th>
-                  <th className="p-0.5 border-r border-black w-9 text-right">V. IPI</th>
-                  <th className="p-0.5 border-r border-black w-7 text-center">ALÍQ. ICMS</th>
+                  <th className="p-0.5 border-r border-black w-10" style={{ borderRight: '1px solid #000' }}>CÓD. PROD.</th>
+                  <th className="p-0.5 border-r border-black text-left" style={{ borderRight: '1px solid #000' }}>DESCRIÇÃO DO PRODUTO / SERVIÇO</th>
+                  <th className="p-0.5 border-r border-black w-14" style={{ borderRight: '1px solid #000' }}>NCM/SH</th>
+                  <th className="p-0.5 border-r border-black w-10" style={{ borderRight: '1px solid #000' }}>CST</th>
+                  <th className="p-0.5 border-r border-black w-10" style={{ borderRight: '1px solid #000' }}>CFOP</th>
+                  <th className="p-0.5 border-r border-black w-7" style={{ borderRight: '1px solid #000' }}>UNID.</th>
+                  <th className="p-0.5 border-r border-black w-10 text-right" style={{ borderRight: '1px solid #000' }}>QUANT.</th>
+                  <th className="p-0.5 border-r border-black w-14 text-right" style={{ borderRight: '1px solid #000' }}>V. UNIT.</th>
+                  <th className="p-0.5 border-r border-black w-14 text-right" style={{ borderRight: '1px solid #000' }}>V. TOTAL</th>
+                  <th className="p-0.5 border-r border-black w-10 text-right" style={{ borderRight: '1px solid #000' }}>DESC.</th>
+                  <th className="p-0.5 border-r border-black w-12 text-right" style={{ borderRight: '1px solid #000' }}>B. CÁLC. ICMS</th>
+                  <th className="p-0.5 border-r border-black w-10 text-right" style={{ borderRight: '1px solid #000' }}>V. ICMS</th>
+                  <th className="p-0.5 border-r border-black w-9 text-right" style={{ borderRight: '1px solid #000' }}>V. IPI</th>
+                  <th className="p-0.5 border-r border-black w-7 text-center" style={{ borderRight: '1px solid #000' }}>ALÍQ. ICMS</th>
                   <th className="p-0.5 w-7 text-center">ALÍQ. IPI</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-300">
                 {itensFiscais.map((it, idx) => (
                   <tr key={it.id || idx} className="hover:bg-gray-50/50">
-                    <td className="p-0.5 border-r border-black text-center font-mono">{it.codigo}</td>
-                    <td className="p-0.5 border-r border-black">
+                    <td className="p-0.5 border-r border-black text-center font-mono" style={{ borderRight: '1px solid #000' }}>{it.codigo}</td>
+                    <td className="p-0.5 border-r border-black" style={{ borderRight: '1px solid #000' }}>
                       <span className="font-bold block uppercase">{it.descricao}</span>
-                      <span className="text-[6.5px] text-gray-600 block">
+                      <span className="text-[6px] text-gray-600 block">
                         Trib aprox: R$ {(it.subtotal * 0.1345).toFixed(2).replace('.', ',')} Fed/Est (Fonte: IBPT)
                       </span>
                     </td>
-                    <td className="p-0.5 border-r border-black text-center font-mono">{it.ncm}</td>
-                    <td className="p-0.5 border-r border-black text-center font-mono">{it.csosn.split(' ')[0]}</td>
-                    <td className="p-0.5 border-r border-black text-center font-mono font-bold">{it.cfop}</td>
-                    <td className="p-0.5 border-r border-black text-center font-bold">{it.unidade}</td>
-                    <td className="p-0.5 border-r border-black text-right font-mono">{it.quantidade.toFixed(2)}</td>
+                    <td className="p-0.5 border-r border-black text-center font-mono" style={{ borderRight: '1px solid #000' }}>{it.ncm}</td>
+                    <td className="p-0.5 border-r border-black text-center font-mono" style={{ borderRight: '1px solid #000' }}>{it.csosn.split(' ')[0]}</td>
+                    <td className="p-0.5 border-r border-black text-center font-mono font-bold" style={{ borderRight: '1px solid #000' }}>{it.cfop}</td>
+                    <td className="p-0.5 border-r border-black text-center font-bold" style={{ borderRight: '1px solid #000' }}>{it.unidade}</td>
+                    <td className="p-0.5 border-r border-black text-right font-mono" style={{ borderRight: '1px solid #000' }}>{it.quantidade.toFixed(2)}</td>
                     <td className="p-0.5 border-r border-black text-right font-mono">{formatCurrency(it.valorUnitario)}</td>
                     <td className="p-0.5 border-r border-black text-right font-mono font-bold">{formatCurrency(it.subtotal)}</td>
                     <td className="p-0.5 border-r border-black text-right font-mono">0,00</td>
                     <td className="p-0.5 border-r border-black text-right font-mono">0,00</td>
                     <td className="p-0.5 border-r border-black text-right font-mono">0,00</td>
                     <td className="p-0.5 border-r border-black text-right font-mono">0,00</td>
-                    <td className="p-0.5 border-r border-black text-center font-mono">0%</td>
+                    <td className="p-0.5 border-r border-black text-center font-mono" style={{ borderRight: '1px solid #000' }}>0%</td>
                     <td className="p-0.5 text-center font-mono">0%</td>
                   </tr>
                 ))}
@@ -1091,14 +1185,17 @@ export default function DanfeEspelhoA4({
         </div>
 
         {/* =========================================================================
-            8. BLOCO DE DADOS ADICIONAIS NO RODAPÉ
+            8. BLOCO DE DADOS ADICIONAIS NO RODAPÉ (Altura fixa de 35mm)
             ========================================================================= */}
-        <div className="danfe-bloco-rodape pt-0.5 mb-1">
+        <div className="danfe-bloco-rodape mt-auto shrink-0 pt-0.5" style={{ width: '200mm' }}>
           <div className="text-[7.5px] font-black uppercase tracking-wider text-gray-800 mb-0.5">
             DADOS ADICIONAIS
           </div>
-          <div className="border border-black grid grid-cols-12 divide-x divide-black text-[7.5px] min-h-[50px]">
-            <div className="col-span-8 p-1.5 flex flex-col justify-between leading-normal">
+          <div 
+            className="danfe-bloco-rodape-quadro border border-black grid grid-cols-12 divide-x divide-black text-[7px] overflow-hidden" 
+            style={{ height: '35mm', minHeight: '35mm', maxHeight: '35mm', border: '1px solid #000' }}
+          >
+            <div className="col-span-8 p-1.5 flex flex-col justify-between leading-normal overflow-hidden" style={{ borderRight: '1px solid #000' }}>
               <div>
                 <span className="block text-[6.5px] font-bold uppercase text-gray-600 mb-0.5">
                   INFORMAÇÕES COMPLEMENTARES
@@ -1109,7 +1206,7 @@ export default function DanfeEspelhoA4({
                 <p className="text-gray-800 mt-0.5">
                   Valor aproximado dos tributos: R$ {ibptFed.toFixed(2).replace('.', ',')} Federal (8,50%), R$ {ibptEst.toFixed(2).replace('.', ',')} Estadual (4,95%) e R$ 0,00 Municipal. Fonte: IBPT.
                 </p>
-                <p className="text-gray-800 mt-0.5">
+                <p className="text-gray-800 mt-0.5 truncate">
                   Pedido de Venda / Cotação UsiCorte Ref: Nº {quote.quoteNumber || 'COT-1'}. {quote.observations ? `Observações: ${quote.observations}.` : ''}
                 </p>
               </div>
@@ -1121,18 +1218,18 @@ export default function DanfeEspelhoA4({
               )}
             </div>
 
-            <div className="col-span-4 p-1.5 flex flex-col justify-between bg-gray-50/40">
+            <div className="col-span-4 p-1.5 flex flex-col justify-between bg-gray-50/40 overflow-hidden">
               <span className="block text-[6.5px] font-bold uppercase text-gray-600">
                 RESERVADO AO FISCO
               </span>
-              <div className="h-10 border border-dashed border-gray-300 rounded flex items-center justify-center text-[7px] text-gray-400 font-mono">
+              <div className="h-6 border border-dashed border-gray-300 rounded flex items-center justify-center text-[7px] text-gray-400 font-mono">
                 [ÁREA DO FISCO]
               </div>
             </div>
           </div>
 
           {/* Rodapé da Folha A4 */}
-          <div className="mt-1 text-center text-[6.5px] text-gray-500 font-mono flex items-center justify-between border-t border-gray-200 pt-1">
+          <div className="mt-1 text-center text-[6px] text-gray-500 font-mono flex items-center justify-between border-t border-gray-200 pt-0.5">
             <span>UsiCorte Metais ERP • Sistema de Emissão e Gestão Industrial</span>
             <span>DANFE Modelo 55 - Versão 4.00</span>
             <span>Data de Impressão: {new Date().toLocaleDateString('pt-BR')} {new Date().toLocaleTimeString('pt-BR')}</span>
