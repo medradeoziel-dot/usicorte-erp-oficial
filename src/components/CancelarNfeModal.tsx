@@ -292,11 +292,16 @@ export default function CancelarNfeModal({
                 </div>
               </div>
 
-              {/* Mensagem de Erro SEFAZ */}
+              {/* Mensagem de Erro / Rejeição SEFAZ */}
               {errorMsg && (
-                <div className="p-3 rounded-xl bg-rose-950/50 border border-rose-500/50 text-xs text-rose-300 flex items-start gap-2.5 animate-in fade-in">
-                  <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-                  <span>{errorMsg}</span>
+                <div className="p-3.5 rounded-xl bg-rose-950/80 border border-rose-500 text-xs text-rose-200 flex items-start gap-3 animate-in fade-in shadow-lg">
+                  <ShieldAlert className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <strong className="block text-rose-300 font-black uppercase tracking-wider text-[11px]">
+                      Rejeição da SEFAZ:
+                    </strong>
+                    <p className="text-slate-100 font-medium leading-relaxed">{errorMsg}</p>
+                  </div>
                 </div>
               )}
 

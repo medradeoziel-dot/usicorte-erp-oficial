@@ -76,7 +76,7 @@ import EmissaoNfeModal from './EmissaoNfeModal';
 import CancelarNfeModal from './CancelarNfeModal';
 import DanfeEspelhoA4Modal from './DanfeEspelhoA4Modal';
 import OrdemCorte80mm, { imprimirCupom80mm } from './OrdemCorte80mm';
-import { obterOuBaixarXmlNfe, isNfeAutorizada, isNfeCancelada, downloadXmlCancelamento, fetchNotasFiscaisDb } from '../services/nfeService';
+import { obterOuBaixarXmlNfe, isNfeAutorizada, isNfeCancelada, downloadXmlCancelamento, fetchNotasFiscaisDb, resolveStatusNfeFinal } from '../services/nfeService';
 import { 
   ContaReceberParcela,
   fetchBoletosDb,
@@ -178,6 +178,10 @@ export interface ConsultaItem {
   nfe_chave?: string;
   danfe_url?: string;
   clienteId?: string;
+  protocolo_cancelamento?: string;
+  xml_cancelamento?: string;
+  motivo_cancelamento?: string;
+  nfe_cancelada_em?: string;
 }
 
 // Dados de consulta (inicia vazio para produção)
@@ -1110,7 +1114,7 @@ export default function ReportsModule({
           totalWeightKg: 0,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
-          status_nfe: item.status_nfe || 'AUTORIZADA',
+          status_nfe: resolveStatusNfeFinal(item.status_nfe, null, item.nfe_chave),
           nfe_numero: item.nfe_numero,
           nfe_chave: item.nfe_chave,
           chave_acesso: item.nfe_chave,
@@ -1120,7 +1124,7 @@ export default function ReportsModule({
           protocolo_nfe: (item as any).protocolo_nfe
         };
       } else if (quoteObj && item.nfe_chave) {
-        quoteObj.status_nfe = item.status_nfe || quoteObj.status_nfe || 'AUTORIZADA';
+        quoteObj.status_nfe = resolveStatusNfeFinal(quoteObj.status_nfe, item.status_nfe, item.nfe_chave || quoteObj.nfe_chave);
         quoteObj.nfe_numero = item.nfe_numero || quoteObj.nfe_numero;
         quoteObj.nfe_chave = item.nfe_chave || quoteObj.nfe_chave;
         quoteObj.chave_acesso = item.nfe_chave || quoteObj.chave_acesso;
@@ -1297,7 +1301,9 @@ export default function ReportsModule({
       const match = 
         (item.cotacao && item.cotacao === updatedQuote.quoteNumber) ||
         (item.cotacaoId && item.cotacaoId === updatedQuote.id) ||
-        (item.cotacao && item.cotacao === updatedQuote.id);
+        (item.cotacao && item.cotacao === updatedQuote.id) ||
+        (item.nfe_chave && updatedQuote.nfe_chave && item.nfe_chave.replace(/\D/g, '') === updatedQuote.nfe_chave.replace(/\D/g, '')) ||
+        (item.nfe_numero && updatedQuote.nfe_numero && String(item.nfe_numero) === String(updatedQuote.nfe_numero));
       if (match) {
         return {
           ...item,
@@ -1310,6 +1316,8 @@ export default function ReportsModule({
       }
       return item;
     }));
+    // Força atualização completa imediata das listas do Supabase
+    loadAllConsultaData({ forceRefresh: true });
   };
 
   // Callback de sucesso ao emitir / autorizar NF-e
@@ -1409,7 +1417,7 @@ export default function ReportsModule({
                 obs: it.observacao || '',
                 status: computedQuoteStatus,
                 desenhoUrl: it.desenho_url || undefined,
-                status_nfe: q?.status_nfe,
+                status_nfe: resolveStatusNfeFinal(q?.status_nfe || (q as any)?.nfe_status, null, q?.nfe_chave || q?.chave_acesso),
                 nfe_numero: q?.nfe_numero,
                 nfe_chave: q?.nfe_chave,
                 danfe_url: q?.danfe_url
@@ -1473,7 +1481,7 @@ export default function ReportsModule({
                     obs: it.observacao || (it as any).notes || (it as any).obs || '',
                     status: computedQuoteStatus,
                     desenhoUrl: it.desenho_url || undefined,
-                    status_nfe: q.status_nfe,
+                    status_nfe: resolveStatusNfeFinal(q.status_nfe || (q as any).nfe_status, null, q.nfe_chave || q.chave_acesso),
                     nfe_numero: q.nfe_numero,
                     nfe_chave: q.nfe_chave,
                     danfe_url: q.danfe_url
@@ -1546,7 +1554,7 @@ export default function ReportsModule({
                       obs: obsText,
                       status: computedLocalStatus as StatusProposta,
                       desenhoUrl: it.drawingImage || (it as any).fotoDesenho || (it as any).desenho_url || undefined,
-                      status_nfe: q.status_nfe,
+                      status_nfe: resolveStatusNfeFinal(q.status_nfe || (q as any).nfe_status, null, q.nfe_chave || q.chave_acesso),
                       nfe_numero: q.nfe_numero,
                       nfe_chave: q.nfe_chave,
                       danfe_url: q.danfe_url
@@ -1582,14 +1590,19 @@ export default function ReportsModule({
           itemsList.forEach(item => {
             const nf = notasDb.find(n => 
               (n.cotacao_id && (n.cotacao_id === item.cotacaoId || n.cotacao_id === item.cotacao)) ||
-              (item.nfe_chave && n.chave_acesso && item.nfe_chave === n.chave_acesso) ||
+              (item.nfe_chave && n.chave_acesso && item.nfe_chave.replace(/\D/g, '') === n.chave_acesso.replace(/\D/g, '')) ||
               (item.nfe_numero && n.numero_nfe && String(item.nfe_numero) === String(n.numero_nfe))
             );
             if (nf) {
-              item.status_nfe = nf.status || 'AUTORIZADA';
+              item.status_nfe = resolveStatusNfeFinal(nf.status, item.status_nfe, nf.chave_acesso || item.nfe_chave);
               item.nfe_numero = String(nf.numero_nfe);
               item.nfe_chave = nf.chave_acesso;
-              (item as any).protocolo_nfe = nf.protocolo;
+              if (item.status_nfe === 'CANCELADA') {
+                item.protocolo_cancelamento = nf.protocolo || item.protocolo_cancelamento;
+                item.xml_cancelamento = nf.xml_conteudo || item.xml_cancelamento;
+              } else {
+                (item as any).protocolo_nfe = nf.protocolo;
+              }
               (item as any).xml_conteudo = nf.xml_conteudo;
               matchedChaves.add(nf.chave_acesso);
             }
@@ -1601,6 +1614,7 @@ export default function ReportsModule({
               matchedChaves.add(nf.chave_acesso);
               const clientFound = (clients || []).find(c => c.id === nf.cliente_id);
               const cliNome = clientFound?.name || (clientFound as any)?.nome || nf.cliente_nome || 'Cliente NF-e';
+              const resolvedStNfe = resolveStatusNfeFinal(nf.status, null, nf.chave_acesso);
 
               itemsList.push({
                 idVer: 80000 + nfIdx,
@@ -1621,12 +1635,14 @@ export default function ReportsModule({
                 observacao: `Chave de Acesso: ${nf.chave_acesso}`,
                 obs: `Chave de Acesso: ${nf.chave_acesso}`,
                 status: 'faturado' as StatusProposta,
-                status_nfe: nf.status || 'AUTORIZADA',
+                status_nfe: resolvedStNfe,
+                protocolo_cancelamento: resolvedStNfe === 'CANCELADA' ? nf.protocolo : undefined,
+                xml_cancelamento: resolvedStNfe === 'CANCELADA' ? nf.xml_conteudo : undefined,
                 nfe_numero: String(nf.numero_nfe),
                 nfe_chave: nf.chave_acesso,
                 danfe_url: undefined,
                 xml_conteudo: nf.xml_conteudo || undefined,
-                protocolo_nfe: nf.protocolo || undefined
+                protocolo_nfe: resolvedStNfe !== 'CANCELADA' ? nf.protocolo : undefined
               } as any);
             }
           });

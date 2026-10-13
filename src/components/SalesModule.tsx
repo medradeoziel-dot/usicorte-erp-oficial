@@ -4394,8 +4394,15 @@ export default function SalesModule({
           quote={quoteForCancelNfe}
           client={clients.find(c => c.id === quoteForCancelNfe.clientId || (quoteForCancelNfe.clientDocument && c.document === quoteForCancelNfe.clientDocument)) || null}
           onSuccess={(updated) => {
-            setLastSavedQuoteForPrint(updated);
-            setSavedQuotes(prev => prev.map(q => q.id === updated.id || q.quoteNumber === updated.quoteNumber ? updated : q));
+            setLastSavedQuoteForPrint(prev => prev && (prev.id === updated.id || prev.quoteNumber === updated.quoteNumber) ? { ...prev, ...updated, status_nfe: 'CANCELADA' } : updated);
+            setSavedQuotes(prev => prev.map(q => {
+              const matches = 
+                q.id === updated.id || 
+                q.quoteNumber === updated.quoteNumber ||
+                (q.nfe_chave && updated.nfe_chave && q.nfe_chave.replace(/\D/g, '') === updated.nfe_chave.replace(/\D/g, '')) ||
+                (q.nfe_numero && updated.nfe_numero && String(q.nfe_numero) === String(updated.nfe_numero));
+              return matches ? { ...q, ...updated, status_nfe: 'CANCELADA' } : q;
+            }));
             setQuoteForCancelNfe(null);
           }}
           onClose={() => setQuoteForCancelNfe(null)}

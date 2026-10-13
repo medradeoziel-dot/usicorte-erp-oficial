@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Quote, Client } from '../types';
 import { formatCurrency, formatSafeDate } from '../utils/calculator';
 import EmissaoNfeModal from './EmissaoNfeModal';
-import { abrirDanfeEmNovaAba, obterOuBaixarXmlNfe, isNfeAutorizada, isNfeCancelada, downloadXmlCancelamento } from '../services/nfeService';
+import { abrirDanfeEmNovaAba, obterOuBaixarXmlNfe, isNfeAutorizada, isNfeCancelada, downloadXmlCancelamento, resolveStatusNfeFinal } from '../services/nfeService';
 import { fetchNotasFiscaisDb } from '../lib/db';
 import CancelarNfeModal from './CancelarNfeModal';
 import { 
@@ -70,15 +70,21 @@ export default function QuoteHistoryModal({
           base.forEach(q => {
             const match = (notasDb || []).find(nf => 
               (nf.cotacao_id && (nf.cotacao_id === q.id || nf.cotacao_id === q.quoteNumber)) ||
-              (q.nfe_chave && nf.chave_acesso && q.nfe_chave === nf.chave_acesso) ||
+              (q.nfe_chave && nf.chave_acesso && q.nfe_chave.replace(/\D/g, '') === nf.chave_acesso.replace(/\D/g, '')) ||
               (q.nfe_numero && nf.numero_nfe && String(q.nfe_numero) === String(nf.numero_nfe))
             );
             if (match) {
-              q.status_nfe = match.status || 'AUTORIZADA';
+              const finalSt = resolveStatusNfeFinal(match.status, q.status_nfe, match.chave_acesso || q.nfe_chave);
+              q.status_nfe = finalSt;
               q.nfe_numero = String(match.numero_nfe);
               q.nfe_chave = match.chave_acesso;
               q.chave_acesso = match.chave_acesso;
-              q.protocolo_nfe = match.protocolo || q.protocolo_nfe;
+              if (finalSt === 'CANCELADA') {
+                q.protocolo_cancelamento = match.protocolo || q.protocolo_cancelamento;
+                q.xml_cancelamento = match.xml_conteudo || q.xml_cancelamento;
+              } else {
+                q.protocolo_nfe = match.protocolo || q.protocolo_nfe;
+              }
               q.xml_conteudo = match.xml_conteudo || q.xml_conteudo;
               matchedChaves.add(match.chave_acesso);
             }
@@ -91,6 +97,7 @@ export default function QuoteHistoryModal({
               matchedChaves.add(chave);
               const clientFound = clients.find(c => c.id === nf.cliente_id);
               const cliNome = clientFound?.name || clientFound?.nome || nf.cliente_nome || 'Cliente NF-e';
+              const resolvedSt = resolveStatusNfeFinal(nf.status, null, nf.chave_acesso);
 
               const syntheticQuote: Quote = {
                 id: nf.cotacao_id || `nf_${nf.numero_nfe}`,
@@ -99,12 +106,14 @@ export default function QuoteHistoryModal({
                 clientName: cliNome,
                 date: nf.created_at ? nf.created_at.slice(0, 10) : new Date().toISOString().slice(0, 10),
                 status: 'Faturado',
-                status_nfe: nf.status || 'AUTORIZADA',
+                status_nfe: resolvedSt,
+                protocolo_cancelamento: resolvedSt === 'CANCELADA' ? nf.protocolo : undefined,
+                xml_cancelamento: resolvedSt === 'CANCELADA' ? nf.xml_conteudo : undefined,
                 nfe_numero: String(nf.numero_nfe),
                 serie_nfe: String(nf.serie_nfe || '1'),
                 nfe_chave: nf.chave_acesso,
                 chave_acesso: nf.chave_acesso,
-                protocolo_nfe: nf.protocolo || undefined,
+                protocolo_nfe: resolvedSt !== 'CANCELADA' ? nf.protocolo || undefined : undefined,
                 xml_conteudo: nf.xml_conteudo || undefined,
                 grandTotal: Number(nf.valor_total) || 0,
                 subtotalTotal: Number(nf.valor_total) || 0,

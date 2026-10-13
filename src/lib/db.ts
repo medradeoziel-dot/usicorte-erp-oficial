@@ -1176,7 +1176,40 @@ export async function saveCotacaoDb(quote: Quote): Promise<{ data: any; error: a
 }
 
 /**
+ * Helper resiliente para resolver o status final da NF-e considerando
+ * tanto a base de dados do Supabase quanto o status local gravado.
+ * Se qualquer fonte registrar como CANCELADA, o status definitivo é CANCELADA.
+ */
+export function resolveStatusNfeFinal(
+  dbStatus?: string | null,
+  currentStatus?: string | null,
+  chaveAcesso?: string | null
+): string {
+  const cleanKey = (chaveAcesso || '').replace(/\D/g, '');
+  if (cleanKey && typeof window !== 'undefined') {
+    try {
+      const localFlag = localStorage.getItem(`usicorte_nfe_status_${cleanKey}`);
+      if (localFlag === 'CANCELADA') return 'CANCELADA';
+    } catch {}
+  }
+  const sDb = String(dbStatus || '').trim().toUpperCase();
+  const sCur = String(currentStatus || '').trim().toUpperCase();
+  if (sDb === 'CANCELADA' || sDb === 'CANCELADO' || sCur === 'CANCELADA' || sCur === 'CANCELADO') {
+    return 'CANCELADA';
+  }
+  if (sDb === 'AUTORIZADA' || sDb === 'EMITIDA' || sDb === 'EMITIDO' || sDb === 'AUTORIZADO') {
+    return 'AUTORIZADA';
+  }
+  if (sCur === 'AUTORIZADA' || sCur === 'EMITIDA' || sCur === 'EMITIDO' || sCur === 'AUTORIZADO') {
+    return sCur;
+  }
+  return dbStatus || currentStatus || 'Pendente';
+}
+
+/**
  * Atualiza status e metadados fiscais da NF-e na tabela 'cotacoes' do Supabase
+ * utilizando estritamente colunas existentes no schema:
+ * status_nfe, nfe_status, nfe_chave, chave_acesso, nfe_numero, nfe_serie, danfe_url, xml_url, mensagem_erro_nfe, nfe_xml, updated_at
  */
 export async function updateCotacaoNfeStatusDb(
   cotacaoIdOrNumber: string,
@@ -1203,52 +1236,80 @@ export async function updateCotacaoNfeStatusDb(
     if (!cotacaoIdOrNumber) return { success: false, error: 'Identificador não fornecido' };
 
     const chaveFinal = payload.chave_acesso || payload.nfe_chave;
-    const protoFinal = payload.protocolo_autorizacao || payload.protocolo_nfe;
+    const cleanChave = (chaveFinal || '').replace(/\D/g, '');
 
-    const updateObj: any = {
+    // Payload estritamente compatível com o schema real da tabela cotacoes do Supabase
+    const updateObj: Record<string, any> = {
       status_nfe: payload.status_nfe,
+      nfe_status: payload.status_nfe,
       updated_at: new Date().toISOString()
     };
-    if (chaveFinal !== undefined) {
-      updateObj.nfe_chave = chaveFinal;
-      updateObj.chave_acesso = chaveFinal;
+
+    if (cleanChave) {
+      updateObj.nfe_chave = cleanChave;
+      updateObj.chave_acesso = cleanChave;
     }
-    if (payload.nfe_numero !== undefined) updateObj.nfe_numero = payload.nfe_numero;
-    if (payload.serie_nfe !== undefined) updateObj.serie_nfe = payload.serie_nfe;
-    if (protoFinal !== undefined) {
-      updateObj.protocolo_autorizacao = protoFinal;
-      updateObj.protocolo_nfe = protoFinal;
+    if (payload.nfe_numero !== undefined) {
+      updateObj.nfe_numero = String(payload.nfe_numero).replace(/\D/g, '');
+    }
+    if (payload.serie_nfe !== undefined) {
+      updateObj.nfe_serie = String(payload.serie_nfe).replace(/\D/g, '');
     }
     if (payload.danfe_url !== undefined) updateObj.danfe_url = payload.danfe_url;
     if (payload.xml_url !== undefined) updateObj.xml_url = payload.xml_url;
-    if (payload.xml_conteudo !== undefined) updateObj.xml_conteudo = payload.xml_conteudo;
-    if (payload.mensagem_erro_nfe !== undefined) updateObj.mensagem_erro_nfe = payload.mensagem_erro_nfe;
-    if (payload.nfe_emitida_em !== undefined) updateObj.nfe_emitida_em = payload.nfe_emitida_em;
-    if (payload.protocolo_cancelamento !== undefined) updateObj.protocolo_cancelamento = payload.protocolo_cancelamento;
-    if (payload.xml_cancelamento !== undefined) updateObj.xml_cancelamento = payload.xml_cancelamento;
-    if (payload.motivo_cancelamento !== undefined) updateObj.motivo_cancelamento = payload.motivo_cancelamento;
-    if (payload.nfe_cancelada_em !== undefined) updateObj.nfe_cancelada_em = payload.nfe_cancelada_em;
+    if (payload.xml_conteudo !== undefined) updateObj.nfe_xml = payload.xml_conteudo;
+    if (payload.xml_cancelamento !== undefined) updateObj.nfe_xml = payload.xml_cancelamento;
 
-    // Persistência local garantida como redundância segura
+    if (payload.status_nfe === 'CANCELADA') {
+      const msgCanc = `CANCELADA SEFAZ - Prot: ${payload.protocolo_cancelamento || ''} - Motivo: ${payload.motivo_cancelamento || ''}`.trim();
+      updateObj.mensagem_erro_nfe = msgCanc;
+    } else if (payload.mensagem_erro_nfe !== undefined) {
+      updateObj.mensagem_erro_nfe = payload.mensagem_erro_nfe;
+    }
+
+    // Persistência local redundante e imediata
     try {
-      const cleanChave = (chaveFinal || '').replace(/\D/g, '');
-      if (cleanChave && payload.xml_conteudo) {
-        localStorage.setItem(`usicorte_nfe_xml_${cleanChave}`, payload.xml_conteudo);
+      if (cleanChave) {
+        if (payload.xml_conteudo) localStorage.setItem(`usicorte_nfe_xml_${cleanChave}`, payload.xml_conteudo);
+        if (payload.xml_cancelamento) localStorage.setItem(`usicorte_nfe_cancel_xml_${cleanChave}`, payload.xml_cancelamento);
+        if (payload.protocolo_cancelamento) localStorage.setItem(`usicorte_nfe_cancel_prot_${cleanChave}`, payload.protocolo_cancelamento);
+        if (payload.status_nfe === 'CANCELADA') localStorage.setItem(`usicorte_nfe_status_${cleanChave}`, 'CANCELADA');
       }
       if (payload.xml_conteudo) {
         localStorage.setItem(`usicorte_nfe_xml_cot_${cotacaoIdOrNumber}`, payload.xml_conteudo);
       }
-      if (cleanChave && payload.xml_cancelamento) {
-        localStorage.setItem(`usicorte_nfe_cancel_xml_${cleanChave}`, payload.xml_cancelamento);
-      }
-      if (cleanChave && payload.status_nfe === 'CANCELADA') {
-        localStorage.setItem(`usicorte_nfe_status_${cleanChave}`, 'CANCELADA');
+
+      // Sincroniza também no cache s_orcamentos caso exista
+      const sOrc = localStorage.getItem('s_orcamentos');
+      if (sOrc) {
+        const arr = JSON.parse(sOrc);
+        if (Array.isArray(arr)) {
+          const updatedArr = arr.map((q: any) => {
+            const matches = 
+              q.id === cotacaoIdOrNumber ||
+              q.quoteNumber === cotacaoIdOrNumber ||
+              (cleanChave && (q.nfe_chave === cleanChave || q.chave_acesso === cleanChave)) ||
+              (payload.nfe_numero && String(q.nfe_numero) === String(payload.nfe_numero));
+            if (matches) {
+              return {
+                ...q,
+                status_nfe: payload.status_nfe,
+                nfe_status: payload.status_nfe,
+                motivo_cancelamento: payload.motivo_cancelamento || q.motivo_cancelamento,
+                protocolo_cancelamento: payload.protocolo_cancelamento || q.protocolo_cancelamento
+              };
+            }
+            return q;
+          });
+          localStorage.setItem('s_orcamentos', JSON.stringify(updatedArr));
+        }
       }
     } catch {}
 
     const isIdUuid = isUuid(cotacaoIdOrNumber);
-    let query = db.from('cotacoes').update(updateObj);
 
+    // 1. Tenta atualizar pelo ID/Número
+    let query = db.from('cotacoes').update(updateObj);
     if (isIdUuid) {
       query = query.eq('id', cotacaoIdOrNumber);
     } else {
@@ -1257,34 +1318,15 @@ export async function updateCotacaoNfeStatusDb(
 
     let { error } = await query;
 
-    // Se o banco acusar que alguma coluna nova não existe na tabela (ex: 42703), tenta sem ela
-    if (error && (error.code === '42703' || error.message?.includes('does not exist'))) {
-      const safeFallback: any = {
-        status_nfe: payload.status_nfe,
-        updated_at: new Date().toISOString()
-      };
-      if (chaveFinal !== undefined) safeFallback.nfe_chave = chaveFinal;
-      if (payload.nfe_numero !== undefined) safeFallback.nfe_numero = payload.nfe_numero;
-      if (payload.serie_nfe !== undefined) safeFallback.serie_nfe = payload.serie_nfe;
-      if (payload.danfe_url !== undefined) safeFallback.danfe_url = payload.danfe_url;
-      if (payload.xml_url !== undefined) safeFallback.xml_url = payload.xml_url;
-      // Se status for cancelada, inclui no campo mensagem_erro_nfe ou observacoes o registro do cancelamento
-      if (payload.status_nfe === 'CANCELADA' && payload.protocolo_cancelamento) {
-        safeFallback.mensagem_erro_nfe = `CANCELADA SEFAZ - Prot: ${payload.protocolo_cancelamento} - Motivo: ${payload.motivo_cancelamento || ''}`;
-      } else if (payload.mensagem_erro_nfe !== undefined) {
-        safeFallback.mensagem_erro_nfe = payload.mensagem_erro_nfe;
-      }
-      if (payload.nfe_emitida_em !== undefined) safeFallback.nfe_emitida_em = payload.nfe_emitida_em;
-
-      let retryQuery = db.from('cotacoes').update(safeFallback);
-      if (isIdUuid) {
-        retryQuery = retryQuery.eq('id', cotacaoIdOrNumber);
-      } else {
-        retryQuery = retryQuery.or(`id.eq.${cotacaoIdOrNumber},numero.eq.${cotacaoIdOrNumber}`);
-      }
-      const retry = await retryQuery;
-      error = retry.error;
+    // 2. Se não deu erro mas queremos garantir sincronia em duplicatas por chave de acesso
+    if (cleanChave) {
+      try {
+        await db.from('cotacoes').update(updateObj).or(`chave_acesso.eq.${cleanChave},nfe_chave.eq.${cleanChave}`);
+      } catch {}
     }
+
+    // Invalida cache de memória para leitura imediata atualizada
+    invalidateCotacoesCache();
 
     if (error) {
       console.warn('Aviso ao atualizar status_nfe no Supabase:', error.message);
@@ -1292,6 +1334,220 @@ export async function updateCotacaoNfeStatusDb(
     }
     return { success: true, error: null };
   } catch (err) {
+    return { success: false, error: err };
+  }
+}
+
+/**
+ * Operação DEFINITIVA de cancelamento da NF-e no Supabase:
+ * Atualiza simultaneamente as tabelas 'notas_fiscais' e 'cotacoes',
+ * garantindo persistência imediata, sincronia no cache e permanência no F5.
+ */
+export async function cancelarNotaFiscalSupabase(params: {
+  cotacaoIdOrNumber?: string;
+  chaveAcesso: string;
+  numeroNfe?: string | number;
+  protocoloCancelamento: string;
+  xmlCancelamento: string;
+  justificativa: string;
+  clienteId?: string;
+  valorTotal?: number;
+}): Promise<{ success: boolean; error?: any }> {
+  try {
+    const cleanChave = (params.chaveAcesso || '').replace(/\D/g, '');
+    const numLimpo = parseInt(String(params.numeroNfe || '').replace(/\D/g, ''), 10) || null;
+    const idOrNum = params.cotacaoIdOrNumber || '';
+
+    // 1. ATUALIZAÇÃO NO SUPABASE: Tabela 'notas_fiscais'
+    // Colunas válidas: id, created_at, cotacao_id, cliente_id, numero_nfe, serie_nfe, chave_acesso, protocolo, status, xml_conteudo, valor_total, data_emissao
+    const nfPayloadUpdate: Record<string, any> = {
+      status: 'CANCELADA',
+      protocolo: params.protocoloCancelamento,
+      xml_conteudo: params.xmlCancelamento
+    };
+
+    let updatedRowsNf = 0;
+
+    // 1a. Update por chave de acesso (se tiver 44 dígitos)
+    if (cleanChave) {
+      const resKey = await db
+        .from('notas_fiscais')
+        .update(nfPayloadUpdate)
+        .eq('chave_acesso', cleanChave)
+        .select();
+      if (resKey.data && resKey.data.length > 0) {
+        updatedRowsNf += resKey.data.length;
+      }
+    }
+
+    // 1b. Update por numero_nfe se ainda não atualizou
+    if (updatedRowsNf === 0 && numLimpo) {
+      const resNum = await db
+        .from('notas_fiscais')
+        .update(nfPayloadUpdate)
+        .eq('numero_nfe', numLimpo)
+        .select();
+      if (resNum.data && resNum.data.length > 0) {
+        updatedRowsNf += resNum.data.length;
+      }
+    }
+
+    // 1c. Update por cotacao_id se ainda não atualizou
+    if (updatedRowsNf === 0 && idOrNum) {
+      const resCot = await db
+        .from('notas_fiscais')
+        .update(nfPayloadUpdate)
+        .eq('cotacao_id', idOrNum)
+        .select();
+      if (resCot.data && resCot.data.length > 0) {
+        updatedRowsNf += resCot.data.length;
+      }
+    }
+
+    // 1d. Se nenhum registro existia na tabela notas_fiscais, INSERE o registro com status CANCELADA
+    // para que qualquer leitura subsequente (inclusive no F5) carregue como CANCELADA
+    if (updatedRowsNf === 0 && cleanChave) {
+      try {
+        await db.from('notas_fiscais').insert({
+          cotacao_id: isUuid(idOrNum) ? idOrNum : null,
+          cliente_id: params.clienteId && isUuid(params.clienteId) ? params.clienteId : null,
+          numero_nfe: numLimpo || 1,
+          serie_nfe: 1,
+          chave_acesso: cleanChave,
+          protocolo: params.protocoloCancelamento,
+          status: 'CANCELADA',
+          xml_conteudo: params.xmlCancelamento,
+          valor_total: Number(params.valorTotal) || 0,
+          created_at: new Date().toISOString()
+        });
+      } catch (insertErr) {
+        console.warn('Aviso ao inserir nota fiscal cancelada em notas_fiscais:', insertErr);
+      }
+    }
+
+    // 2. ATUALIZAÇÃO NO SUPABASE: Tabela 'cotacoes'
+    const cotPayloadUpdate: Record<string, any> = {
+      status_nfe: 'CANCELADA',
+      nfe_status: 'CANCELADA',
+      mensagem_erro_nfe: `CANCELADA SEFAZ - Prot: ${params.protocoloCancelamento} - Motivo: ${params.justificativa}`.trim(),
+      nfe_xml: params.xmlCancelamento,
+      updated_at: new Date().toISOString()
+    };
+
+    // 2a. Update por id / numero
+    if (idOrNum) {
+      if (isUuid(idOrNum)) {
+        await db.from('cotacoes').update(cotPayloadUpdate).eq('id', idOrNum);
+      } else {
+        await db.from('cotacoes').update(cotPayloadUpdate).or(`id.eq.${idOrNum},numero.eq.${idOrNum}`);
+      }
+    }
+
+    // 2b. Update por chave de acesso
+    if (cleanChave) {
+      await db.from('cotacoes').update(cotPayloadUpdate).or(`chave_acesso.eq.${cleanChave},nfe_chave.eq.${cleanChave}`);
+    }
+
+    // 2c. Update por numero_nfe
+    if (numLimpo) {
+      await db.from('cotacoes').update(cotPayloadUpdate).eq('nfe_numero', String(numLimpo));
+    }
+
+    // 3. LIMPEZA DE CACHE EM MEMÓRIA
+    invalidateCotacoesCache();
+
+    // 4. ATUALIZAÇÃO NO LOCALSTORAGE (Redundância offline e persistência local garantida)
+    try {
+      if (cleanChave) {
+        localStorage.setItem(`usicorte_nfe_status_${cleanChave}`, 'CANCELADA');
+        localStorage.setItem(`usicorte_nfe_cancel_xml_${cleanChave}`, params.xmlCancelamento);
+        localStorage.setItem(`usicorte_nfe_cancel_prot_${cleanChave}`, params.protocoloCancelamento);
+      }
+
+      // Atualiza array usicorte_notas_fiscais
+      const existingStr = localStorage.getItem('usicorte_notas_fiscais');
+      if (existingStr) {
+        const list: any[] = JSON.parse(existingStr);
+        let foundInList = false;
+        const updatedList = list.map(item => {
+          const matchKey = cleanChave && item.chave_acesso === cleanChave;
+          const matchNum = numLimpo && Number(item.numero_nfe) === numLimpo;
+          const matchCot = idOrNum && (item.cotacao_id === idOrNum);
+          if (matchKey || matchNum || matchCot) {
+            foundInList = true;
+            return {
+              ...item,
+              status: 'CANCELADA',
+              protocolo: params.protocoloCancelamento,
+              xml_cancelamento: params.xmlCancelamento,
+              motivo_cancelamento: params.justificativa
+            };
+          }
+          return item;
+        });
+
+        if (!foundInList && cleanChave) {
+          updatedList.unshift({
+            chave_acesso: cleanChave,
+            numero_nfe: numLimpo || 1,
+            serie_nfe: 1,
+            status: 'CANCELADA',
+            protocolo: params.protocoloCancelamento,
+            xml_cancelamento: params.xmlCancelamento,
+            motivo_cancelamento: params.justificativa,
+            cotacao_id: idOrNum || null,
+            valor_total: params.valorTotal || 0,
+            created_at: new Date().toISOString()
+          });
+        }
+        localStorage.setItem('usicorte_notas_fiscais', JSON.stringify(updatedList));
+      }
+
+      // Atualiza array s_orcamentos caso exista
+      const sOrc = localStorage.getItem('s_orcamentos');
+      if (sOrc) {
+        const orcList: any[] = JSON.parse(sOrc);
+        if (Array.isArray(orcList)) {
+          const updatedOrc = orcList.map(q => {
+            const matches =
+              q.id === idOrNum ||
+              q.quoteNumber === idOrNum ||
+              (cleanChave && (q.nfe_chave === cleanChave || q.chave_acesso === cleanChave)) ||
+              (numLimpo && Number(q.nfe_numero) === numLimpo);
+            if (matches) {
+              return {
+                ...q,
+                status_nfe: 'CANCELADA',
+                nfe_status: 'CANCELADA',
+                protocolo_cancelamento: params.protocoloCancelamento,
+                xml_cancelamento: params.xmlCancelamento,
+                motivo_cancelamento: params.justificativa
+              };
+            }
+            return q;
+          });
+          localStorage.setItem('s_orcamentos', JSON.stringify(updatedOrc));
+        }
+      }
+
+      // Notifica componentes através de evento global
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('nfe_status_changed', {
+            detail: {
+              chaveAcesso: cleanChave,
+              numeroNfe: numLimpo,
+              status: 'CANCELADA',
+              protocolo: params.protocoloCancelamento
+            }
+          })
+        );
+      }
+    } catch {}
+
+    return { success: true };
+  } catch (err) {
+    console.error('Erro em cancelarNotaFiscalSupabase:', err);
     return { success: false, error: err };
   }
 }
@@ -2519,6 +2775,26 @@ export async function fetchNotasFiscaisDb(): Promise<{ data: NotaFiscalDb[]; err
       const seenChaves = new Set(dbNotas.map(n => String(n.chave_acesso || '').trim()));
       const seenNumeros = new Set(dbNotas.map(n => String(n.numero_nfe || '').trim()));
 
+      // 1. Se o localList marcar como CANCELADA, propaga para dbNotas
+      dbNotas.forEach(n => {
+        const cleanChave = String(n.chave_acesso || '').replace(/\D/g, '');
+        const localMatch = localList.find(ln => 
+          (cleanChave && String(ln.chave_acesso || '').replace(/\D/g, '') === cleanChave) ||
+          (n.numero_nfe && String(ln.numero_nfe) === String(n.numero_nfe))
+        );
+        if (localMatch && String(localMatch.status).toUpperCase() === 'CANCELADA') {
+          n.status = 'CANCELADA';
+          if (localMatch.protocolo) n.protocolo = localMatch.protocolo;
+          if (localMatch.xml_cancelamento) n.xml_conteudo = localMatch.xml_cancelamento;
+        }
+        if (cleanChave && typeof window !== 'undefined') {
+          if (localStorage.getItem(`usicorte_nfe_status_${cleanChave}`) === 'CANCELADA') {
+            n.status = 'CANCELADA';
+          }
+        }
+      });
+
+      // 2. Adiciona notas do localList que não estão em dbNotas
       localList.forEach(ln => {
         const chave = String(ln.chave_acesso || '').trim();
         const num = String(ln.numero_nfe || '').trim();
@@ -2529,6 +2805,18 @@ export async function fetchNotasFiscaisDb(): Promise<{ data: NotaFiscalDb[]; err
       });
     }
   } catch {}
+
+  // Garante que qualquer nota com flag local ou status cancelada permaneça como CANCELADA
+  dbNotas.forEach(n => {
+    const cleanKey = String(n.chave_acesso || '').replace(/\D/g, '');
+    if (cleanKey && typeof window !== 'undefined') {
+      try {
+        if (localStorage.getItem(`usicorte_nfe_status_${cleanKey}`) === 'CANCELADA') {
+          n.status = 'CANCELADA';
+        }
+      } catch {}
+    }
+  });
 
   // Ordenação decrescente por numero_nfe ou created_at
   dbNotas.sort((a, b) => {

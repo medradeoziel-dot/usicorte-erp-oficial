@@ -81,7 +81,15 @@ function normalizeLocalQuote(raw: any, fallbackIndex: number): Quote {
     grandTotal,
     items: normalizedItems,
     createdAt: raw.createdAt || raw.created_at || new Date().toISOString(),
-    updatedAt: new Date().toISOString()
+    updatedAt: new Date().toISOString(),
+    status_nfe: raw.status_nfe || raw.nfe_status || (raw.nfe_chave ? 'AUTORIZADA' : 'Pendente'),
+    nfe_numero: raw.nfe_numero,
+    serie_nfe: raw.serie_nfe,
+    nfe_chave: raw.nfe_chave || raw.chave_acesso,
+    chave_acesso: raw.chave_acesso || raw.nfe_chave,
+    protocolo_cancelamento: raw.protocolo_cancelamento,
+    xml_cancelamento: raw.xml_cancelamento,
+    motivo_cancelamento: raw.motivo_cancelamento
   };
 }
 
