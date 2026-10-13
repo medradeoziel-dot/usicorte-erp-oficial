@@ -360,23 +360,30 @@ export default function DanfeEspelhoA4({
 
   return (
     <div className="danfe-inner-overlay fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex flex-col items-center justify-between overflow-y-auto p-2 sm:p-4 print:p-0 print:m-0 print:bg-white print:static print:z-auto print:inset-auto print:overflow-visible print:h-auto print:max-h-none print:block print:w-full">
-      {/* Estilos CSS Scoped para isolamento absoluto da impressão da DANFE */}
+      {/* Estilos CSS Scoped para isolamento e formatação oficial A4 Portrait da DANFE */}
       <style>{`
         @media print {
           @page {
             size: A4 portrait;
-            margin: 4mm 5mm;
+            margin: 5mm;
+          }
+
+          *, *:before, *:after {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
 
           /* Reseta os containers pais para fluxo normal da folha A4 */
           html, body {
             width: 100% !important;
-            height: auto !important;
-            min-height: 100% !important;
+            height: 287mm !important;
+            max-height: 287mm !important;
             margin: 0 !important;
             padding: 0 !important;
             background: #ffffff !important;
-            overflow: visible !important;
+            overflow: hidden !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
 
           #root, #app-root, main,
@@ -457,42 +464,54 @@ export default function DanfeEspelhoA4({
             visibility: visible !important;
           }
 
-          /* 3. Posicionar o container do DANFE em absolute (left: 0, top: 0, width: 100%) para ocupar 100% da folha A4 */
+          /* 3. Posicionar o container do DANFE em absolute (left: 0, top: 0, width: 100%) ocupando exatamente a altura da folha A4 (287mm) */
           .danfe-print-container,
           #container-impressao-danfe {
-            display: block !important;
+            display: flex !important;
+            flex-direction: column !important;
+            justify-content: space-between !important;
             position: absolute !important;
             left: 0 !important;
             top: 0 !important;
             width: 100% !important;
             max-width: 100% !important;
+            height: 287mm !important;
+            max-height: 287mm !important;
             margin: 0 !important;
             padding: 0 !important;
             background: #ffffff !important;
             box-shadow: none !important;
             border: none !important;
-            overflow: visible !important;
+            overflow: hidden !important;
             box-sizing: border-box !important;
             z-index: 99999 !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
 
-          /* Quando houver aninhamento de .danfe-print-container, o interno fica relativo */
+          /* Quando houver aninhamento de .danfe-print-container, o interno fica relativo e preenche 100% */
           .danfe-print-container .danfe-print-container {
             position: relative !important;
             left: auto !important;
             top: auto !important;
             width: 100% !important;
+            height: 100% !important;
+            max-height: 287mm !important;
             margin: 0 auto !important;
           }
 
           #folha-danfe-a4,
           .danfe-folha-a4 {
-            display: block !important;
+            display: flex !important;
+            flex-direction: column !important;
+            justify-content: space-between !important;
             width: 100% !important;
             max-width: 100% !important;
-            min-height: auto !important;
+            height: 287mm !important;
+            max-height: 287mm !important;
+            min-height: 287mm !important;
             margin: 0 auto !important;
-            padding: 2mm 3mm !important;
+            padding: 2.5mm 3.5mm !important;
             box-shadow: none !important;
             border: 1px solid #000000 !important;
             box-sizing: border-box !important;
@@ -500,6 +519,30 @@ export default function DanfeEspelhoA4({
             page-break-inside: avoid !important;
             break-inside: avoid !important;
             visibility: visible !important;
+            overflow: hidden !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+
+          .danfe-secao-produtos {
+            flex: 1 1 auto !important;
+            min-height: 0 !important;
+            display: flex !important;
+            flex-direction: column !important;
+            margin-bottom: 1.5mm !important;
+            overflow: hidden !important;
+          }
+
+          .danfe-secao-produtos > div {
+            flex: 1 1 auto !important;
+            min-height: 0 !important;
+            display: flex !important;
+            flex-direction: column !important;
+          }
+
+          .danfe-bloco-rodape {
+            margin-top: auto !important;
+            flex-shrink: 0 !important;
           }
         }
       `}</style>
@@ -617,7 +660,7 @@ export default function DanfeEspelhoA4({
       <div 
         ref={printRef}
         id="folha-danfe-a4"
-        className="danfe-print-container w-full max-w-[210mm] min-h-[297mm] bg-white text-black p-[6mm] shadow-2xl relative select-text border border-gray-300 font-sans print:shadow-none print:border-none print:p-[2.5mm_3.5mm] print:m-0 print:w-full print:max-w-none text-[8.5px] leading-tight"
+        className="danfe-print-container danfe-folha-a4 w-full max-w-[210mm] min-h-[297mm] bg-white text-black p-[6mm] shadow-2xl relative select-text border border-gray-300 font-sans print:shadow-none print:border-none print:p-[2.5mm_3.5mm] print:m-0 print:w-full print:max-w-none print:h-[287mm] print:max-h-[287mm] print:min-h-[287mm] flex flex-col justify-between text-[8.5px] leading-tight"
         style={{ fontFamily: 'Arial, Helvetica, sans-serif' }}
       >
         
@@ -1028,106 +1071,110 @@ export default function DanfeEspelhoA4({
         </div>
 
         {/* =========================================================================
-            7. TABELA COMPLETA DE DADOS DO PRODUTO / SERVIÇOS
+            7. TABELA COMPLETA DE DADOS DO PRODUTO / SERVIÇOS (Preenche o espaço central)
             ========================================================================= */}
-        <div className="text-[7.5px] font-black uppercase tracking-wider text-gray-800 mb-0.5">
-          DADOS DO PRODUTO / SERVIÇOS
-        </div>
-        <div className="border border-black mb-1 overflow-hidden">
-          <table className="w-full text-left border-collapse text-[7.5px] leading-tight">
-            <thead className="bg-gray-100 border-b border-black text-center font-bold text-[6.5px]">
-              <tr>
-                <th className="p-0.5 border-r border-black w-10">CÓD. PROD.</th>
-                <th className="p-0.5 border-r border-black text-left">DESCRIÇÃO DO PRODUTO / SERVIÇO</th>
-                <th className="p-0.5 border-r border-black w-14">NCM/SH</th>
-                <th className="p-0.5 border-r border-black w-10">CST</th>
-                <th className="p-0.5 border-r border-black w-10">CFOP</th>
-                <th className="p-0.5 border-r border-black w-7">UNID.</th>
-                <th className="p-0.5 border-r border-black w-10 text-right">QUANT.</th>
-                <th className="p-0.5 border-r border-black w-14 text-right">V. UNIT.</th>
-                <th className="p-0.5 border-r border-black w-14 text-right">V. TOTAL</th>
-                <th className="p-0.5 border-r border-black w-10 text-right">DESC.</th>
-                <th className="p-0.5 border-r border-black w-12 text-right">B. CÁLC. ICMS</th>
-                <th className="p-0.5 border-r border-black w-10 text-right">V. ICMS</th>
-                <th className="p-0.5 border-r border-black w-9 text-right">V. IPI</th>
-                <th className="p-0.5 border-r border-black w-7 text-center">ALÍQ. ICMS</th>
-                <th className="p-0.5 w-7 text-center">ALÍQ. IPI</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-300">
-              {itensFiscais.map((it, idx) => (
-                <tr key={it.id || idx} className="hover:bg-gray-50/50">
-                  <td className="p-0.5 border-r border-black text-center font-mono">{it.codigo}</td>
-                  <td className="p-0.5 border-r border-black">
-                    <span className="font-bold block uppercase">{it.descricao}</span>
-                    <span className="text-[6.5px] text-gray-600 block">
-                      Trib aprox: R$ {(it.subtotal * 0.1345).toFixed(2).replace('.', ',')} Fed/Est (Fonte: IBPT)
-                    </span>
-                  </td>
-                  <td className="p-0.5 border-r border-black text-center font-mono">{it.ncm}</td>
-                  <td className="p-0.5 border-r border-black text-center font-mono">{it.csosn.split(' ')[0]}</td>
-                  <td className="p-0.5 border-r border-black text-center font-mono font-bold">{it.cfop}</td>
-                  <td className="p-0.5 border-r border-black text-center font-bold">{it.unidade}</td>
-                  <td className="p-0.5 border-r border-black text-right font-mono">{it.quantidade.toFixed(2)}</td>
-                  <td className="p-0.5 border-r border-black text-right font-mono">{formatCurrency(it.valorUnitario)}</td>
-                  <td className="p-0.5 border-r border-black text-right font-mono font-bold">{formatCurrency(it.subtotal)}</td>
-                  <td className="p-0.5 border-r border-black text-right font-mono">0,00</td>
-                  <td className="p-0.5 border-r border-black text-right font-mono">0,00</td>
-                  <td className="p-0.5 border-r border-black text-right font-mono">0,00</td>
-                  <td className="p-0.5 border-r border-black text-right font-mono">0,00</td>
-                  <td className="p-0.5 border-r border-black text-center font-mono">0%</td>
-                  <td className="p-0.5 text-center font-mono">0%</td>
+        <div className="danfe-secao-produtos flex-1 flex flex-col min-h-0 mb-1 overflow-hidden">
+          <div className="text-[7.5px] font-black uppercase tracking-wider text-gray-800 mb-0.5 shrink-0">
+            DADOS DO PRODUTO / SERVIÇOS
+          </div>
+          <div className="border border-black overflow-hidden flex-1 flex flex-col min-h-0">
+            <table className="w-full text-left border-collapse text-[7.5px] leading-tight">
+              <thead className="bg-gray-100 border-b border-black text-center font-bold text-[6.5px]">
+                <tr>
+                  <th className="p-0.5 border-r border-black w-10">CÓD. PROD.</th>
+                  <th className="p-0.5 border-r border-black text-left">DESCRIÇÃO DO PRODUTO / SERVIÇO</th>
+                  <th className="p-0.5 border-r border-black w-14">NCM/SH</th>
+                  <th className="p-0.5 border-r border-black w-10">CST</th>
+                  <th className="p-0.5 border-r border-black w-10">CFOP</th>
+                  <th className="p-0.5 border-r border-black w-7">UNID.</th>
+                  <th className="p-0.5 border-r border-black w-10 text-right">QUANT.</th>
+                  <th className="p-0.5 border-r border-black w-14 text-right">V. UNIT.</th>
+                  <th className="p-0.5 border-r border-black w-14 text-right">V. TOTAL</th>
+                  <th className="p-0.5 border-r border-black w-10 text-right">DESC.</th>
+                  <th className="p-0.5 border-r border-black w-12 text-right">B. CÁLC. ICMS</th>
+                  <th className="p-0.5 border-r border-black w-10 text-right">V. ICMS</th>
+                  <th className="p-0.5 border-r border-black w-9 text-right">V. IPI</th>
+                  <th className="p-0.5 border-r border-black w-7 text-center">ALÍQ. ICMS</th>
+                  <th className="p-0.5 w-7 text-center">ALÍQ. IPI</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-gray-300">
+                {itensFiscais.map((it, idx) => (
+                  <tr key={it.id || idx} className="hover:bg-gray-50/50">
+                    <td className="p-0.5 border-r border-black text-center font-mono">{it.codigo}</td>
+                    <td className="p-0.5 border-r border-black">
+                      <span className="font-bold block uppercase">{it.descricao}</span>
+                      <span className="text-[6.5px] text-gray-600 block">
+                        Trib aprox: R$ {(it.subtotal * 0.1345).toFixed(2).replace('.', ',')} Fed/Est (Fonte: IBPT)
+                      </span>
+                    </td>
+                    <td className="p-0.5 border-r border-black text-center font-mono">{it.ncm}</td>
+                    <td className="p-0.5 border-r border-black text-center font-mono">{it.csosn.split(' ')[0]}</td>
+                    <td className="p-0.5 border-r border-black text-center font-mono font-bold">{it.cfop}</td>
+                    <td className="p-0.5 border-r border-black text-center font-bold">{it.unidade}</td>
+                    <td className="p-0.5 border-r border-black text-right font-mono">{it.quantidade.toFixed(2)}</td>
+                    <td className="p-0.5 border-r border-black text-right font-mono">{formatCurrency(it.valorUnitario)}</td>
+                    <td className="p-0.5 border-r border-black text-right font-mono font-bold">{formatCurrency(it.subtotal)}</td>
+                    <td className="p-0.5 border-r border-black text-right font-mono">0,00</td>
+                    <td className="p-0.5 border-r border-black text-right font-mono">0,00</td>
+                    <td className="p-0.5 border-r border-black text-right font-mono">0,00</td>
+                    <td className="p-0.5 border-r border-black text-right font-mono">0,00</td>
+                    <td className="p-0.5 border-r border-black text-center font-mono">0%</td>
+                    <td className="p-0.5 text-center font-mono">0%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
 
         {/* =========================================================================
-            8. DADOS ADICIONAIS / INFORMAÇÕES COMPLEMENTARES
+            8. BLOCO INFERIOR FIXADO NO RODAPÉ (margin-top: auto)
             ========================================================================= */}
-        <div className="text-[7.5px] font-black uppercase tracking-wider text-gray-800 mb-0.5">
-          DADOS ADICIONAIS
-        </div>
-        <div className="border border-black grid grid-cols-12 divide-x divide-black text-[7.5px] min-h-[52px]">
-          <div className="col-span-8 p-1.5 flex flex-col justify-between leading-normal">
-            <div>
-              <span className="block text-[6.5px] font-bold uppercase text-gray-600 mb-0.5">
-                INFORMAÇÕES COMPLEMENTARES
-              </span>
-              <p className="font-bold text-black uppercase">
-                DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL. NÃO GERA DIREITO A CRÉDITO FISCAL DE IPI E ICMS.
-              </p>
-              <p className="text-gray-800 mt-0.5">
-                Valor aproximado dos tributos: R$ {ibptFed.toFixed(2).replace('.', ',')} Federal (8,50%), R$ {ibptEst.toFixed(2).replace('.', ',')} Estadual (4,95%) e R$ 0,00 Municipal. Fonte: IBPT.
-              </p>
-              <p className="text-gray-800 mt-0.5">
-                Pedido de Venda / Cotação UsiCorte Ref: Nº {quote.quoteNumber || 'COT-1'}. {quote.observations ? `Observações: ${quote.observations}.` : ''}
-              </p>
-            </div>
-            
-            {isPrevia && (
-              <div className="mt-1 pt-1 border-t border-dashed border-red-400 text-red-700 font-bold text-[7px] uppercase">
-                ⚠️ MODO DE CONFERÊNCIA: ESTA PRÉVIA NÃO POSSUI VALIDADE FISCAL OU JURÍDICA. VALORES SUJEITOS À TRANSMISSÃO SEFAZ.
+        <div className="danfe-bloco-rodape mt-auto shrink-0 pt-0.5">
+          <div className="text-[7.5px] font-black uppercase tracking-wider text-gray-800 mb-0.5">
+            DADOS ADICIONAIS
+          </div>
+          <div className="border border-black grid grid-cols-12 divide-x divide-black text-[7.5px] min-h-[50px]">
+            <div className="col-span-8 p-1.5 flex flex-col justify-between leading-normal">
+              <div>
+                <span className="block text-[6.5px] font-bold uppercase text-gray-600 mb-0.5">
+                  INFORMAÇÕES COMPLEMENTARES
+                </span>
+                <p className="font-bold text-black uppercase">
+                  DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL. NÃO GERA DIREITO A CRÉDITO FISCAL DE IPI E ICMS.
+                </p>
+                <p className="text-gray-800 mt-0.5">
+                  Valor aproximado dos tributos: R$ {ibptFed.toFixed(2).replace('.', ',')} Federal (8,50%), R$ {ibptEst.toFixed(2).replace('.', ',')} Estadual (4,95%) e R$ 0,00 Municipal. Fonte: IBPT.
+                </p>
+                <p className="text-gray-800 mt-0.5">
+                  Pedido de Venda / Cotação UsiCorte Ref: Nº {quote.quoteNumber || 'COT-1'}. {quote.observations ? `Observações: ${quote.observations}.` : ''}
+                </p>
               </div>
-            )}
-          </div>
+              
+              {isPrevia && (
+                <div className="mt-1 pt-1 border-t border-dashed border-red-400 text-red-700 font-bold text-[7px] uppercase">
+                  ⚠️ MODO DE CONFERÊNCIA: ESTA PRÉVIA NÃO POSSUI VALIDADE FISCAL OU JURÍDICA. VALORES SUJEITOS À TRANSMISSÃO SEFAZ.
+                </div>
+              )}
+            </div>
 
-          <div className="col-span-4 p-1.5 flex flex-col justify-between bg-gray-50/40">
-            <span className="block text-[6.5px] font-bold uppercase text-gray-600">
-              RESERVADO AO FISCO
-            </span>
-            <div className="h-10 border border-dashed border-gray-300 rounded flex items-center justify-center text-[7px] text-gray-400 font-mono">
-              [ÁREA DO FISCO]
+            <div className="col-span-4 p-1.5 flex flex-col justify-between bg-gray-50/40">
+              <span className="block text-[6.5px] font-bold uppercase text-gray-600">
+                RESERVADO AO FISCO
+              </span>
+              <div className="h-10 border border-dashed border-gray-300 rounded flex items-center justify-center text-[7px] text-gray-400 font-mono">
+                [ÁREA DO FISCO]
+              </div>
             </div>
           </div>
-        </div>
 
-        {/* Rodapé da Folha A4 */}
-        <div className="mt-2 text-center text-[6.5px] text-gray-500 font-mono flex items-center justify-between border-t border-gray-200 pt-1">
-          <span>UsiCorte Metais ERP • Sistema de Emissão e Gestão Industrial</span>
-          <span>DANFE Modelo 55 - Versão 4.00</span>
-          <span>Data de Impressão: {new Date().toLocaleDateString('pt-BR')} {new Date().toLocaleTimeString('pt-BR')}</span>
+          {/* Rodapé da Folha A4 */}
+          <div className="mt-1 text-center text-[6.5px] text-gray-500 font-mono flex items-center justify-between border-t border-gray-200 pt-1">
+            <span>UsiCorte Metais ERP • Sistema de Emissão e Gestão Industrial</span>
+            <span>DANFE Modelo 55 - Versão 4.00</span>
+            <span>Data de Impressão: {new Date().toLocaleDateString('pt-BR')} {new Date().toLocaleTimeString('pt-BR')}</span>
+          </div>
         </div>
 
       </div>

@@ -631,23 +631,30 @@ export default function DanfeEspelhoA4Modal({
           )}
         </div>
 
-        {/* Estilos CSS Scoped para isolamento absoluto da impressão da DANFE */}
+        {/* Estilos CSS Scoped para isolamento e formatação oficial A4 Portrait da DANFE */}
         <style>{`
           @media print {
             @page {
               size: A4 portrait;
-              margin: 4mm 5mm;
+              margin: 5mm;
+            }
+
+            *, *:before, *:after {
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
             }
 
             /* Reseta os containers pais para fluxo normal da folha A4 */
             html, body {
               width: 100% !important;
-              height: auto !important;
-              min-height: 100% !important;
+              height: 287mm !important;
+              max-height: 287mm !important;
               margin: 0 !important;
               padding: 0 !important;
               background: #ffffff !important;
-              overflow: visible !important;
+              overflow: hidden !important;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
             }
 
             #root, #app-root, main,
@@ -728,42 +735,54 @@ export default function DanfeEspelhoA4Modal({
               visibility: visible !important;
             }
 
-            /* 3. Posicionar o container do DANFE em absolute (left: 0, top: 0, width: 100%) para ocupar 100% da folha A4 */
+            /* 3. Posicionar o container do DANFE em absolute (left: 0, top: 0, width: 100%) ocupando exatamente a altura da folha A4 (287mm) */
             .danfe-print-container,
             #container-impressao-danfe {
-              display: block !important;
+              display: flex !important;
+              flex-direction: column !important;
+              justify-content: space-between !important;
               position: absolute !important;
               left: 0 !important;
               top: 0 !important;
               width: 100% !important;
               max-width: 100% !important;
+              height: 287mm !important;
+              max-height: 287mm !important;
               margin: 0 !important;
               padding: 0 !important;
               background: #ffffff !important;
               box-shadow: none !important;
               border: none !important;
-              overflow: visible !important;
+              overflow: hidden !important;
               box-sizing: border-box !important;
               z-index: 99999 !important;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
             }
 
-            /* Quando houver aninhamento de .danfe-print-container, o interno fica relativo */
+            /* Quando houver aninhamento de .danfe-print-container, o interno fica relativo e preenche 100% */
             .danfe-print-container .danfe-print-container {
               position: relative !important;
               left: auto !important;
               top: auto !important;
               width: 100% !important;
+              height: 100% !important;
+              max-height: 287mm !important;
               margin: 0 auto !important;
             }
 
             #folha-danfe-a4,
             .danfe-folha-a4 {
-              display: block !important;
+              display: flex !important;
+              flex-direction: column !important;
+              justify-content: space-between !important;
               width: 100% !important;
               max-width: 100% !important;
-              min-height: auto !important;
+              height: 287mm !important;
+              max-height: 287mm !important;
+              min-height: 287mm !important;
               margin: 0 auto !important;
-              padding: 2mm 3mm !important;
+              padding: 2.5mm 3.5mm !important;
               box-shadow: none !important;
               border: 1px solid #000000 !important;
               box-sizing: border-box !important;
@@ -771,6 +790,30 @@ export default function DanfeEspelhoA4Modal({
               page-break-inside: avoid !important;
               break-inside: avoid !important;
               visibility: visible !important;
+              overflow: hidden !important;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+
+            .danfe-secao-produtos {
+              flex: 1 1 auto !important;
+              min-height: 0 !important;
+              display: flex !important;
+              flex-direction: column !important;
+              margin-bottom: 1.5mm !important;
+              overflow: hidden !important;
+            }
+
+            .danfe-secao-produtos > div {
+              flex: 1 1 auto !important;
+              min-height: 0 !important;
+              display: flex !important;
+              flex-direction: column !important;
+            }
+
+            .danfe-bloco-rodape {
+              margin-top: auto !important;
+              flex-shrink: 0 !important;
             }
           }
         `}</style>
