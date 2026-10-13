@@ -359,13 +359,13 @@ export default function DanfeEspelhoA4({
   };
 
   return (
-    <div className="danfe-inner-overlay fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex flex-col items-center justify-between overflow-y-auto p-2 sm:p-4 print:p-0 print:m-0 print:bg-white print:static print:z-auto print:inset-auto print:overflow-visible print:h-auto print:max-h-none print:block print:w-full">
+    <div className="danfe-inner-overlay fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex flex-col items-center overflow-y-auto p-2 sm:p-4 print:p-0 print:m-0 print:bg-white print:static print:z-auto print:inset-auto print:overflow-visible print:h-auto print:block print:w-full">
       {/* Estilos CSS Scoped para isolamento e formatação oficial A4 Portrait da DANFE */}
       <style>{`
         @media print {
           @page {
             size: A4 portrait;
-            margin: 0mm !important;
+            margin: 5mm;
           }
 
           *, *:before, *:after {
@@ -373,17 +373,14 @@ export default function DanfeEspelhoA4({
             print-color-adjust: exact !important;
           }
 
-          /* Reseta os containers pais para fluxo normal da folha A4 */
+          /* Reseta os containers pais para fluxo normal */
           html, body {
-            width: 210mm !important;
-            height: 297mm !important;
-            max-height: 297mm !important;
+            width: auto !important;
+            height: auto !important;
             margin: 0 !important;
             padding: 0 !important;
             background: #ffffff !important;
-            overflow: hidden !important;
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
+            overflow: visible !important;
           }
 
           #root, #app-root, main,
@@ -463,30 +460,21 @@ export default function DanfeEspelhoA4({
             visibility: visible !important;
           }
 
-          /* 3. Posicionar o container do DANFE em absolute (left: 0, top: 0) ocupando exatamente a folha A4 (210mm x 297mm) com padding de 4mm */
+          /* 3. Posicionar o container do DANFE em absolute (left: 0, top: 0) sem esticar ou alterar proporções */
           .danfe-print-container {
-            width: 210mm !important;
-            height: 297mm !important;
-            max-width: 210mm !important;
-            max-height: 297mm !important;
-            min-height: 297mm !important;
-            padding: 4mm !important;
-            box-sizing: border-box !important;
             position: absolute !important;
             top: 0 !important;
             left: 0 !important;
-            background: #fff !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            height: auto !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            box-sizing: border-box !important;
+            background: #ffffff !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
-            display: flex !important;
-            flex-direction: column !important;
-            justify-content: space-between !important;
-            overflow: hidden !important;
-            page-break-inside: avoid !important;
-            break-inside: avoid !important;
-            page-break-after: avoid !important;
-            break-after: avoid !important;
-            margin: 0 !important;
+            overflow: visible !important;
             border: none !important;
             box-shadow: none !important;
             z-index: 99999 !important;
@@ -495,61 +483,28 @@ export default function DanfeEspelhoA4({
           .danfe-print-container .danfe-print-container {
             position: static !important;
             width: 100% !important;
-            height: 100% !important;
+            height: auto !important;
             max-width: 100% !important;
-            max-height: 100% !important;
             padding: 0 !important;
             margin: 0 !important;
           }
 
           #folha-danfe-a4,
           .danfe-folha-a4 {
-            display: flex !important;
-            flex-direction: column !important;
-            justify-content: space-between !important;
-            width: 210mm !important;
-            height: 297mm !important;
-            max-width: 210mm !important;
-            max-height: 297mm !important;
-            min-height: 297mm !important;
-            padding: 4mm !important;
-            box-sizing: border-box !important;
-            position: absolute !important;
-            top: 0 !important;
-            left: 0 !important;
+            display: block !important;
+            width: 100% !important;
+            max-width: 100% !important;
+            height: auto !important;
             margin: 0 !important;
+            padding: 0 !important;
+            box-sizing: border-box !important;
             background: #ffffff !important;
-            page-break-inside: avoid !important;
-            break-inside: avoid !important;
-            page-break-after: avoid !important;
-            break-after: avoid !important;
             visibility: visible !important;
-            overflow: hidden !important;
+            overflow: visible !important;
             border: none !important;
             box-shadow: none !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
-          }
-
-          .danfe-secao-produtos {
-            flex: 1 1 auto !important;
-            min-height: 0 !important;
-            display: flex !important;
-            flex-direction: column !important;
-            margin-bottom: 1.5mm !important;
-            overflow: hidden !important;
-          }
-
-          .danfe-secao-produtos > div {
-            flex: 1 1 auto !important;
-            min-height: 0 !important;
-            display: flex !important;
-            flex-direction: column !important;
-          }
-
-          .danfe-bloco-rodape {
-            margin-top: auto !important;
-            flex-shrink: 0 !important;
           }
         }
       `}</style>
@@ -667,7 +622,7 @@ export default function DanfeEspelhoA4({
       <div 
         ref={printRef}
         id="folha-danfe-a4"
-        className="danfe-print-container danfe-folha-a4 w-full max-w-[210mm] min-h-[297mm] bg-white text-black p-[6mm] shadow-2xl relative select-text border border-gray-300 font-sans print:shadow-none print:border-none print:p-[4mm] print:m-0 print:w-[210mm] print:max-w-[210mm] print:h-[297mm] print:max-h-[297mm] print:min-h-[297mm] flex flex-col justify-between text-[8.5px] leading-tight"
+        className="danfe-print-container danfe-folha-a4 w-full max-w-[210mm] bg-white text-black p-4 sm:p-5 shadow-2xl relative select-text border border-gray-300 font-sans print:shadow-none print:border-none print:p-0 print:m-0 print:w-full print:max-w-none text-[8.5px] leading-tight"
         style={{ fontFamily: 'Arial, Helvetica, sans-serif' }}
       >
         
@@ -1078,13 +1033,13 @@ export default function DanfeEspelhoA4({
         </div>
 
         {/* =========================================================================
-            7. TABELA COMPLETA DE DADOS DO PRODUTO / SERVIÇOS (Preenche o espaço central)
+            7. TABELA COMPLETA DE DADOS DO PRODUTO / SERVIÇOS
             ========================================================================= */}
-        <div className="danfe-secao-produtos flex-1 flex flex-col min-h-0 mb-1 overflow-hidden">
-          <div className="text-[7.5px] font-black uppercase tracking-wider text-gray-800 mb-0.5 shrink-0">
+        <div className="danfe-secao-produtos mb-1">
+          <div className="text-[7.5px] font-black uppercase tracking-wider text-gray-800 mb-0.5">
             DADOS DO PRODUTO / SERVIÇOS
           </div>
-          <div className="border border-black overflow-hidden flex-1 flex flex-col min-h-0">
+          <div className="border border-black overflow-hidden">
             <table className="w-full text-left border-collapse text-[7.5px] leading-tight">
               <thead className="bg-gray-100 border-b border-black text-center font-bold text-[6.5px]">
                 <tr>
@@ -1136,9 +1091,9 @@ export default function DanfeEspelhoA4({
         </div>
 
         {/* =========================================================================
-            8. BLOCO INFERIOR FIXADO NO RODAPÉ (margin-top: auto)
+            8. BLOCO DE DADOS ADICIONAIS NO RODAPÉ
             ========================================================================= */}
-        <div className="danfe-bloco-rodape mt-auto shrink-0 pt-0.5">
+        <div className="danfe-bloco-rodape pt-0.5 mb-1">
           <div className="text-[7.5px] font-black uppercase tracking-wider text-gray-800 mb-0.5">
             DADOS ADICIONAIS
           </div>
