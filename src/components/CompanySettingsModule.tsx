@@ -30,6 +30,7 @@ import { CompanyFiscalData } from '../types';
 import { 
   fetchCompanyData, 
   saveCompanyData, 
+  updateEmitenteNfeConfig,
   DEFAULT_COMPANY_DATA 
 } from '../services/companyService';
 import { formatCNPJ, formatCPF, formatCEP, formatPhone } from '../utils/validators';
@@ -64,11 +65,46 @@ export default function CompanySettingsModule({ onBackToDashboard }: CompanySett
     load();
   }, []);
 
+  // Sincronização em tempo real de eventos da empresa (ex: emissão de NF-e com incremento automático)
+  useEffect(() => {
+    const handleUpdate = (e: CustomEvent) => {
+      if (e.detail && e.detail.ultimo_numero_nfe !== undefined) {
+        setFormData(prev => ({
+          ...prev,
+          ultimo_numero_nfe: e.detail.ultimo_numero_nfe,
+          serie_nfe: e.detail.serie_nfe !== undefined ? e.detail.serie_nfe : prev.serie_nfe
+        }));
+      }
+    };
+    window.addEventListener('company-data-updated', handleUpdate as EventListener);
+    return () => window.removeEventListener('company-data-updated', handleUpdate as EventListener);
+  }, []);
+
   const showStatus = (text: string, type: 'success' | 'error' | 'info') => {
     setStatusMessage({ text, type });
     setTimeout(() => {
       setStatusMessage(prev => prev.text === text ? { text: '', type: null } : prev);
     }, 6000);
+  };
+
+  const handleSalvarUltimoNumeroNfe = async (numeroEspecifico?: number) => {
+    const valor = numeroEspecifico !== undefined 
+      ? numeroEspecifico 
+      : (Number(formData.ultimo_numero_nfe) || 0);
+
+    const validVal = isNaN(valor) || valor < 0 ? 0 : valor;
+
+    try {
+      const res = await updateEmitenteNfeConfig(validVal, formData.serie_nfe || 1);
+      if (res.success) {
+        setFormData(prev => ({ ...prev, ultimo_numero_nfe: validVal }));
+        showStatus('Número da NF-e atualizado com sucesso!', 'success');
+      } else {
+        showStatus('Aviso: Número da NF-e salvo localmente.', 'info');
+      }
+    } catch (e: any) {
+      showStatus(`Erro ao atualizar número da NF-e: ${e?.message || 'Falha de conexão'}`, 'error');
+    }
   };
 
   const handleInputChange = (field: keyof CompanyFiscalData, value: any) => {
@@ -180,7 +216,7 @@ export default function CompanySettingsModule({ onBackToDashboard }: CompanySett
       const res = await saveCompanyData(formData);
       if (res.success) {
         setFormData(res.data);
-        showStatus('Dados da empresa e emitente gravados com sucesso! Cabeçalhos e relatórios atualizados.', 'success');
+        showStatus('Número da NF-e atualizado com sucesso!', 'success');
       } else {
         showStatus('Erro ao gravar no banco de dados.', 'error');
       }
@@ -889,13 +925,29 @@ export default function CompanySettingsModule({ onBackToDashboard }: CompanySett
                     ultimo_numero_nfe: validVal
                   }));
                 }}
+                onBlur={(e) => {
+                  const val = parseInt(e.target.value, 10);
+                  const validVal = isNaN(val) || val < 0 ? 0 : val;
+                  handleSalvarUltimoNumeroNfe(validVal);
+                }}
                 placeholder="537"
-                className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm outline-none focus:border-blue-500 text-blue-300 font-mono font-bold text-base"
+                className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm outline-none focus:border-blue-500 text-blue-300 font-mono font-bold text-base transition-colors"
                 required
               />
-              <span className="text-[11px] text-slate-400">
-                Guarda o último número emitido (coluna <code>ultimo_numero_nfe</code> na tabela <code>emitente</code>). A próxima NF-e gerada ou conferida terá o número <strong>{(Number(formData.ultimo_numero_nfe) || 0) + 1}</strong>.
-              </span>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mt-1">
+                <span className="text-[11px] text-slate-400">
+                  Guarda o último número emitido (coluna <code>ultimo_numero_nfe</code> na tabela <code>emitente</code>). A próxima NF-e gerada ou conferida terá o número <strong>{(Number(formData.ultimo_numero_nfe) || 0) + 1}</strong>.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleSalvarUltimoNumeroNfe()}
+                  className="px-3 py-1 bg-blue-600/20 hover:bg-blue-600/40 text-blue-300 hover:text-white border border-blue-500/30 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all shrink-0 cursor-pointer w-fit self-end sm:self-auto"
+                  title="Gravar este valor imediatamente no Supabase"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>Salvar Número</span>
+                </button>
+              </div>
             </div>
 
             {/* Campo Numérico: Série da NF-e */}
@@ -916,6 +968,13 @@ export default function CompanySettingsModule({ onBackToDashboard }: CompanySett
                     ...prev,
                     serie_nfe: validVal
                   }));
+                }}
+                onBlur={(e) => {
+                  const val = parseInt(e.target.value, 10);
+                  const validVal = isNaN(val) || val < 1 ? 1 : val;
+                  updateEmitenteNfeConfig(formData.ultimo_numero_nfe || 0, validVal).then(() => {
+                    showStatus('Série da NF-e atualizada com sucesso!', 'success');
+                  });
                 }}
                 placeholder="1"
                 className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm outline-none focus:border-blue-500 text-slate-100 font-mono font-bold"

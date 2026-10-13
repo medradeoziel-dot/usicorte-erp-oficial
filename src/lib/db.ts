@@ -2126,55 +2126,194 @@ export function brl(val: number | null | undefined): string {
 export async function fetchCotacaoById(idOrNumero: string): Promise<SupabaseCotacao | null> {
   try {
     if (!idOrNumero) return null;
+    const clean = idOrNumero.trim();
+
+    let cotacao: any = null;
 
     // 1. Busca nativa pelo campo 'id' se for um UUID válido
-    if (isUuid(idOrNumero)) {
-      const { data: dataById, error: errorById } = await db
+    if (isUuid(clean)) {
+      const { data: dataById } = await db
         .from('cotacoes')
-        .select('*, cotacao_itens(*)')
-        .eq('id', idOrNumero)
+        .select('*')
+        .eq('id', clean)
         .maybeSingle();
 
-      if (dataById && !errorById) {
-        return dataById as SupabaseCotacao;
+      if (dataById) {
+        cotacao = dataById;
       }
     }
 
-    // 2. Fallback de busca nativa pelo campo 'numero' (ex: COT-2026-0001)
-    const { data: dataByNumero, error: errorByNumero } = await db
-      .from('cotacoes')
-      .select('*, cotacao_itens(*)')
-      .eq('numero', idOrNumero)
-      .maybeSingle();
+    // 2. Busca pelo campo 'numero' (ex: COT-2026-0001)
+    if (!cotacao) {
+      const { data: dataByNumero } = await db
+        .from('cotacoes')
+        .select('*')
+        .eq('numero', clean)
+        .maybeSingle();
 
-    if (errorByNumero) {
-      console.warn("Aviso ao buscar cotação por número:", errorByNumero.message);
+      if (dataByNumero) {
+        cotacao = dataByNumero;
+      }
     }
 
-    return (dataByNumero as SupabaseCotacao) || null;
+    // 3. Fallback adicional por ID sem restrição de regex UUID (ex: id numérico)
+    if (!cotacao) {
+      const { data: dataFallback } = await db
+        .from('cotacoes')
+        .select('*')
+        .eq('id', clean)
+        .maybeSingle();
+
+      if (dataFallback) {
+        cotacao = dataFallback;
+      }
+    }
+
+    if (!cotacao) return null;
+
+    // 4. CONSULTA INTEGRAL DE TODOS OS ITENS SEM LIMITE NA TABELA 'cotacao_itens'
+    // Evita truncamento e garante que todos os 65+ itens sejam carregados
+    let itensDaCotacao: SupabaseCotacaoItem[] = [];
+
+    // Helper interno para buscar sem limite
+    const buscarItensSemLimite = async (campo: string, valor: string): Promise<SupabaseCotacaoItem[]> => {
+      try {
+        let res = await db
+          .from('cotacao_itens')
+          .select('*')
+          .eq(campo, valor)
+          .order('ordem', { ascending: true });
+        if (!res.error && res.data && res.data.length > 0) return res.data;
+
+        // Fallback sem order
+        const fb = await db
+          .from('cotacao_itens')
+          .select('*')
+          .eq(campo, valor);
+        if (!fb.error && fb.data && fb.data.length > 0) return fb.data;
+      } catch {}
+      return [];
+    };
+
+    // Busca direta pelo UUID / ID da cotação
+    if (cotacao.id) {
+      itensDaCotacao = await buscarItensSemLimite('cotacao_id', String(cotacao.id));
+    }
+
+    // Se não encontrou por ID, ou se os itens foram associados pelo campo 'numero'
+    if (itensDaCotacao.length === 0 && cotacao.numero) {
+      itensDaCotacao = await buscarItensSemLimite('cotacao_id', String(cotacao.numero));
+    }
+
+    cotacao.cotacao_itens = itensDaCotacao;
+    return cotacao as SupabaseCotacao;
   } catch (err) {
     console.error("Erro ao buscar cotação por ID/número:", err);
     return null;
   }
 }
 
-export async function fetchItensByCotacaoId(cotacaoId: string): Promise<SupabaseCotacaoItem[]> {
+export async function fetchItensByCotacaoId(cotacaoIdOrNumero: string): Promise<SupabaseCotacaoItem[]> {
   try {
-    if (!cotacaoId) return [];
-    const { data, error, status } = await db
-      .from('cotacao_itens')
-      .select('*')
-      .eq('cotacao_id', cotacaoId)
-      .order('ordem', { ascending: true });
+    if (!cotacaoIdOrNumero) return [];
+    const clean = String(cotacaoIdOrNumero).trim();
 
-    if (error) {
-      if (!isNotFoundError(error, status)) {
-        console.warn("Erro ao buscar itens da cotação:", error.message);
-      }
+    const buscarItensSemLimite = async (campo: string, valor: string): Promise<SupabaseCotacaoItem[]> => {
+      try {
+        let res = await db
+          .from('cotacao_itens')
+          .select('*')
+          .eq(campo, valor)
+          .order('ordem', { ascending: true });
+        if (!res.error && res.data && res.data.length > 0) return res.data;
+
+        // Fallback sem order para suportar esquemas sem coluna ordem
+        const fb = await db
+          .from('cotacao_itens')
+          .select('*')
+          .eq(campo, valor);
+        if (!fb.error && fb.data && fb.data.length > 0) return fb.data;
+      } catch {}
       return [];
+    };
+
+    // 1. Busca direta por cotacao_id sem qualquer restrição de limite
+    let itens = await buscarItensSemLimite('cotacao_id', clean);
+    if (itens && itens.length > 0) {
+      return itens;
     }
 
-    return data || [];
+    // 2. Se clean for número de cotação (ex: COT-2026-0001), resolve o UUID correspondente
+    if (!isUuid(clean)) {
+      const uuid = await resolveCotacaoUuid(clean);
+      if (uuid) {
+        itens = await buscarItensSemLimite('cotacao_id', uuid);
+        if (itens && itens.length > 0) {
+          return itens;
+        }
+      }
+    } else {
+      // 3. Se clean for UUID, busca o número da cotação e consulta por ele
+      const { data: cotData } = await db
+        .from('cotacoes')
+        .select('numero')
+        .eq('id', clean)
+        .maybeSingle();
+
+      if (cotData?.numero) {
+        itens = await buscarItensSemLimite('cotacao_id', cotData.numero);
+        if (itens && itens.length > 0) {
+          return itens;
+        }
+      }
+    }
+
+    // 4. Fallback por cotacao_numero caso a coluna alternativa seja usada
+    try {
+      const { data: altCols } = await db
+        .from('cotacao_itens')
+        .select('*')
+        .eq('cotacao_numero', clean);
+      if (altCols && altCols.length > 0) return altCols;
+    } catch {}
+
+    // 5. Fallback por localStorage ('s_orcamentos') garantindo todos os itens em modo offline/local
+    try {
+      const saved = localStorage.getItem('s_orcamentos');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        const found = parsed.find((q: any) => 
+          (q.id && String(q.id).trim() === clean) ||
+          (q.quoteNumber && String(q.quoteNumber).trim().toLowerCase() === clean.toLowerCase())
+        );
+        if (found && Array.isArray(found.items) && found.items.length > 0) {
+          return found.items.map((it: any, idx: number) => ({
+            id: it.id || idx + 1,
+            cotacao_id: clean,
+            ordem: idx,
+            produto: it.constantName || it.constanteNome || it.material || 'MATERIAL',
+            material: it.material || it.constantName || '',
+            medida: it.measure || it.diameter || it.medida || '—',
+            descricao: it.description || it.descricao || 'Item industrial',
+            observacao: it.notes || it.observacao || '',
+            quantidade: Number(it.quantity || it.qtd || 1),
+            valor_unitario: Number(it.unitPrice || it.valorUnitario || 0),
+            valor_total: Number(it.subtotal || ((it.unitPrice || 0) * (it.quantity || 1))),
+            desenho_url: it.drawingImage || it.fotoDesenho || '',
+            ncm: it.ncm,
+            unidade_medida: it.unidade_medida || it.unidade,
+            csosn: it.csosn,
+            cfop: it.cfop,
+            cfop_interno: it.cfop_interno,
+            cfop_externo: it.cfop_externo,
+            peso_unitario: Number(it.unitWeightKg || it.pesoUnitario || 0),
+            peso_total: Number(it.totalWeightKg || it.pesoTotal || 0)
+          }));
+        }
+      }
+    } catch {}
+
+    return [];
   } catch (err) {
     console.error("Erro na busca de itens por cotação ID:", err);
     return [];

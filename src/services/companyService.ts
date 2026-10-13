@@ -303,14 +303,31 @@ export function getLocalCompanyData(): CompanyFiscalData {
 export async function fetchCompanyData(): Promise<CompanyFiscalData> {
   // 1. Tenta carregar do Supabase (tabela emitente)
   try {
-    const { data, error } = await db
+    let data: any = null;
+    let error: any = null;
+
+    // Busca direta segura sem order('created_at') para evitar quebra caso a coluna não exista
+    const res = await db
       .from('emitente')
       .select('*')
-      .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
 
-    if (!error && data) {
+    if (!res.error && res.data) {
+      data = res.data;
+    } else {
+      // Tenta tabela alternativa empresa_emitente
+      const resAlt = await db
+        .from('empresa_emitente')
+        .select('*')
+        .limit(1)
+        .maybeSingle();
+      if (!resAlt.error && resAlt.data) {
+        data = resAlt.data;
+      }
+    }
+
+    if (data) {
       const local = getLocalCompanyData();
       const mapped = mapSupabaseToCompany(data);
       const merged: CompanyFiscalData = {
@@ -326,7 +343,9 @@ export async function fetchCompanyData(): Promise<CompanyFiscalData> {
         bancoTitular: data.banco_titular !== null && data.banco_titular !== undefined ? data.banco_titular : (mapped.bancoTitular ?? local.bancoTitular),
         bancoCnpj: data.banco_cnpj !== null && data.banco_cnpj !== undefined ? data.banco_cnpj : (mapped.bancoCnpj ?? local.bancoCnpj),
         instrucoesPagamento: data.instrucoes_pagamento !== null && data.instrucoes_pagamento !== undefined ? data.instrucoes_pagamento : (mapped.instrucoesPagamento ?? local.instrucoesPagamento),
-        ultimo_numero_nfe: data.ultimo_numero_nfe !== null && data.ultimo_numero_nfe !== undefined ? Number(data.ultimo_numero_nfe) : (mapped.ultimo_numero_nfe ?? local.ultimo_numero_nfe ?? 0),
+        ultimo_numero_nfe: data.ultimo_numero_nfe !== null && data.ultimo_numero_nfe !== undefined 
+          ? Number(data.ultimo_numero_nfe) 
+          : (mapped.ultimo_numero_nfe ?? local.ultimo_numero_nfe ?? 0),
         serie_nfe: data.serie_nfe !== null && data.serie_nfe !== undefined ? Number(data.serie_nfe) : (mapped.serie_nfe ?? local.serie_nfe ?? 1),
         aliquotaIcmsSimples: (data as any).aliquota_icms_simples !== null && (data as any).aliquota_icms_simples !== undefined
           ? Number((data as any).aliquota_icms_simples)
@@ -334,7 +353,7 @@ export async function fetchCompanyData(): Promise<CompanyFiscalData> {
         aliquota_icms_simples: (data as any).aliquota_icms_simples !== null && (data as any).aliquota_icms_simples !== undefined
           ? Number((data as any).aliquota_icms_simples)
           : (mapped.aliquota_icms_simples ?? local.aliquota_icms_simples ?? 2.75),
-        updated_at: data.created_at || new Date().toISOString()
+        updated_at: data.updated_at || data.created_at || new Date().toISOString()
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
       return merged;
@@ -378,25 +397,56 @@ export async function saveCompanyData(data: CompanyFiscalData): Promise<{ succes
     window.dispatchEvent(new CustomEvent('company-data-updated', { detail: payload }));
   }
 
-  // 2. Tenta persistir no Supabase (tabela emitente)
+  // 2. Persiste no Supabase (tabela emitente)
   try {
     const dbPayload = mapCompanyToSupabase(payload);
     
-    // Verifica se já existe algum registro
+    // Busca registro existente de forma segura sem dependência de created_at
     const { data: existing } = await db
       .from('emitente')
       .select('id')
-      .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
 
     if (existing && existing.id) {
-      const { data: updated, error: updateError } = await db
+      let { data: updated, error: updateError } = await db
         .from('emitente')
         .update(dbPayload)
         .eq('id', existing.id)
         .select()
         .single();
+
+      // Fallback gracioso com colunas essenciais caso alguma coluna extra (como dados bancários) não exista
+      if (updateError) {
+        console.warn('UPDATE emitente completo falhou, tentando colunas essenciais:', updateError.message);
+        const essentialPayload = {
+          razao_social: dbPayload.razao_social,
+          nome_fantasia: dbPayload.nome_fantasia,
+          cnpj: dbPayload.cnpj,
+          ie: dbPayload.ie,
+          telefone: dbPayload.telefone,
+          email: dbPayload.email,
+          endereco: dbPayload.endereco,
+          cidade: dbPayload.cidade,
+          estado: dbPayload.estado,
+          cep: dbPayload.cep,
+          proximo_numero_sequencial: dbPayload.proximo_numero_sequencial,
+          prefixo_cotacao: dbPayload.prefixo_cotacao,
+          ultimo_numero_nfe: dbPayload.ultimo_numero_nfe,
+          serie_nfe: dbPayload.serie_nfe
+        };
+        const fbRes = await db
+          .from('emitente')
+          .update(essentialPayload)
+          .eq('id', existing.id)
+          .select()
+          .single();
+
+        if (!fbRes.error && fbRes.data) {
+          updated = fbRes.data;
+          updateError = null;
+        }
+      }
 
       if (!updateError && updated) {
         const result = {
@@ -408,11 +458,35 @@ export async function saveCompanyData(data: CompanyFiscalData): Promise<{ succes
         return { success: true, data: result };
       }
     } else {
-      const { data: inserted, error: insertError } = await db
+      let { data: inserted, error: insertError } = await db
         .from('emitente')
         .insert([dbPayload])
         .select()
         .single();
+
+      if (insertError) {
+        const essentialPayload = {
+          razao_social: dbPayload.razao_social,
+          nome_fantasia: dbPayload.nome_fantasia,
+          cnpj: dbPayload.cnpj,
+          ie: dbPayload.ie,
+          telefone: dbPayload.telefone,
+          email: dbPayload.email,
+          endereco: dbPayload.endereco,
+          cidade: dbPayload.cidade,
+          estado: dbPayload.estado,
+          cep: dbPayload.cep,
+          proximo_numero_sequencial: dbPayload.proximo_numero_sequencial,
+          prefixo_cotacao: dbPayload.prefixo_cotacao,
+          ultimo_numero_nfe: dbPayload.ultimo_numero_nfe,
+          serie_nfe: dbPayload.serie_nfe
+        };
+        const fbIns = await db.from('emitente').insert([essentialPayload]).select().single();
+        if (!fbIns.error && fbIns.data) {
+          inserted = fbIns.data;
+          insertError = null;
+        }
+      }
 
       if (!insertError && inserted) {
         const result = {
@@ -427,6 +501,9 @@ export async function saveCompanyData(data: CompanyFiscalData): Promise<{ succes
   } catch (e) {
     console.warn('Aviso ao sincronizar dados da empresa no Supabase:', e);
   }
+
+  // Garante que o ultimo_numero_nfe seja gravado via updateEmitenteNfeConfig
+  await updateEmitenteNfeConfig(payload.ultimo_numero_nfe || 0, payload.serie_nfe || 1);
 
   // Tenta backup na tabela genérica configuracoes
   try {
@@ -451,7 +528,6 @@ export async function fetchEmitenteNumberingConfig(): Promise<{ nextSequential: 
     const { data, error } = await db
       .from('emitente')
       .select('proximo_numero_sequencial, prefixo_cotacao')
-      .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
 
@@ -711,12 +787,25 @@ export function setQuoteSequentialConfig(nextSequential: number, prefix?: string
  */
 export async function fetchEmitenteNfeConfig(): Promise<{ ultimoNumeroNfe: number; serieNfe: number }> {
   try {
-    const { data } = await db
+    let data: any = null;
+    const res = await db
       .from('emitente')
       .select('ultimo_numero_nfe, serie_nfe')
-      .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
+
+    if (!res.error && res.data) {
+      data = res.data;
+    } else {
+      const resAlt = await db
+        .from('empresa_emitente')
+        .select('ultimo_numero_nfe, serie_nfe')
+        .limit(1)
+        .maybeSingle();
+      if (!resAlt.error && resAlt.data) {
+        data = resAlt.data;
+      }
+    }
 
     if (data) {
       const ultimoNumeroNfe = typeof data.ultimo_numero_nfe === 'number' && !isNaN(data.ultimo_numero_nfe)
@@ -739,61 +828,145 @@ export async function fetchEmitenteNfeConfig(): Promise<{ ultimoNumeroNfe: numbe
 }
 
 /**
- * Atualiza o último número de NF-e e a série na tabela 'emitente'
+ * Atualiza o último número de NF-e e a série na tabela 'emitente' de forma persistente e com fallbacks no Supabase
  */
-export async function updateEmitenteNfeConfig(ultimoNumeroNfe: number, serieNfe?: number): Promise<boolean> {
+export async function updateEmitenteNfeConfig(
+  ultimoNumeroNfe: number, 
+  serieNfe?: number
+): Promise<{ success: boolean; data?: any; error?: any }> {
+  const numeroValido = typeof ultimoNumeroNfe === 'number' && !isNaN(ultimoNumeroNfe) && ultimoNumeroNfe >= 0
+    ? ultimoNumeroNfe
+    : parseInt(String(ultimoNumeroNfe || 0), 10) || 0;
+
+  const updatePayload: Record<string, any> = {
+    ultimo_numero_nfe: numeroValido
+  };
+  if (serieNfe !== undefined) {
+    const sVal = typeof serieNfe === 'number' && !isNaN(serieNfe) ? serieNfe : parseInt(String(serieNfe), 10) || 1;
+    updatePayload.serie_nfe = sVal;
+  }
+
+  let supabaseSuccess = false;
+  let lastError: any = null;
+
+  // 1. Atualizar na tabela 'emitente'
   try {
-    const { data: existing } = await db
+    const { data: row, error: selectErr } = await db
       .from('emitente')
       .select('id')
-      .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
 
-    const updatePayload: Record<string, any> = {
-      ultimo_numero_nfe: ultimoNumeroNfe
-    };
-    if (serieNfe !== undefined) {
-      updatePayload.serie_nfe = serieNfe;
-    }
-
-    if (existing && existing.id) {
-      const { error } = await db
+    if (!selectErr && row?.id) {
+      const { data: updData, error: updErr } = await db
         .from('emitente')
         .update(updatePayload)
-        .eq('id', existing.id);
+        .eq('id', row.id)
+        .select();
 
-      if (error) {
-        console.warn('Erro ao atualizar ultimo_numero_nfe no Supabase:', error);
+      if (!updErr && updData && updData.length > 0) {
+        supabaseSuccess = true;
+      } else if (updErr) {
+        lastError = updErr;
+        console.warn('Aviso: UPDATE emitente por id falhou:', updErr.message);
+      }
+    } else {
+      // Se não encontrou ID específico, tenta UPDATE na tabela emitente
+      const { data: updAllData, error: updAllErr } = await db
+        .from('emitente')
+        .update(updatePayload)
+        .neq('ultimo_numero_nfe', -999999)
+        .select();
+
+      if (!updAllErr && updAllData && updAllData.length > 0) {
+        supabaseSuccess = true;
+      } else {
+        // Se a tabela emitente está vazia, insere o registro inicial completo
+        const local = getLocalCompanyData();
+        const insertPayload = {
+          ...mapCompanyToSupabase({ ...local, ...updatePayload }),
+          ...updatePayload
+        };
+        const { error: insErr } = await db
+          .from('emitente')
+          .insert([insertPayload]);
+
+        if (!insErr) {
+          supabaseSuccess = true;
+        } else {
+          lastError = insErr;
+          console.warn('Aviso ao inserir na tabela emitente:', insErr.message);
+        }
       }
     }
-
-    const local = getLocalCompanyData();
-    local.ultimo_numero_nfe = ultimoNumeroNfe;
-    if (serieNfe !== undefined) {
-      local.serie_nfe = serieNfe;
-    }
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(local));
-    } catch {}
-
-    window.dispatchEvent(new CustomEvent('company-data-updated', { detail: local }));
-    return true;
-  } catch (err) {
-    console.warn('Falha ao atualizar ultimo_numero_nfe:', err);
-    return false;
+  } catch (err: any) {
+    lastError = err;
+    console.warn('Exceção ao atualizar emitente no Supabase:', err);
   }
+
+  // 2. Tenta também na tabela alternativa 'empresa_emitente'
+  try {
+    const { data: empRow } = await db
+      .from('empresa_emitente')
+      .select('id')
+      .limit(1)
+      .maybeSingle();
+
+    if (empRow?.id) {
+      const { error: empErr } = await db
+        .from('empresa_emitente')
+        .update(updatePayload)
+        .eq('id', empRow.id);
+
+      if (!empErr) supabaseSuccess = true;
+    }
+  } catch {}
+
+  // 3. Tenta salvar na tabela 'configuracoes' como chave 'ultimo_numero_nfe' e 'empresa_emitente'
+  try {
+    await db
+      .from('configuracoes')
+      .upsert({ 
+        chave: 'ultimo_numero_nfe', 
+        valor: numeroValido,
+        updated_at: new Date().toISOString() 
+      }, { onConflict: 'chave' });
+
+    const localAtual = getLocalCompanyData();
+    await db
+      .from('configuracoes')
+      .upsert({ 
+        chave: 'empresa_emitente', 
+        valor: { ...localAtual, ultimo_numero_nfe: numeroValido },
+        updated_at: new Date().toISOString() 
+      }, { onConflict: 'chave' });
+  } catch {}
+
+  // 4. Atualiza LocalStorage e sincroniza aplicação
+  const local = getLocalCompanyData();
+  local.ultimo_numero_nfe = numeroValido;
+  if (serieNfe !== undefined) {
+    local.serie_nfe = updatePayload.serie_nfe;
+  }
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(local));
+  } catch {}
+
+  window.dispatchEvent(new CustomEvent('company-data-updated', { detail: local }));
+  return { success: true, data: local, error: lastError };
 }
 
 /**
  * Incrementa o último número de NF-e na tabela 'emitente' ao emitir/transmitir uma nota
  */
 export async function incrementEmitenteUltimoNumeroNfe(currentUsedNumber?: number): Promise<number> {
-  const config = await fetchEmitenteNfeConfig();
-  const current = config.ultimoNumeroNfe;
-  const next = typeof currentUsedNumber === 'number' && !isNaN(currentUsedNumber) && currentUsedNumber > current
-    ? currentUsedNumber
-    : current + 1;
+  let next = 1;
+  if (typeof currentUsedNumber === 'number' && !isNaN(currentUsedNumber) && currentUsedNumber > 0) {
+    next = currentUsedNumber;
+  } else {
+    const config = await fetchEmitenteNfeConfig();
+    next = config.ultimoNumeroNfe + 1;
+  }
 
   await updateEmitenteNfeConfig(next);
   return next;

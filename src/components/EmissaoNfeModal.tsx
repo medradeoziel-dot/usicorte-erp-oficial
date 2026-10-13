@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Quote, Client } from '../types';
+import { Quote, Client, QuoteItem } from '../types';
 import { 
   transmitirNfeSefaz, 
   prepararItensFiscais, 
@@ -21,8 +21,8 @@ import {
 } from '../services/nfeService';
 import CancelarNfeModal from './CancelarNfeModal';
 import DanfeEspelhoA4Modal from './DanfeEspelhoA4Modal';
-import { updateCotacaoNfeStatusDb } from '../lib/db';
-import { fetchCompanyData, CompanyFiscalData, DEFAULT_COMPANY_DATA } from '../services/companyService';
+import { updateCotacaoNfeStatusDb, fetchItensByCotacaoId } from '../lib/db';
+import { fetchCompanyData, CompanyFiscalData, DEFAULT_COMPANY_DATA, updateEmitenteNfeConfig } from '../services/companyService';
 import { formatCurrency } from '../utils/calculator';
 import Logo from './Logo';
 import { 
@@ -73,9 +73,82 @@ export default function EmissaoNfeModal({
   const [showDanfeOficialModal, setShowDanfeOficialModal] = useState<boolean>(false);
   const [autoPrintDanfe, setAutoPrintDanfe] = useState<boolean>(false);
 
+  const [isLoadingItems, setIsLoadingItems] = useState<boolean>(false);
+
   useEffect(() => {
     setCurrentQuoteState(quote);
-  }, [quote]);
+
+    // CONSULTA INTEGRAL NO SUPABASE: Busca SEM LIMITES todos os itens pertencentes a esta cotação na tabela cotacao_itens
+    let isMounted = true;
+    async function carregarItensIntegrais() {
+      const targetId = quote.id || quote.quoteNumber;
+      if (!targetId) return;
+
+      try {
+        setIsLoadingItems(true);
+        let dbItens = await fetchItensByCotacaoId(String(targetId));
+        if ((!dbItens || dbItens.length === 0) && quote.quoteNumber) {
+          dbItens = await fetchItensByCotacaoId(String(quote.quoteNumber));
+        }
+        if ((!dbItens || dbItens.length === 0) && quote.id) {
+          dbItens = await fetchItensByCotacaoId(String(quote.id));
+        }
+
+        if (!isMounted) return;
+
+        if (dbItens && dbItens.length > 0) {
+          if (dbItens.length >= (quote.items?.length || 0)) {
+            const mappedItems: QuoteItem[] = dbItens.map((it: any, idx: number) => ({
+              id: String(it.id || (idx + 1)),
+              date: it.created_at?.slice(0, 10) || quote.date || new Date().toISOString().slice(0, 10),
+              companyName: quote.clientName || 'Cliente Selecionado',
+              constant: '1.0',
+              diameter: it.medida || '',
+              description: it.descricao || it.produto || `Item #${idx + 1}`,
+              descricao: it.descricao || it.produto || `Item #${idx + 1}`,
+              material: it.material || it.produto || 'Aço Carbono',
+              constanteNome: it.material || it.produto || 'Material',
+              measure: it.medida || 'Conforme desenho',
+              widthLength: it.medida || '',
+              quantity: Number(it.quantidade) || 1,
+              qtd: Number(it.quantidade) || 1,
+              unitPrice: Number(it.valor_unitario) || 0,
+              valorUnitario: Number(it.valor_unitario) || 0,
+              subtotal: Number(it.valor_total) || ((Number(it.valor_unitario) || 0) * (Number(it.quantidade) || 1)),
+              notes: it.observacao || '',
+              observacao: it.observacao || '',
+              drawingImage: it.desenho_url || undefined,
+              fotoDesenho: it.desenho_url || undefined,
+              ncm: it.ncm,
+              cfop: it.cfop,
+              cfop_interno: it.cfop_interno,
+              cfop_externo: it.cfop_externo,
+              csosn: it.csosn,
+              unidade_medida: it.unidade_medida,
+              totalWeightKg: Number((it as any).peso_total || 0),
+              pesoTotal: Number((it as any).peso_total || 0),
+              unitWeightKg: Number((it as any).peso_unitario || 0)
+            }));
+
+            const calcTotal = mappedItems.reduce((acc, it) => acc + (it.subtotal || 0), 0);
+            setCurrentQuoteState(prev => ({
+              ...prev,
+              items: mappedItems,
+              subtotalTotal: calcTotal || prev.subtotalTotal,
+              grandTotal: calcTotal || prev.grandTotal
+            }));
+          }
+        }
+      } catch (err) {
+        console.warn('Aviso ao sincronizar itens integrais na modal de NF-e:', err);
+      } finally {
+        if (isMounted) setIsLoadingItems(false);
+      }
+    }
+
+    carregarItensIntegrais();
+    return () => { isMounted = false; };
+  }, [quote.id, quote.quoteNumber]);
 
   const isCancelada = isNfeCancelada(currentQuoteState.status_nfe);
   const isAutorizada = isNfeAutorizada(currentQuoteState.status_nfe);
@@ -83,7 +156,7 @@ export default function EmissaoNfeModal({
   const handleOpenPreDanfeNewTab = async () => {
     setOpeningNewTab(true);
     try {
-      await abrirPreDanfeEmNovaAba(quote, client);
+      await abrirPreDanfeEmNovaAba(currentQuoteState, client);
     } finally {
       setOpeningNewTab(false);
     }
@@ -105,34 +178,49 @@ export default function EmissaoNfeModal({
       }
     }
     loadEmitente();
-    return () => { isMounted = false; };
+
+    const handleCompanyUpdate = (e: CustomEvent) => {
+      if (isMounted && e.detail) {
+        setCompany(prev => ({
+          ...prev,
+          ...e.detail,
+          ultimo_numero_nfe: e.detail.ultimo_numero_nfe !== undefined ? e.detail.ultimo_numero_nfe : prev.ultimo_numero_nfe
+        }));
+      }
+    };
+    window.addEventListener('company-data-updated', handleCompanyUpdate as EventListener);
+
+    return () => { 
+      isMounted = false;
+      window.removeEventListener('company-data-updated', handleCompanyUpdate as EventListener);
+    };
   }, []);
 
   // 2. Dados do Destinatário / Cliente
   const clienteInfo = useMemo(() => {
-    const nome = client?.name || client?.nome || quote.clientName || 'Cliente Balcão';
-    const doc = client?.document || client?.documento || quote.clientDocument || 'Não informado';
+    const nome = client?.name || client?.nome || currentQuoteState.clientName || 'Cliente Balcão';
+    const doc = client?.document || client?.documento || currentQuoteState.clientDocument || 'Não informado';
     const ie = buscarInscricaoEstadual(client) !== 'ISENTO' 
       ? buscarInscricaoEstadual(client) 
-      : buscarInscricaoEstadual(quote);
+      : buscarInscricaoEstadual(currentQuoteState);
     const indicadorIe = client?.indicador_ie || client?.indicadorIe || (doc.replace(/\D/g, '').length > 11 ? '1' : '9');
-    const cidade = client?.city || client?.cidade || quote.clientCity || 'BAURU';
-    const uf = (client?.state || client?.uf || quote.clientState || 'SP').toUpperCase();
+    const cidade = client?.city || client?.cidade || currentQuoteState.clientCity || 'BAURU';
+    const uf = (client?.state || client?.uf || currentQuoteState.clientState || 'SP').toUpperCase();
     const endereco = client?.street || client?.endereco || 'Endereço Comercial';
 
     return { nome, doc, ie, indicadorIe, cidade, uf, endereco };
-  }, [client, quote]);
+  }, [client, currentQuoteState]);
 
   // 3. Validação de CFOP Automática:
   // Se a UF do cliente for "SP" => cfop_interno (5102)
   // Se a UF for diferente de "SP" => cfop_externo (6102)
   const itensFiscais: ItemFiscalNfe[] = useMemo(() => {
-    return prepararItensFiscais(quote.items, clienteInfo.uf);
-  }, [quote.items, clienteInfo.uf]);
+    return prepararItensFiscais(currentQuoteState.items || [], clienteInfo.uf);
+  }, [currentQuoteState.items, clienteInfo.uf]);
 
   const valorTotal = useMemo(() => {
-    return quote.grandTotal || quote.subtotalTotal || itensFiscais.reduce((acc, it) => acc + it.subtotal, 0);
-  }, [quote, itensFiscais]);
+    return currentQuoteState.grandTotal || currentQuoteState.subtotalTotal || itensFiscais.reduce((acc, it) => acc + it.subtotal, 0);
+  }, [currentQuoteState.grandTotal, currentQuoteState.subtotalTotal, itensFiscais]);
 
   const aliquotaIcmsSimples = obterAliquotaIcmsSimples(company);
   const creditoIcms = useMemo(() => {
@@ -142,16 +230,16 @@ export default function EmissaoNfeModal({
   const isOperacaoInterestadual = clienteInfo.uf !== 'SP';
 
   const proximoNumeroNfe = useMemo(() => {
-    if (quote.nfe_numero) return quote.nfe_numero;
+    if (currentQuoteState.nfe_numero) return currentQuoteState.nfe_numero;
     const ultimo = typeof company.ultimo_numero_nfe === 'number' && !isNaN(company.ultimo_numero_nfe)
       ? company.ultimo_numero_nfe
       : 0;
     return String(ultimo + 1).padStart(6, '0');
-  }, [quote.nfe_numero, company.ultimo_numero_nfe]);
+  }, [currentQuoteState.nfe_numero, company.ultimo_numero_nfe]);
 
   const serieNfe = useMemo(() => {
-    return String(quote.serie_nfe || company.serie_nfe || '1');
-  }, [quote.serie_nfe, company.serie_nfe]);
+    return String(currentQuoteState.serie_nfe || company.serie_nfe || '1');
+  }, [currentQuoteState.serie_nfe, company.serie_nfe]);
 
   // Identifica o CSOSN principal para exibição do cabeçalho e regras de crédito
   const csosnPrincipal = useMemo(() => {
@@ -169,11 +257,11 @@ export default function EmissaoNfeModal({
 
     // 1. Altera o status_nfe para "Processando"
     try {
-      await updateCotacaoNfeStatusDb(quote.id || quote.quoteNumber, {
+      await updateCotacaoNfeStatusDb(currentQuoteState.id || currentQuoteState.quoteNumber, {
         status_nfe: 'Processando'
       });
       onSuccess({
-        ...quote,
+        ...currentQuoteState,
         status_nfe: 'Processando'
       });
     } catch (e) {
@@ -181,14 +269,14 @@ export default function EmissaoNfeModal({
     }
 
     try {
-      // 2. Envia a solicitação para a API fiscal / SEFAZ
-      const res = await transmitirNfeSefaz(quote, client);
+      // 2. Envia a solicitação para a API fiscal / SEFAZ com todos os itens da cotação
+      const res = await transmitirNfeSefaz(currentQuoteState, client);
 
       if (res.sucesso && res.statusNfe === 'Emitida') {
         // 3. Sucesso: Grava a nfe_chave, nfe_numero, danfe_url, xml_url e muda o status para "Emitida"
         setTransmissionResult(res);
         const updatedQuote: Quote = {
-          ...quote,
+          ...currentQuoteState,
           status_nfe: 'Emitida',
           nfe_chave: res.nfeChave,
           nfe_numero: res.nfeNumero,
@@ -201,6 +289,19 @@ export default function EmissaoNfeModal({
         setCurrentQuoteState(updatedQuote);
         onSuccess(updatedQuote);
 
+        // INCREMENTO AUTOMÁTICO NA EMISSÃO:
+        // No momento exato em que a nota for autorizada com sucesso na SEFAZ,
+        // o sistema incrementa o ultimo_numero_nfe na base de dados (tabela emitente)
+        // para que a próxima nota siga a sequência corretamente (ex: emitiu a 1, atualiza para 1 para a próxima ser a 2)
+        const numAutorizado = parseInt(String(res.nfeNumero).replace(/\D/g, ''), 10);
+        if (numAutorizado > 0) {
+          try {
+            await updateEmitenteNfeConfig(numAutorizado, parseInt(String(res.serie || serieNfe || 1), 10));
+          } catch (numErr) {
+            console.warn('Aviso ao sincronizar ultimo_numero_nfe pós-autorização:', numErr);
+          }
+        }
+
         // 1. AÇÃO AUTOMÁTICA PÓS-AUTORIZAÇÃO (STATUS 100):
         // Dispara imediatamente o Modal/Visualizador do DANFE em PDF
         // e aciona a impressão automática / salvar como PDF do sistema
@@ -211,13 +312,13 @@ export default function EmissaoNfeModal({
         const msg = res.mensagemErro || 'Rejeição desconhecida pela SEFAZ.';
         setErrorMessage(msg);
         try {
-          await updateCotacaoNfeStatusDb(quote.id || quote.quoteNumber, {
+          await updateCotacaoNfeStatusDb(currentQuoteState.id || currentQuoteState.quoteNumber, {
             status_nfe: 'Erro',
             mensagem_erro_nfe: msg
           });
         } catch {}
         const errorQuote: Quote = {
-          ...quote,
+          ...currentQuoteState,
           status_nfe: 'Erro',
           mensagem_erro_nfe: msg
         };
@@ -227,13 +328,13 @@ export default function EmissaoNfeModal({
       const msg = err?.message || 'Falha na comunicação com os servidores da SEFAZ.';
       setErrorMessage(msg);
       try {
-        await updateCotacaoNfeStatusDb(quote.id || quote.quoteNumber, {
+        await updateCotacaoNfeStatusDb(currentQuoteState.id || currentQuoteState.quoteNumber, {
           status_nfe: 'Erro',
           mensagem_erro_nfe: msg
         });
       } catch {}
       const errorQuote: Quote = {
-        ...quote,
+        ...currentQuoteState,
         status_nfe: 'Erro',
         mensagem_erro_nfe: msg
       };
@@ -501,7 +602,16 @@ export default function EmissaoNfeModal({
             <div className="flex items-center justify-between">
               <h4 className="font-bold text-slate-200 flex items-center gap-2">
                 <FileText className="w-4 h-4 text-blue-400" />
-                Itens Fiscais da NF-e ({itensFiscais.length})
+                <span>Itens Fiscais da NF-e ({itensFiscais.length})</span>
+                {isLoadingItems ? (
+                  <span className="flex items-center gap-1 text-[11px] font-normal text-amber-300 ml-2">
+                    <Loader2 className="w-3 h-3 animate-spin" /> Carregando todos os itens da cotação...
+                  </span>
+                ) : (
+                  <span className="text-[10px] text-emerald-400/90 font-mono bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
+                    Total integral carregado
+                  </span>
+                )}
               </h4>
               <span className="text-[11px] font-semibold text-indigo-300 bg-indigo-950/60 px-2.5 py-0.5 rounded-lg border border-indigo-500/30">
                 Tributação: Simples Nacional (CSOSN {csosnPrincipal})

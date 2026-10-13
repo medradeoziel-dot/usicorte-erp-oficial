@@ -110,6 +110,18 @@ export default function DanfeEspelhoA4Modal({
     } else {
       setCompany(getLocalCompanyData());
     }
+
+    const handleCompanyUpdate = (e: CustomEvent) => {
+      if (e.detail) {
+        setCompany(prev => ({
+          ...prev,
+          ...e.detail,
+          ultimo_numero_nfe: e.detail.ultimo_numero_nfe !== undefined ? e.detail.ultimo_numero_nfe : prev.ultimo_numero_nfe
+        }));
+      }
+    };
+    window.addEventListener('company-data-updated', handleCompanyUpdate as EventListener);
+    return () => window.removeEventListener('company-data-updated', handleCompanyUpdate as EventListener);
   }, [initialCompany, isOpen]);
 
   // 1. Busca Completa do Cliente no Supabase usando cliente_id ou nome

@@ -15,6 +15,7 @@ import {
 import { 
   fetchCotacoesDb, 
   fetchCotacaoById,
+  fetchItensByCotacaoId,
   fetchUltimosItensCotacaoDb,
   uploadDesenhoStorage, 
   updateItemCortadoDb,
@@ -864,8 +865,13 @@ export default function ReportsModule({
     try {
       const cot = await fetchCotacaoById(idOuNumero);
       if (cot) {
-        const mappedItems: QuoteItem[] = (cot.cotacao_itens && cot.cotacao_itens.length > 0)
-          ? cot.cotacao_itens.map((it, idx) => ({
+        let rawItens = cot.cotacao_itens || [];
+        if (!rawItens || rawItens.length === 0) {
+          rawItens = await fetchItensByCotacaoId(cot.id || cot.numero || idOuNumero);
+        }
+
+        const mappedItems: QuoteItem[] = (rawItens && rawItens.length > 0)
+          ? rawItens.map((it, idx) => ({
               id: String(it.id || (idx + 1)),
               date: cot.data || new Date().toISOString().slice(0, 10),
               companyName: cot.cliente_nome || 'Cliente Selecionado',
@@ -886,31 +892,17 @@ export default function ReportsModule({
               observacao: it.observacao || '',
               drawingImage: it.desenho_url || undefined,
               fotoDesenho: it.desenho_url || undefined,
-              totalWeightKg: 0,
-              pesoTotal: 0
+              ncm: it.ncm,
+              cfop: it.cfop,
+              cfop_interno: it.cfop_interno,
+              cfop_externo: it.cfop_externo,
+              csosn: it.csosn,
+              unidade_medida: it.unidade_medida,
+              totalWeightKg: Number((it as any).peso_total || 0),
+              pesoTotal: Number((it as any).peso_total || 0),
+              unitWeightKg: Number((it as any).peso_unitario || 0)
             }))
-          : [{
-              id: '1',
-              date: cot.data || new Date().toISOString().slice(0, 10),
-              companyName: cot.cliente_nome || 'Cliente Selecionado',
-              constant: '1.0',
-              diameter: '',
-              description: cot.observacoes || 'Item da cotação',
-              descricao: cot.observacoes || 'Item da cotação',
-              material: 'Aço Carbono',
-              constanteNome: 'Aço Carbono',
-              measure: 'Conforme desenho',
-              widthLength: '',
-              quantity: 1,
-              qtd: 1,
-              unitPrice: Number(cot.valor_total) || 0,
-              valorUnitario: Number(cot.valor_total) || 0,
-              subtotal: Number(cot.valor_total) || 0,
-              notes: '',
-              observacao: '',
-              totalWeightKg: 0,
-              pesoTotal: 0
-            }];
+          : [];
 
         const mapStatus = (st?: string): Quote['status'] => {
           if (!st) return 'Rascunho';
@@ -1043,6 +1035,10 @@ export default function ReportsModule({
       if (targetId) {
         quoteObj = await carregarCotacaoPorId(targetId);
       }
+      if (!quoteObj && item.cotacao) {
+        quoteObj = await carregarCotacaoPorId(item.cotacao);
+      }
+
       if (!quoteObj) {
         try {
           const saved = localStorage.getItem('s_orcamentos');
@@ -1060,7 +1056,109 @@ export default function ReportsModule({
         }
       }
 
-      if (!quoteObj) {
+      // CONSULTA INTEGRAL NO SUPABASE: Busca SEM LIMITES todos os itens pertencentes a esta cotação na tabela cotacao_itens
+      let allDbItems: any[] = [];
+      if (item.cotacaoId) {
+        allDbItems = await fetchItensByCotacaoId(String(item.cotacaoId));
+      }
+      if (allDbItems.length === 0 && item.cotacao) {
+        allDbItems = await fetchItensByCotacaoId(String(item.cotacao));
+      }
+      if (allDbItems.length === 0 && quoteObj?.id) {
+        allDbItems = await fetchItensByCotacaoId(String(quoteObj.id));
+      }
+      if (allDbItems.length === 0 && quoteObj?.quoteNumber) {
+        allDbItems = await fetchItensByCotacaoId(String(quoteObj.quoteNumber));
+      }
+
+      if (allDbItems && allDbItems.length > 0) {
+        const mappedItems: QuoteItem[] = allDbItems.map((it, idx) => ({
+          id: String(it.id || (idx + 1)),
+          date: it.created_at?.slice(0, 10) || item.data || new Date().toISOString().slice(0, 10),
+          companyName: item.empresa || 'Cliente Selecionado',
+          constant: '1.0',
+          diameter: it.medida || '',
+          description: it.descricao || it.produto || `Item #${idx + 1}`,
+          descricao: it.descricao || it.produto || `Item #${idx + 1}`,
+          material: it.material || it.produto || 'Aço Carbono',
+          constanteNome: it.material || it.produto || 'Material',
+          measure: it.medida || 'Conforme desenho',
+          widthLength: it.medida || '',
+          quantity: Number(it.quantidade) || 1,
+          qtd: Number(it.quantidade) || 1,
+          unitPrice: Number(it.valor_unitario) || 0,
+          valorUnitario: Number(it.valor_unitario) || 0,
+          subtotal: Number(it.valor_total) || ((Number(it.valor_unitario) || 0) * (Number(it.quantidade) || 1)),
+          notes: it.observacao || '',
+          observacao: it.observacao || '',
+          drawingImage: it.desenho_url || undefined,
+          fotoDesenho: it.desenho_url || undefined,
+          ncm: it.ncm,
+          cfop: it.cfop,
+          cfop_interno: it.cfop_interno,
+          cfop_externo: it.cfop_externo,
+          csosn: it.csosn,
+          unidade_medida: it.unidade_medida,
+          totalWeightKg: Number((it as any).peso_total || 0),
+          pesoTotal: Number((it as any).peso_total || 0),
+          unitWeightKg: Number((it as any).peso_unitario || 0)
+        }));
+
+        const totalCalculado = mappedItems.reduce((acc, curr) => acc + (curr.subtotal || 0), 0);
+
+        if (quoteObj) {
+          quoteObj.items = mappedItems;
+          quoteObj.subtotalTotal = totalCalculado || quoteObj.subtotalTotal;
+          quoteObj.grandTotal = totalCalculado || quoteObj.grandTotal;
+        } else {
+          quoteObj = {
+            id: item.cotacaoId || item.cotacao || `COT-${Date.now()}`,
+            quoteNumber: item.cotacao || 'COT-TEMP',
+            clientId: (item as any).clienteId || item.clienteId,
+            cliente_id: (item as any).clienteId || item.clienteId,
+            cliente_nome: item.empresa,
+            date: item.data || new Date().toISOString().slice(0, 10),
+            clientName: item.empresa || 'Cliente Balcão',
+            contactPerson: item.contato !== '-' ? item.contato : '',
+            status: item.status === 'aprovado' ? 'Aprovado' : item.status === 'pendente' ? 'Enviado' : 'Faturado',
+            validityDays: 10,
+            paymentTerms: 'À Vista / Pix',
+            observations: item.observacao || '',
+            items: mappedItems,
+            subtotalTotal: totalCalculado,
+            grandTotal: totalCalculado,
+            discount: 0,
+            shipping: 0,
+            totalWeightKg: 0,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            status_nfe: resolveStatusNfeFinal(item.status_nfe, null, item.nfe_chave),
+            nfe_numero: item.nfe_numero,
+            nfe_chave: item.nfe_chave,
+            chave_acesso: item.nfe_chave,
+            danfe_url: item.danfe_url,
+            xml_url: (item as any).xml_url,
+            xml_conteudo: (item as any).xml_conteudo,
+            protocolo_nfe: (item as any).protocolo_nfe
+          };
+        }
+      } else if (!quoteObj || !quoteObj.items || quoteObj.items.length === 0) {
+        // Fallback local se o banco não responder
+        try {
+          const saved = localStorage.getItem('s_orcamentos');
+          if (saved) {
+            const parsed: Quote[] = JSON.parse(saved);
+            const found = parsed.find(
+              q => (q.quoteNumber && q.quoteNumber.trim().toLowerCase() === String(item.cotacao).trim().toLowerCase()) ||
+                   (q.id && q.id === item.cotacaoId) ||
+                   (q.id && q.id === item.cotacao)
+            );
+            if (found && found.items && found.items.length > 0) {
+              quoteObj = found;
+            }
+          }
+        } catch {}
+        // Fallback local se o banco não responder
         const sameQuoteItems = dbQuotesItems.filter(
           i => (i.cotacao && i.cotacao === item.cotacao) || (i.cotacaoId && i.cotacaoId === item.cotacaoId)
         );
@@ -1123,7 +1221,9 @@ export default function ReportsModule({
           xml_conteudo: (item as any).xml_conteudo,
           protocolo_nfe: (item as any).protocolo_nfe
         };
-      } else if (quoteObj && item.nfe_chave) {
+      }
+
+      if (quoteObj && item.nfe_chave) {
         quoteObj.status_nfe = resolveStatusNfeFinal(quoteObj.status_nfe, item.status_nfe, item.nfe_chave || quoteObj.nfe_chave);
         quoteObj.nfe_numero = item.nfe_numero || quoteObj.nfe_numero;
         quoteObj.nfe_chave = item.nfe_chave || quoteObj.nfe_chave;
