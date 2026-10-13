@@ -367,7 +367,7 @@ export default function DanfeEspelhoA4({
         @media print {
           @page {
             size: A4 portrait;
-            margin: 5mm;
+            margin: 3mm 4mm 4mm 4mm;
           }
 
           *, *:before, *:after {
@@ -391,9 +391,7 @@ export default function DanfeEspelhoA4({
           #screen-calculadora, #screen-ordem-servico, #screen-movimentacoes,
           #screen-estoque, #screen-financeiro, #screen-empresa, #screen-php,
           #screen-dashboard, #screen-relatorios,
-          .danfe-modal-overlay, .danfe-modal-dialog, .danfe-modal-scroll,
-          .danfe-inner-overlay,
-          #container-impressao-danfe {
+          .danfe-modal-overlay, .danfe-modal-dialog, .danfe-modal-scroll {
             display: block !important;
             position: static !important;
             inset: auto !important;
@@ -408,6 +406,35 @@ export default function DanfeEspelhoA4({
             background: transparent !important;
             transform: none !important;
             float: none !important;
+          }
+
+          /* Fixação direta no topo absoluto para evitar margem superior residual */
+          #container-impressao-danfe {
+            display: block !important;
+            position: absolute !important;
+            top: 0 !important;
+            left: 0 !important;
+            right: 0 !important;
+            width: 100% !important;
+            margin: 0 auto !important;
+            margin-top: 0 !important;
+            padding: 0 !important;
+            padding-top: 0 !important;
+            background: transparent !important;
+            overflow: visible !important;
+            height: auto !important;
+            max-height: none !important;
+            transform: none !important;
+          }
+
+          .danfe-inner-overlay {
+            display: block !important;
+            position: static !important;
+            width: 100% !important;
+            margin: 0 !important;
+            margin-top: 0 !important;
+            padding: 0 !important;
+            padding-top: 0 !important;
           }
 
           /* 1. Esconder todos os elementos de fundo da página */
@@ -460,27 +487,31 @@ export default function DanfeEspelhoA4({
           .danfe-print-container,
           .danfe-print-container *,
           #folha-danfe-a4,
-          #folha-danfe-a4 * {
+          #folha-danfe-a4 *,
+          #container-impressao-danfe,
+          #container-impressao-danfe * {
             visibility: visible !important;
           }
 
-          /* 3. Container da folha A4 em formato exato */
+          /* 3. Container da folha A4 alinhado rigorosamente ao topo da folha */
           .danfe-print-container,
           #folha-danfe-a4,
           .danfe-folha-a4 {
             display: flex !important;
             flex-direction: column !important;
-            justify-content: space-between !important;
+            justify-content: flex-start !important;
             position: relative !important;
-            top: auto !important;
+            top: 0 !important;
             left: auto !important;
             width: 100% !important;
-            max-width: 200mm !important;
-            min-height: 287mm !important;
+            max-width: 202mm !important;
+            min-height: 0 !important;
             height: auto !important;
             max-height: none !important;
             margin: 0 auto !important;
+            margin-top: 0 !important;
             padding: 0 !important;
+            padding-top: 0 !important;
             box-sizing: border-box !important;
             background: #ffffff !important;
             font-family: Arial, Helvetica, sans-serif !important;
@@ -505,8 +536,10 @@ export default function DanfeEspelhoA4({
             border: none !important;
           }
 
-          /* Canhoto superior com exatamente 15mm */
+          /* Canhoto superior com exatamente 15mm e margem zerada no topo */
           .danfe-canhoto-topo {
+            margin-top: 0 !important;
+            padding-top: 0 !important;
             height: 15mm !important;
             min-height: 15mm !important;
             max-height: 15mm !important;
@@ -696,7 +729,7 @@ export default function DanfeEspelhoA4({
       <div 
         ref={printRef}
         id="folha-danfe-a4"
-        className="danfe-print-container danfe-folha-a4 bg-white text-black shadow-2xl relative select-text font-sans print:shadow-none print:border-none print:m-0 flex flex-col justify-between leading-tight mx-auto"
+        className="danfe-print-container danfe-folha-a4 bg-white text-black shadow-2xl relative select-text font-sans print:shadow-none print:border-none print:m-0 print:mt-0 print:p-0 print:pt-0 print:top-0 flex flex-col justify-between leading-tight mx-auto"
         style={{
           width: '210mm',
           maxWidth: '100%',
@@ -735,7 +768,7 @@ export default function DanfeEspelhoA4({
             1. CANHOTO SUPERIOR (Declaração de Recebimento - Fixo em 15mm)
             ========================================================================= */}
         <div 
-          className="danfe-canhoto-topo border border-black mb-1 overflow-hidden w-full" 
+          className="danfe-canhoto-topo border border-black mb-1 overflow-hidden w-full print:mt-0 print:pt-0" 
           style={{ height: '15mm', minHeight: '15mm', maxHeight: '15mm', border: '1px solid #000' }}
         >
           <div className="flex h-full">

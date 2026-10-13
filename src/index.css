@@ -255,7 +255,6 @@
   body.print-danfe .danfe-modal-overlay,
   body.print-danfe .danfe-modal-dialog,
   body.print-danfe .danfe-modal-scroll,
-  body.print-danfe .danfe-inner-overlay,
   body:has(.danfe-print-container) html,
   body:has(.danfe-print-container) body,
   body:has(.danfe-print-container) #root,
@@ -276,8 +275,7 @@
   body:has(.danfe-print-container) #screen-relatorios,
   body:has(.danfe-print-container) .danfe-modal-overlay,
   body:has(.danfe-print-container) .danfe-modal-dialog,
-  body:has(.danfe-print-container) .danfe-modal-scroll,
-  body:has(.danfe-print-container) .danfe-inner-overlay {
+  body:has(.danfe-print-container) .danfe-modal-scroll {
     display: block !important;
     position: static !important;
     overflow: visible !important;
@@ -329,26 +327,62 @@
   body:has(.danfe-print-container) #container-impressao-danfe * {
     visibility: visible !important;
   }
+
+  /* Fixação direta no topo absoluto para evitar margem superior residual */
+  body.print-danfe #container-impressao-danfe,
+  body:has(.danfe-print-container) #container-impressao-danfe {
+    display: block !important;
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    width: 100% !important;
+    margin: 0 auto !important;
+    margin-top: 0 !important;
+    padding: 0 !important;
+    padding-top: 0 !important;
+    background: transparent !important;
+    overflow: visible !important;
+    height: auto !important;
+    max-height: none !important;
+    transform: none !important;
+  }
+
+  body.print-danfe .danfe-inner-overlay,
+  body:has(.danfe-print-container) .danfe-inner-overlay {
+    display: block !important;
+    position: static !important;
+    width: 100% !important;
+    margin: 0 !important;
+    margin-top: 0 !important;
+    padding: 0 !important;
+    padding-top: 0 !important;
+  }
+
   body.print-danfe .danfe-print-container,
   body.print-danfe #folha-danfe-a4,
+  body.print-danfe .danfe-folha-a4,
   body:has(.danfe-print-container) .danfe-print-container,
   body:has(.danfe-print-container) #folha-danfe-a4,
+  body:has(.danfe-print-container) .danfe-folha-a4,
   .danfe-print-container,
   #folha-danfe-a4,
   .danfe-folha-a4 {
     display: flex !important;
     flex-direction: column !important;
-    justify-content: space-between !important;
+    justify-content: flex-start !important;
     position: relative !important;
-    top: auto !important;
+    top: 0 !important;
     left: auto !important;
     width: 100% !important;
-    max-width: 200mm !important;
-    min-height: 287mm !important;
+    max-width: 202mm !important;
+    min-height: 0 !important;
     height: auto !important;
     max-height: none !important;
     margin: 0 auto !important;
+    margin-top: 0 !important;
     padding: 0 !important;
+    padding-top: 0 !important;
     box-sizing: border-box !important;
     background: #ffffff !important;
     font-family: Arial, Helvetica, sans-serif !important;
@@ -374,8 +408,10 @@
     border: none !important;
   }
 
-  /* Canhoto superior fixo em 15mm */
+  /* Canhoto superior alinhado imediatamente ao topo */
   .danfe-canhoto-topo {
+    margin-top: 0 !important;
+    padding-top: 0 !important;
     height: 15mm !important;
     min-height: 15mm !important;
     max-height: 15mm !important;

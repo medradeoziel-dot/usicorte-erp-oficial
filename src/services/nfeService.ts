@@ -1561,7 +1561,7 @@ export function gerarDanfeHtml(
   <meta charset="UTF-8">
   <title>${tituloPagina}</title>
   <style>
-    @page { size: A4 portrait; margin: 5mm; }
+    @page { size: A4 portrait; margin: 3mm 4mm 4mm 4mm; }
     * { box-sizing: border-box; }
     body { font-family: Arial, Helvetica, sans-serif; font-size: 8.5px; color: #000; margin: 0; padding: 10px; background: #fff; line-height: 1.15; }
     .sheet { max-width: 210mm; margin: 0 auto; position: relative; }
@@ -1608,7 +1608,8 @@ export function gerarDanfeHtml(
     }
     @media print { 
       .no-print { display: none !important; }
-      body { padding: 0; }
+      body { padding: 0 !important; margin: 0 !important; }
+      .sheet { margin: 0 auto !important; margin-top: 0 !important; padding-top: 0 !important; top: 0 !important; }
     }
   </style>
 </head>
