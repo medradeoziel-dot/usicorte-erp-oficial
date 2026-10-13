@@ -307,7 +307,7 @@ export default function DanfeEspelhoA4Modal({
 
   return (
     <div className="danfe-modal-overlay fixed inset-0 z-[60] flex items-center justify-center p-2 sm:p-4 bg-slate-950/85 backdrop-blur-xs print:static print:z-auto print:inset-auto print:p-0 print:m-0 print:bg-transparent print:overflow-visible print:h-auto print:max-h-none print:block">
-      <div className="danfe-modal-dialog bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl max-w-5xl w-full max-h-[96vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200 print:static print:border-none print:shadow-none print:bg-transparent print:max-w-none print:max-h-none print:w-full print:h-auto print:overflow-visible print:block print:m-0 print:p-0">
+      <div className="danfe-modal-dialog bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl max-w-5xl w-full max-h-[96vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200 print:static print:border-none print:shadow-none print:bg-transparent print:max-w-none print:max-h-none print:w-full print:h-auto print:overflow-visible print:block print:m-0 print:p-0 print:animate-none print:transform-none">
         
         {/* Modal Header */}
         <div className="p-4 bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 border-b border-slate-700 flex items-center justify-between shrink-0 no-print">
@@ -622,7 +622,7 @@ export default function DanfeEspelhoA4Modal({
           )}
 
           {formaPagamento === 'A_VISTA' && (
-            <div className="px-3 py-1.5 bg-emerald-950/40 rounded-lg border border-emerald-500/20 text-emerald-300 text-xs flex items-center gap-2">
+            <div className="px-3 py-1.5 bg-emerald-950/40 rounded-lg border border-emerald-500/20 text-emerald-300 text-xs flex items-center gap-2 no-print">
               <Check className="w-4 h-4 text-emerald-400 shrink-0" />
               <span>
                 <strong>Modo À Vista Ativo:</strong> O quadro &quot;FATURA / DUPLICATAS&quot; da DANFE será mantido rigorosamente vazio (sem linha de duplicata ou vencimento), em conformidade com as regras fiscais do modelo 55 (indPag: 0 - Pagamento à vista).
@@ -636,7 +636,7 @@ export default function DanfeEspelhoA4Modal({
           @media print {
             @page {
               size: A4 portrait;
-              margin: 3mm 4mm 4mm 4mm;
+              margin: 3mm 4mm 3mm 4mm;
             }
 
             *, *:before, *:after {
@@ -655,7 +655,7 @@ export default function DanfeEspelhoA4Modal({
               overflow: visible !important;
             }
 
-            #root, #app-root, main,
+            #root, #app-root, #app-root > div, main,
             #screen-clientes, #screen-produtos, #screen-orcamento, #screen-vendas,
             #screen-calculadora, #screen-ordem-servico, #screen-movimentacoes,
             #screen-estoque, #screen-financeiro, #screen-empresa, #screen-php,
@@ -667,51 +667,29 @@ export default function DanfeEspelhoA4Modal({
               overflow: visible !important;
               height: auto !important;
               max-height: none !important;
-              min-height: auto !important;
+              min-height: 0 !important;
               margin: 0 !important;
               padding: 0 !important;
               border: none !important;
               box-shadow: none !important;
               background: transparent !important;
               transform: none !important;
+              animation: none !important;
+              transition: none !important;
               float: none !important;
             }
 
-            /* Fixação direta no topo absoluto para evitar margem superior residual */
-            #container-impressao-danfe {
-              display: block !important;
-              position: absolute !important;
-              top: 0 !important;
-              left: 0 !important;
-              right: 0 !important;
-              width: 100% !important;
-              margin: 0 auto !important;
-              margin-top: 0 !important;
-              padding: 0 !important;
-              padding-top: 0 !important;
-              background: transparent !important;
-              overflow: visible !important;
-              height: auto !important;
-              max-height: none !important;
-              transform: none !important;
-            }
-
-            .danfe-inner-overlay {
-              display: block !important;
-              position: static !important;
-              width: 100% !important;
-              margin: 0 !important;
-              margin-top: 0 !important;
-              padding: 0 !important;
-              padding-top: 0 !important;
-            }
-
-            /* 1. Esconder todos os elementos de fundo da página */
-            body * {
-              visibility: hidden;
-            }
-
-            /* Ocultar explicitamente outros relatórios e botões */
+            /* Ocultação total e imediata dos elementos de telas e controles fora da DANFE */
+            .screen-header,
+            .filtros-bar,
+            .tabela-container,
+            .tabela-consulta,
+            #tabelaDados,
+            .opcoes-pesquisa,
+            .botoes-impressao,
+            #screen-relatorios > *:not(.danfe-modal-overlay),
+            #screen-vendas > *:not(.danfe-modal-overlay),
+            #screen-orcamento > *:not(.danfe-modal-overlay),
             #container-impressao,
             #container-impressao *,
             #container-impressao-vendas,
@@ -750,6 +728,14 @@ export default function DanfeEspelhoA4Modal({
             .footerbar {
               display: none !important;
               visibility: hidden !important;
+              height: 0 !important;
+              margin: 0 !important;
+              padding: 0 !important;
+            }
+
+            /* 1. Esconder todos os elementos de fundo da página */
+            body * {
+              visibility: hidden;
             }
 
             /* 2. Tornar visível exclusivamente o container do DANFE e seus elementos filhos */
@@ -760,6 +746,36 @@ export default function DanfeEspelhoA4Modal({
             #container-impressao-danfe,
             #container-impressao-danfe * {
               visibility: visible !important;
+            }
+
+            /* Container de impressão do DANFE alinhado imediatamente ao topo */
+            #container-impressao-danfe {
+              display: block !important;
+              position: relative !important;
+              top: 0 !important;
+              left: 0 !important;
+              right: 0 !important;
+              width: 100% !important;
+              max-width: 210mm !important;
+              margin: 0 auto !important;
+              margin-top: 0 !important;
+              padding: 0 !important;
+              padding-top: 0 !important;
+              background: transparent !important;
+              overflow: visible !important;
+              height: auto !important;
+              max-height: none !important;
+              transform: none !important;
+            }
+
+            .danfe-inner-overlay {
+              display: block !important;
+              position: static !important;
+              width: 100% !important;
+              margin: 0 !important;
+              margin-top: 0 !important;
+              padding: 0 !important;
+              padding-top: 0 !important;
             }
 
             /* 3. Container da folha A4 alinhado rigorosamente ao topo da folha */
@@ -773,19 +789,19 @@ export default function DanfeEspelhoA4Modal({
               top: 0 !important;
               left: auto !important;
               width: 100% !important;
-              max-width: 202mm !important;
+              max-width: 210mm !important;
               min-height: 0 !important;
               height: auto !important;
               max-height: none !important;
               margin: 0 auto !important;
               margin-top: 0 !important;
-              padding: 0 !important;
+              padding: 0 2mm 0 2mm !important;
               padding-top: 0 !important;
               box-sizing: border-box !important;
               background: #ffffff !important;
               font-family: Arial, Helvetica, sans-serif !important;
               font-size: 7pt !important;
-              border: 1px solid #000 !important;
+              border: none !important;
               overflow: visible !important;
               box-shadow: none !important;
               -webkit-print-color-adjust: exact !important;

@@ -319,7 +319,7 @@ export default function App() {
         </div>
       )}
 
-      <div className="flex flex-1 relative overflow-hidden print:overflow-visible print:h-auto print:block">
+      <div className="flex flex-1 relative overflow-hidden print:overflow-visible print:h-auto print:block print:static">
         <Sidebar 
           currentScreen={currentScreen}
           reportsTab={reportsTab}

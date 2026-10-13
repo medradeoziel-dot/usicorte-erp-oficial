@@ -1561,7 +1561,7 @@ export function gerarDanfeHtml(
   <meta charset="UTF-8">
   <title>${tituloPagina}</title>
   <style>
-    @page { size: A4 portrait; margin: 3mm 4mm 4mm 4mm; }
+    @page { size: A4 portrait; margin: 3mm 4mm 3mm 4mm; }
     * { box-sizing: border-box; }
     body { font-family: Arial, Helvetica, sans-serif; font-size: 8.5px; color: #000; margin: 0; padding: 10px; background: #fff; line-height: 1.15; }
     .sheet { max-width: 210mm; margin: 0 auto; position: relative; }
