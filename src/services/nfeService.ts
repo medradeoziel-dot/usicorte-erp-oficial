@@ -2,6 +2,7 @@ import { Quote, QuoteItem, Client } from '../types';
 import { db, updateCotacaoNfeStatusDb, isUuid, inserirNotaFiscalDb, fetchNotasFiscaisDb, NotaFiscalDb } from '../lib/db';
 import { fetchCompanyData, CompanyFiscalData, DEFAULT_COMPANY_DATA, incrementEmitenteUltimoNumeroNfe, getLocalCompanyData } from './companyService';
 import { generateBarcodeSvg } from '../utils/barcode';
+import { formatarMedidasLimpa, getObservacaoEspecificaItem } from '../utils/calculator';
 
 /**
  * Formata o número da NF-e para exibição oficial no DANFE (ex: 000538 -> 000.538 ou 538)
@@ -1042,6 +1043,149 @@ export function formatarChaveAcesso(chave: string): string {
  * - Se UF do cliente for "SP": define o CFOP como cfop_interno (5102)
  * - Se UF for diferente de "SP": define o CFOP como cfop_externo (6102)
  */
+/**
+ * 1. COMPOSIÇÃO DA DESCRIÇÃO DO ITEM NO DANFE E NO XML DA NF-E (tag xProd):
+ * Concatena os campos do item da seguinte forma:
+ * - Nome do Produto / Material (ex: LASER - A36)
+ * - Medidas (ex: 3/4 x 250 x 240 mm)
+ * - Descrição / Observação complementar (ex: CONF DESENHO)
+ * Exemplo final esperado no campo de descrição do produto: "LASER - A36 - 3/4 x 250 x 240 mm - CONF DESENHO".
+ */
+export function formatarDescricaoCompletaItemNfe(it: any): string {
+  if (!it) return 'ITEM METALÚRGICO USICORTE';
+
+  // 1. Nome do Produto / Material (ex: "LASER - A36", "CHAPA A36", "TREFILADO SAE 1045", etc.)
+  let produtoMaterial = (
+    it.constantName ||
+    it.constanteNome ||
+    it.material ||
+    it.produto ||
+    ''
+  ).trim();
+
+  // 2. Medidas (ex: "3/4 x 250 x 240 mm", "Ø 50 x 200 mm")
+  let medidas = '';
+  const medPre = (it.medidasFormatadas || it.medidaFormatada || it.medida || it.medidas || '').trim();
+  if (medPre && medPre !== '—' && medPre !== '-') {
+    medidas = medPre;
+  } else {
+    const medCalc = formatarMedidasLimpa(it);
+    if (medCalc && medCalc !== '—' && medCalc !== '-') {
+      medidas = medCalc;
+    }
+  }
+
+  // Fallback inteligente para medidas caso o item tenha dimensões avulsas de corte
+  if (!medidas) {
+    const esp = it.thickness || it.espessura || it.measure || it.diameter || '';
+    const larg = it.widthMm || it.largura || it.width || '';
+    const comp = it.lengthMm || it.comprimento || it.length || '';
+    const wl = it.widthLength || '';
+
+    const partesMed: string[] = [];
+    if (esp && String(esp).trim() !== '-' && String(esp).trim() !== '—') {
+      partesMed.push(String(esp).trim());
+    }
+    if (wl && String(wl).trim() !== '-' && String(wl).trim() !== '—') {
+      partesMed.push(String(wl).trim());
+    } else {
+      if (larg && String(larg).trim() !== '0' && String(larg).trim() !== '-') {
+        partesMed.push(String(larg).trim());
+      }
+      if (comp && String(comp).trim() !== '0' && String(comp).trim() !== '-') {
+        partesMed.push(String(comp).trim());
+      }
+    }
+    if (partesMed.length > 0) {
+      let medStr = partesMed.join(' x ');
+      if (!medStr.toLowerCase().includes('mm')) {
+        medStr = `${medStr} mm`;
+      }
+      medidas = medStr;
+    }
+  }
+
+  // 3. Descrição / Observação complementar (ex: "CONF DESENHO")
+  const rawDesc = (it.description || it.descricao || '').trim();
+  const rawNotes = (it.notes || it.observacao || it.info || '').trim();
+
+  // Se produtoMaterial estiver vazio, aproveita o rawDesc
+  if (!produtoMaterial) {
+    if (rawDesc && rawDesc !== '-' && rawDesc !== '—') {
+      produtoMaterial = rawDesc;
+    } else {
+      produtoMaterial = 'ITEM METALÚRGICO USICORTE';
+    }
+  }
+
+  // Se a descrição do item já for uma string completa (já contém medidas e produtoMaterial), não duplica
+  if (
+    rawDesc &&
+    medidas &&
+    rawDesc.toUpperCase().includes(medidas.toUpperCase()) &&
+    (rawDesc.toUpperCase().includes(produtoMaterial.toUpperCase()) || produtoMaterial.toUpperCase() === rawDesc.toUpperCase())
+  ) {
+    return rawDesc;
+  }
+
+  // Determina o complemento (ex: CONF DESENHO, observações de corte, etc.)
+  let complemento = '';
+
+  // Se a descrição do item for diferente do produto/material, trata como descrição complementar
+  if (
+    rawDesc &&
+    rawDesc !== '-' &&
+    rawDesc !== '—' &&
+    rawDesc.toUpperCase() !== produtoMaterial.toUpperCase()
+  ) {
+    complemento = rawDesc;
+  }
+
+  // Se houver observações específicas nos campos notes/observacao (ex: CONF DESENHO)
+  const obsItem = getObservacaoEspecificaItem(it) || (rawNotes !== '-' && rawNotes !== '—' ? rawNotes : '');
+  if (obsItem) {
+    if (!complemento) {
+      if (obsItem.toUpperCase() !== produtoMaterial.toUpperCase()) {
+        complemento = obsItem;
+      }
+    } else if (
+      !complemento.toUpperCase().includes(obsItem.toUpperCase()) &&
+      obsItem.toUpperCase() !== produtoMaterial.toUpperCase()
+    ) {
+      complemento = `${complemento} - ${obsItem}`;
+    }
+  }
+
+  // Monta as partes na ordem solicitada:
+  // 1. Nome do Produto / Material (ex: LASER - A36)
+  // 2. Medidas (ex: 3/4 x 250 x 240 mm)
+  // 3. Descrição / Observação complementar (ex: CONF DESENHO)
+  const partes: string[] = [];
+
+  if (produtoMaterial) {
+    partes.push(produtoMaterial);
+  }
+
+  if (medidas && !produtoMaterial.toUpperCase().includes(medidas.toUpperCase())) {
+    partes.push(medidas);
+  }
+
+  if (complemento) {
+    const jaContem = partes.some(p => p.toUpperCase().includes(complemento.toUpperCase()));
+    if (!jaContem) {
+      partes.push(complemento);
+    }
+  }
+
+  const descricaoFinal = partes.join(' - ').trim();
+  return descricaoFinal || 'ITEM METALÚRGICO USICORTE';
+}
+
+/**
+ * Prepara a lista de itens fiscais aplicando a regra estrita de validação de CFOP:
+ * - Se UF do cliente for "SP": define o CFOP como cfop_interno (5102)
+ * - Se UF for diferente de "SP": define o CFOP como cfop_externo (6102)
+ */
 export function prepararItensFiscais(items: QuoteItem[], ufDestinatario: string): ItemFiscalNfe[] {
   const isDestinatarioSP = (ufDestinatario || 'SP').trim().toUpperCase() === 'SP';
   const cfopPadrao = isDestinatarioSP ? '5102' : '6102';
@@ -1062,7 +1206,7 @@ export function prepararItensFiscais(items: QuoteItem[], ufDestinatario: string)
       id: it.id || `item-${idx + 1}`,
       ordem: idx + 1,
       codigo: String(it.id || idx + 1).slice(-6).toUpperCase(),
-      descricao: (it.description || it.descricao || it.constantName || 'ITEM METALÚRGICO USICORTE').trim(),
+      descricao: formatarDescricaoCompletaItemNfe(it),
       ncm: rawNcm,
       cfop: rawCfop,
       unidade: rawUn,
@@ -1097,7 +1241,7 @@ export function gerarXmlNfe(
       <prod>
         <cProd>${item.codigo}</cProd>
         <cEAN>SEM GTIN</cEAN>
-        <xProd>${escapeXml(item.descricao)}</xProd>
+        <xProd>${escapeXml(item.descricao.slice(0, 120))}</xProd>
         <NCM>${item.ncm}</NCM>
         <CFOP>${item.cfop}</CFOP>
         <uCom>${item.unidade}</uCom>

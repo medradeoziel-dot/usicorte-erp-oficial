@@ -17,9 +17,10 @@ import {
   obterOuBaixarXmlNfe,
   isNfeAutorizada,
   isNfeCancelada,
-  obterNomePadraoDanfePdf
+  obterNomePadraoDanfePdf,
+  formatarDescricaoCompletaItemNfe
 } from '../services/nfeService';
-export { buscarInscricaoEstadual };
+export { buscarInscricaoEstadual, formatarDescricaoCompletaItemNfe };
 import { formatCurrency, formatNumberBR, formatSafeDate } from '../utils/calculator';
 import Logo from './Logo';
 import { 
