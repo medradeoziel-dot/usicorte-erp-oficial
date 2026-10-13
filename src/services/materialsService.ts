@@ -92,13 +92,18 @@ export function mapSupabaseToItem(record: any): MaterialItem {
     cfop_interno: record.cfop_interno ? String(record.cfop_interno).trim() : '5102',
     cfop_externo: record.cfop_externo ? String(record.cfop_externo).trim() : '6102',
     unidade_medida: record.unidade_medida ? String(record.unidade_medida).trim().toUpperCase() : 'PC',
-    csosn: record.csosn ? String(record.csosn).trim() : '102 - Sem permissão de crédito',
+    csosn: (!record.csosn || String(record.csosn).includes('102') || String(record.csosn).includes('101')) 
+      ? '101 - Com permissão de crédito' 
+      : String(record.csosn).trim(),
     created_at: record.created_at
   };
 }
 
 export function materialItemToProfile(item: MaterialItem): MaterialProfile {
   const cleanDesc = item.descricao && item.descricao.trim() !== '' ? item.descricao.trim() : '';
+  const itemCsosn = (!item.csosn || String(item.csosn).includes('102') || String(item.csosn).includes('101'))
+    ? '101 - Com permissão de crédito'
+    : item.csosn;
   return {
     id: item.id,
     name: item.nome,
@@ -110,11 +115,14 @@ export function materialItemToProfile(item: MaterialItem): MaterialProfile {
     cfop_interno: item.cfop_interno || '5102',
     cfop_externo: item.cfop_externo || '6102',
     unidade_medida: item.unidade_medida || 'PC',
-    csosn: item.csosn || '102 - Sem permissão de crédito'
+    csosn: itemCsosn
   };
 }
 
 export function materialItemToConstante(item: MaterialItem): TabelaConstanteItem {
+  const itemCsosn = (!item.csosn || String(item.csosn).includes('102') || String(item.csosn).includes('101'))
+    ? '101 - Com permissão de crédito'
+    : item.csosn;
   return {
     nome: item.nome,
     k: item.k,
@@ -125,7 +133,7 @@ export function materialItemToConstante(item: MaterialItem): TabelaConstanteItem
     cfop_interno: item.cfop_interno || '5102',
     cfop_externo: item.cfop_externo || '6102',
     unidade_medida: item.unidade_medida || 'PC',
-    csosn: item.csosn || '102 - Sem permissão de crédito'
+    csosn: itemCsosn
   };
 }
 
@@ -192,7 +200,7 @@ export function getCachedMaterials(): MaterialItem[] {
     cfop_interno: (c as any).cfop_interno || '5102',
     cfop_externo: (c as any).cfop_externo || '6102',
     unidade_medida: (c as any).unidade_medida || 'PC',
-    csosn: (c as any).csosn || '102 - Sem permissão de crédito'
+    csosn: (!(c as any).csosn || String((c as any).csosn).includes('102') || String((c as any).csosn).includes('101')) ? '101 - Com permissão de crédito' : String((c as any).csosn)
   }));
 
   syncGlobalMaterials(defaults);
@@ -281,7 +289,9 @@ export async function createMaterialDb(payload: {
   const fiscalCfopInt = (payload.cfop_interno || '5102').trim();
   const fiscalCfopExt = (payload.cfop_externo || '6102').trim();
   const fiscalUn = (payload.unidade_medida || 'PC').trim().toUpperCase();
-  const fiscalCsosn = (payload.csosn || '102 - Sem permissão de crédito').trim();
+  const fiscalCsosn = (!payload.csosn || payload.csosn.includes('102') || payload.csosn.includes('101')) 
+    ? '101 - Com permissão de crédito' 
+    : payload.csosn.trim();
 
   try {
     const fullPayload = {
@@ -386,7 +396,9 @@ export async function updateMaterialDb(
   const fiscalCfopInt = (payload.cfop_interno || '5102').trim();
   const fiscalCfopExt = (payload.cfop_externo || '6102').trim();
   const fiscalUn = (payload.unidade_medida || 'PC').trim().toUpperCase();
-  const fiscalCsosn = (payload.csosn || '102 - Sem permissão de crédito').trim();
+  const fiscalCsosn = (!payload.csosn || payload.csosn.includes('102') || payload.csosn.includes('101')) 
+    ? '101 - Com permissão de crédito' 
+    : payload.csosn.trim();
 
   try {
     const fullPayload = {

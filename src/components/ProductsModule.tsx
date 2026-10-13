@@ -62,7 +62,7 @@ export default function ProductsModule({ onSelectProductForQuote }: ProductsModu
     cfop_interno: '5102',
     cfop_externo: '6102',
     unidade_medida: 'PC',
-    csosn: '102 - Sem permissão de crédito'
+    csosn: '101 - Com permissão de crédito'
   });
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -93,7 +93,7 @@ export default function ProductsModule({ onSelectProductForQuote }: ProductsModu
       cfop_interno: '5102',
       cfop_externo: '6102',
       unidade_medida: 'PC',
-      csosn: '102 - Sem permissão de crédito'
+      csosn: '101 - Com permissão de crédito'
     });
     setFormError(null);
     setIsModalOpen(true);
@@ -101,6 +101,9 @@ export default function ProductsModule({ onSelectProductForQuote }: ProductsModu
 
   const handleOpenEditModal = (mat: MaterialItem) => {
     setEditingMaterial(mat);
+    const matCsosn = (!mat.csosn || mat.csosn.includes('102') || mat.csosn.includes('101'))
+      ? '101 - Com permissão de crédito'
+      : mat.csosn;
     setFormData({
       nome: mat.nome,
       descricao: mat.descricao || '',
@@ -111,7 +114,7 @@ export default function ProductsModule({ onSelectProductForQuote }: ProductsModu
       cfop_interno: mat.cfop_interno || '5102',
       cfop_externo: mat.cfop_externo || '6102',
       unidade_medida: mat.unidade_medida || 'PC',
-      csosn: mat.csosn || '102 - Sem permissão de crédito'
+      csosn: matCsosn
     });
     setFormError(null);
     setIsModalOpen(true);
@@ -833,7 +836,7 @@ export default function ProductsModule({ onSelectProductForQuote }: ProductsModu
                       <option value="500 - ICMS cobrado anteriormente por ST">500 - ICMS cobrado anteriormente por ST</option>
                       <option value="900 - Outros">900 - Outros</option>
                     </select>
-                    <span className="text-[9px] text-slate-500 mt-0.5 block">Padrão: 102 - Sem permissão de crédito</span>
+                    <span className="text-[9px] text-slate-500 mt-0.5 block">Padrão: 101 - Tributada pelo Simples Nacional com permissão de crédito</span>
                   </div>
                 </div>
               </div>

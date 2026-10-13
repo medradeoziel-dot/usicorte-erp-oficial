@@ -180,7 +180,7 @@ export default function SalesModule({
         cfop_interno: fromMaterials.cfop_interno || '5102',
         cfop_externo: fromMaterials.cfop_externo || '6102',
         unidade_medida: fromMaterials.unidade_medida || 'PC',
-        csosn: fromMaterials.csosn || '102 - Sem permissão de crédito'
+        csosn: (!fromMaterials.csosn || fromMaterials.csosn.includes('102') || fromMaterials.csosn.includes('101')) ? '101 - Com permissão de crédito' : fromMaterials.csosn
       };
     }
 
@@ -201,7 +201,7 @@ export default function SalesModule({
         cfop_interno: fromProfiles.cfop_interno || '5102',
         cfop_externo: fromProfiles.cfop_externo || '6102',
         unidade_medida: fromProfiles.unidade_medida || 'PC',
-        csosn: fromProfiles.csosn || '102 - Sem permissão de crédito'
+        csosn: (!fromProfiles.csosn || fromProfiles.csosn.includes('102') || fromProfiles.csosn.includes('101')) ? '101 - Com permissão de crédito' : fromProfiles.csosn
       };
     }
 
@@ -218,7 +218,7 @@ export default function SalesModule({
         cfop_interno: '5102',
         cfop_externo: '6102',
         unidade_medida: 'PC',
-        csosn: '102 - Sem permissão de crédito'
+        csosn: '101 - Com permissão de crédito'
       };
     }
 
@@ -238,7 +238,7 @@ export default function SalesModule({
         cfop_interno: '5102',
         cfop_externo: '6102',
         unidade_medida: 'PC',
-        csosn: '102 - Sem permissão de crédito'
+        csosn: '101 - Com permissão de crédito'
       };
     }
 
@@ -695,7 +695,7 @@ export default function SalesModule({
                   cfop_externo: it.cfop_externo || '6102',
                   unidade_medida: it.unidade_medida || 'PC',
                   unidadeMedida: it.unidade_medida || 'PC',
-                  csosn: it.csosn || '102 - Sem permissão de crédito'
+                  csosn: (!it.csosn || it.csosn.includes('102') || it.csosn.includes('101')) ? '101 - Com permissão de crédito' : it.csosn
                 };
               })
             };
@@ -779,7 +779,7 @@ export default function SalesModule({
                       cfop_externo: it.cfop_externo || '6102',
                       unidade_medida: it.unidade_medida || 'PC',
                       unidadeMedida: it.unidade_medida || 'PC',
-                      csosn: it.csosn || '102 - Sem permissão de crédito'
+                      csosn: (!it.csosn || it.csosn.includes('102') || it.csosn.includes('101')) ? '101 - Com permissão de crédito' : it.csosn
                     }))
                   };
                 });
@@ -1585,7 +1585,9 @@ export default function SalesModule({
         cfop_externo: item.cfop_externo || findProductOrMaterialData(itemMatName)?.cfop_externo || '6102',
         unidade_medida: item.unidade_medida || findProductOrMaterialData(itemMatName)?.unidade_medida || 'PC',
         unidadeMedida: item.unidadeMedida || findProductOrMaterialData(itemMatName)?.unidade_medida || 'PC',
-        csosn: item.csosn || findProductOrMaterialData(itemMatName)?.csosn || '102 - Sem permissão de crédito'
+        csosn: (!item.csosn || item.csosn.includes('102') || item.csosn.includes('101')) 
+          ? '101 - Com permissão de crédito' 
+          : (findProductOrMaterialData(itemMatName)?.csosn || '101 - Com permissão de crédito')
       } : item);
 
       setItems(updatedItemsList);
@@ -1643,7 +1645,9 @@ export default function SalesModule({
         cfop_externo: fiscalData?.cfop_externo || '6102',
         unidade_medida: fiscalData?.unidade_medida || 'PC',
         unidadeMedida: fiscalData?.unidade_medida || 'PC',
-        csosn: fiscalData?.csosn || '102 - Sem permissão de crédito'
+        csosn: (!fiscalData?.csosn || fiscalData.csosn.includes('102') || fiscalData.csosn.includes('101')) 
+          ? '101 - Com permissão de crédito' 
+          : fiscalData.csosn
       };
 
       updatedItemsList = [...items, newItem];

@@ -550,7 +550,11 @@ export function gerarDigVal(chave: string, valor: number): string {
 export function downloadXmlNfe(xmlContent: string, chaveAcesso: string): void {
   const cleanChave = (chaveAcesso || '').replace(/\D/g, '').padEnd(44, '0').slice(0, 44);
   const fileName = `NFe${cleanChave}.xml`;
-  const blob = new Blob([xmlContent], { type: 'application/xml;charset=utf-8' });
+  const sanitizedXml = (xmlContent || '')
+    .replace(/<CSOSN>102<\/CSOSN>/g, '<CSOSN>101</CSOSN>')
+    .replace(/<ICMSSN102>/g, '<ICMSSN101>')
+    .replace(/<\/ICMSSN102>/g, '</ICMSSN101>');
+  const blob = new Blob([sanitizedXml], { type: 'application/xml;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -982,6 +986,10 @@ export async function obterOuBaixarXmlNfe(
       const cleanDoc = cliDanfe.doc.replace(/\D/g, '');
       const tipoDoc: 'CNPJ' | 'CPF' = cleanDoc.length > 11 ? 'CNPJ' : 'CPF';
 
+      const refOrigemXml = quote.origemCotacoes && quote.origemCotacoes.length > 1
+        ? `Ref. Cotações: ${quote.origemCotacoes.join(', ')}`
+        : (quote.observations || (quote.quoteNumber ? `Ref. Cotação: ${quote.quoteNumber}` : ''));
+
       xml = gerarXmlNfe(
         {
           razaoSocial: comp.corporateName || (comp as any).razao_social || 'L. M. BANZATTO METAIS',
@@ -1019,7 +1027,8 @@ export async function obterOuBaixarXmlNfe(
         chave,
         valorTotal,
         dataEmissao,
-        protocolo
+        protocolo,
+        refOrigemXml
       );
 
       // Persiste no Supabase e no cache local
@@ -1321,7 +1330,16 @@ export function prepararItensFiscais(items: QuoteItem[], ufDestinatario: string)
       ? (it.cfop_interno || cfopPadrao) 
       : (it.cfop_externo || cfopPadrao);
     const rawUn = (it.unidade_medida || it.unidadeMedida || 'PC').trim().toUpperCase();
-    const rawCsosn = it.csosn || (it as any).csosn_cst || (it as any).cst || '101 - Com permissão de crédito';
+    // 1. LEITURA DO CSOSN DO CADASTRO/ITEM:
+    // Força o uso do CSOSN 101 (para empresas do Simples Nacional com permissão de crédito)
+    // caso o item ou o emitente estejam configurados para isso, ignorando códigos antigos como 102.
+    const rawCsosnStr = String(it.csosn || (it as any).csosn_cst || (it as any).cst || '').trim();
+    let csosnFinal = '101 - Com permissão de crédito';
+    if (rawCsosnStr && !rawCsosnStr.includes('102') && rawCsosnStr !== '102') {
+      csosnFinal = rawCsosnStr.includes('101') ? '101 - Com permissão de crédito' : rawCsosnStr;
+    } else {
+      csosnFinal = '101 - Com permissão de crédito';
+    }
 
     const qty = Number(it.quantity || it.qtd || 1);
     const vUnit = Number(it.unitPrice || it.valorUnitario || 0);
@@ -1338,7 +1356,7 @@ export function prepararItensFiscais(items: QuoteItem[], ufDestinatario: string)
       quantidade: qty,
       valorUnitario: vUnit,
       subtotal: subtotal,
-      csosn: rawCsosn,
+      csosn: csosnFinal,
       cotacaoOrigem: it.cotacaoOrigem || (it as any).cotacao_origem
     };
   });
@@ -1364,7 +1382,34 @@ export function gerarXmlNfe(
   const cDV = chaveAcesso.slice(43, 44);
   const creditoInfo = calcularCreditoIcmsSimples(valorTotal, emitente.aliquotaIcmsSimples || 2.75);
 
-  const xmlItens = itens.map((item, index) => `
+  const xmlItens = itens.map((item, index) => {
+    // 2. MAPEAMENTO FISCAL:
+    // No mapeamento das tags do XML da NF-e (grupo do ICMS para Simples Nacional - CSOSN),
+    // garanta que a tag correspondente envie 101 em vez de 102.
+    const csosnCod = item.csosn ? item.csosn.split(' ')[0].replace(/\D/g, '') : '101';
+    const isCsosn101 = csosnCod === '101' || csosnCod === '102' || !csosnCod;
+    const aliquotaCred = emitente.aliquotaIcmsSimples || 2.75;
+    const valorCreditoItem = Number(((item.subtotal * aliquotaCred) / 100).toFixed(2));
+
+    const tagIcms = isCsosn101
+      ? `
+        <ICMS>
+          <ICMSSN101>
+            <orig>0</orig>
+            <CSOSN>101</CSOSN>
+            <pCredSN>${aliquotaCred.toFixed(2)}</pCredSN>
+            <vCredICMSSN>${valorCreditoItem.toFixed(2)}</vCredICMSSN>
+          </ICMSSN101>
+        </ICMS>`
+      : `
+        <ICMS>
+          <ICMSSN${csosnCod}>
+            <orig>0</orig>
+            <CSOSN>${csosnCod}</CSOSN>
+          </ICMSSN${csosnCod}>
+        </ICMS>`;
+
+    return `
     <det nItem="${index + 1}">
       <prod>
         <cProd>${item.codigo}</cProd>
@@ -1382,13 +1427,7 @@ export function gerarXmlNfe(
         <vUnTrib>${item.valorUnitario.toFixed(4)}</vUnTrib>
         <indTot>1</indTot>
       </prod>
-      <imposto>
-        <ICMS>
-          <ICMSSN102>
-            <orig>0</orig>
-            <CSOSN>102</CSOSN>
-          </ICMSSN102>
-        </ICMS>
+      <imposto>${tagIcms}
         <PIS>
           <PISNT>
             <CST>07</CST>
@@ -1400,7 +1439,8 @@ export function gerarXmlNfe(
           </COFINSNT>
         </COFINS>
       </imposto>
-    </det>`).join('');
+    </det>`;
+  }).join('');
 
   const nfeXml = `<NFe xmlns="http://www.portalfiscal.inf.br/nfe">
   <infNFe Id="NFe${chaveAcesso}" versao="4.00">
@@ -1855,7 +1895,7 @@ export function gerarDanfeHtml(
         <span style="font-size: 7.5px; color: #555;">Trib aprox: R$ ${(it.subtotal * 0.1345).toFixed(2).replace('.', ',')} Fed/Est (Fonte: IBPT)</span>
       </td>
       <td style="border: 1px solid #000; padding: 2px 4px; text-align: center; font-family: monospace;">${it.ncm}</td>
-      <td style="border: 1px solid #000; padding: 2px 4px; text-align: center; font-family: monospace;">${it.csosn.split(' ')[0]}</td>
+      <td style="border: 1px solid #000; padding: 2px 4px; text-align: center; font-family: monospace;">${(it.csosn && !it.csosn.includes('102')) ? (it.csosn.includes('101') ? '101' : it.csosn.split(' ')[0]) : '101'}</td>
       <td style="border: 1px solid #000; padding: 2px 4px; text-align: center; font-family: monospace; font-weight: bold;">${it.cfop}</td>
       <td style="border: 1px solid #000; padding: 2px 4px; text-align: center; font-weight: bold;">${it.unidade}</td>
       <td style="border: 1px solid #000; padding: 2px 4px; text-align: right; font-family: monospace;">${it.quantidade.toFixed(2)}</td>

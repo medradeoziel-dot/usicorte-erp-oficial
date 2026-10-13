@@ -1108,7 +1108,10 @@ export async function saveCotacaoDb(quote: Quote): Promise<{ data: any; error: a
 
         const ncmFiscal = it.ncm || foundMat?.ncm || '72085200';
         const unFiscal = (it.unidade_medida || it.unidadeMedida || foundMat?.unidade_medida || 'PC').toUpperCase();
-        const csosnFiscal = it.csosn || foundMat?.csosn || '102 - Sem permissão de crédito';
+        const rawCsosn = it.csosn || foundMat?.csosn || '';
+        const csosnFiscal = (!rawCsosn || String(rawCsosn).includes('102') || String(rawCsosn).includes('101')) 
+          ? '101 - Com permissão de crédito' 
+          : String(rawCsosn).trim();
         const cfopFiscal = it.cfop || it.cfop_interno || foundMat?.cfop_interno || '5102';
 
         return {

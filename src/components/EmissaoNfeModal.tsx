@@ -131,7 +131,7 @@ export default function EmissaoNfeModal({
               cfop: it.cfop,
               cfop_interno: it.cfop_interno,
               cfop_externo: it.cfop_externo,
-              csosn: it.csosn,
+              csosn: (!it.csosn || String(it.csosn).includes('102') || String(it.csosn).includes('101')) ? '101 - Com permissão de crédito' : it.csosn,
               unidade_medida: it.unidade_medida,
               totalWeightKg: Number((it as any).peso_total || 0),
               pesoTotal: Number((it as any).peso_total || 0),
@@ -197,7 +197,7 @@ export default function EmissaoNfeModal({
               cfop: it.cfop,
               cfop_interno: it.cfop_interno,
               cfop_externo: it.cfop_externo,
-              csosn: it.csosn,
+              csosn: (!it.csosn || String(it.csosn).includes('102') || String(it.csosn).includes('101')) ? '101 - Com permissão de crédito' : it.csosn,
               unidade_medida: it.unidade_medida,
               totalWeightKg: Number((it as any).peso_total || 0),
               pesoTotal: Number((it as any).peso_total || 0),
@@ -756,7 +756,7 @@ export default function EmissaoNfeModal({
                         </td>
                         <td className="py-2 px-3 text-center">
                           <span className="font-mono font-bold px-1.5 py-0.5 rounded text-[11px] text-indigo-300 bg-indigo-950/50 border border-indigo-500/30">
-                            {(it.csosn || '101').split(' ')[0]}
+                            {(it.csosn && !it.csosn.includes('102')) ? it.csosn.split(' ')[0] : '101'}
                           </span>
                         </td>
                         <td className="py-2 px-3 text-center">
@@ -1212,7 +1212,7 @@ export default function EmissaoNfeModal({
                           <td className="p-1 border-r border-black text-center font-mono">{it.codigo}</td>
                           <td className="p-1 border-r border-black font-semibold">{it.descricao}</td>
                           <td className="p-1 border-r border-black text-center font-mono">{it.ncm}</td>
-                          <td className="p-1 border-r border-black text-center font-mono">{it.csosn.split(' ')[0]}</td>
+                          <td className="p-1 border-r border-black text-center font-mono">{(it.csosn && !it.csosn.includes('102')) ? (it.csosn.includes('101') ? '101' : it.csosn.split(' ')[0]) : '101'}</td>
                           <td className="p-1 border-r border-black text-center font-mono font-bold text-indigo-900">{it.cfop}</td>
                           <td className="p-1 border-r border-black text-center font-bold">{it.unidade}</td>
                           <td className="p-1 border-r border-black text-right font-mono">{it.quantidade.toFixed(2)}</td>

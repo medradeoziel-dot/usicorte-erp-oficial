@@ -896,7 +896,7 @@ export default function ReportsModule({
               cfop: it.cfop,
               cfop_interno: it.cfop_interno,
               cfop_externo: it.cfop_externo,
-              csosn: it.csosn,
+              csosn: (!it.csosn || String(it.csosn).includes('102') || String(it.csosn).includes('101')) ? '101 - Com permissão de crédito' : it.csosn,
               unidade_medida: it.unidade_medida,
               totalWeightKg: Number((it as any).peso_total || 0),
               pesoTotal: Number((it as any).peso_total || 0),
@@ -1097,7 +1097,7 @@ export default function ReportsModule({
           cfop: it.cfop,
           cfop_interno: it.cfop_interno,
           cfop_externo: it.cfop_externo,
-          csosn: it.csosn,
+          csosn: (!it.csosn || String(it.csosn).includes('102') || String(it.csosn).includes('101')) ? '101 - Com permissão de crédito' : it.csosn,
           unidade_medida: it.unidade_medida,
           totalWeightKg: Number((it as any).peso_total || 0),
           pesoTotal: Number((it as any).peso_total || 0),
@@ -1239,6 +1239,10 @@ export default function ReportsModule({
 
   // Abre o modal de emissão / transmissão da NF-e para a SEFAZ
   const handleAbrirEmissaoNfe = async (item: ConsultaItem) => {
+    if (selectedIds.length > 1 && selectedIds.includes(item.idVer)) {
+      await handleEmitirNfeTopBar();
+      return;
+    }
     if (isNfeCancelada(item.status_nfe)) {
       setDeleteFeedback({
         message: `Esta NF-e (Nº ${item.nfe_numero || ''}) foi CANCELADA na SEFAZ (Status 101). A emissão de novo DANFE com valor fiscal está permanentemente desativada.`,
@@ -1259,6 +1263,10 @@ export default function ReportsModule({
 
   // Abre o modal de visualização e conferência da DANFE A4
   const handleAbrirVisualizacaoDanfe = async (item: ConsultaItem) => {
+    if (selectedIds.length > 1 && selectedIds.includes(item.idVer)) {
+      await handleVisualizarDanfeTopBar();
+      return;
+    }
     const quote = await resolveQuoteForNfe(item);
     if (quote) {
       setQuoteForDanfeModal(quote);

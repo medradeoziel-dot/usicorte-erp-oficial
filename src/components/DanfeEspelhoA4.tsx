@@ -1167,7 +1167,9 @@ export default function DanfeEspelhoA4({
                       </span>
                     </td>
                     <td className="p-0.5 border-r border-black text-center font-mono" style={{ borderRight: '1px solid #000' }}>{it.ncm}</td>
-                    <td className="p-0.5 border-r border-black text-center font-mono" style={{ borderRight: '1px solid #000' }}>{it.csosn.split(' ')[0]}</td>
+                    <td className="p-0.5 border-r border-black text-center font-mono" style={{ borderRight: '1px solid #000' }}>
+                      {(it.csosn && !it.csosn.includes('102')) ? (it.csosn.includes('101') ? '101' : it.csosn.split(' ')[0]) : '101'}
+                    </td>
                     <td className="p-0.5 border-r border-black text-center font-mono font-bold" style={{ borderRight: '1px solid #000' }}>{it.cfop}</td>
                     <td className="p-0.5 border-r border-black text-center font-bold" style={{ borderRight: '1px solid #000' }}>{it.unidade}</td>
                     <td className="p-0.5 border-r border-black text-right font-mono" style={{ borderRight: '1px solid #000' }}>{it.quantidade.toFixed(2)}</td>
