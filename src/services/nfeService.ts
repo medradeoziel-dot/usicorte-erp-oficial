@@ -8,10 +8,15 @@ import { generateBarcodeSvg } from '../utils/barcode';
  */
 export function formatarNumeroDanfe(numStr: string | number): string {
   const clean = String(numStr).replace(/\D/g, '');
-  if (clean.length === 6) {
-    return `${clean.slice(0, 3)}.${clean.slice(3)}`;
+  if (!clean) return String(numStr);
+  const num = parseInt(clean, 10);
+  if (isNaN(num) || num === 0) return '000.001';
+  const padded = String(num).padStart(6, '0');
+  if (padded.length === 6) {
+    return `${padded.slice(0, 3)}.${padded.slice(3)}`;
   }
-  return clean || String(numStr);
+  const padded9 = String(num).padStart(9, '0');
+  return `${padded9.slice(0, 3)}.${padded9.slice(3, 6)}.${padded9.slice(6)}`;
 }
 
 export interface ItemFiscalNfe {

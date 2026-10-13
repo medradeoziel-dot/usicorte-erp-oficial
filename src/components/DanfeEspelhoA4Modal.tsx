@@ -96,7 +96,11 @@ export default function DanfeEspelhoA4Modal({
   }, [quote]);
 
   const numeroNfe = useMemo(() => {
-    return quote?.nfe_numero || String((company.ultimo_numero_nfe || 0) + 1).padStart(6, '0');
+    if (quote?.nfe_numero && String(quote.nfe_numero) !== String(quote?.quoteNumber) && !String(quote.nfe_numero).toUpperCase().includes('COT')) {
+      const clean = String(quote.nfe_numero).replace(/\D/g, '');
+      if (clean) return clean.padStart(6, '0');
+    }
+    return String((company.ultimo_numero_nfe || 0) + 1).padStart(6, '0');
   }, [quote, company]);
 
   // Carrega os dados oficiais da empresa emitente

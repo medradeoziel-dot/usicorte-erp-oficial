@@ -279,7 +279,10 @@ export default function DanfeEspelhoA4({
   const emitenteUltimo = typeof emitente.ultimo_numero_nfe === 'number' && !isNaN(emitente.ultimo_numero_nfe)
     ? emitente.ultimo_numero_nfe
     : 0;
-  const numeroNfe = quote.nfe_numero || String(emitenteUltimo + 1).padStart(6, '0');
+  const rawNfeNum = (quote.nfe_numero && String(quote.nfe_numero) !== String(quote.quoteNumber) && !String(quote.nfe_numero).toUpperCase().includes('COT'))
+    ? String(quote.nfe_numero).replace(/\D/g, '')
+    : '';
+  const numeroNfe = rawNfeNum ? rawNfeNum.padStart(6, '0') : String(emitenteUltimo + 1).padStart(6, '0');
   const serie = String(quote.serie_nfe || emitente.serie_nfe || '1');
   const chaveAcessoRaw = quote.nfe_chave || gerarChaveAcessoNfe(emitente.uf, new Date(), emitente.cnpj, serie, numeroNfe);
   const chaveFormatada = isPrevia ? 'CHAVE SERÁ GERADA APÓS TRANSMISSÃO SEFAZ' : formatarChaveAcesso(chaveAcessoRaw);
