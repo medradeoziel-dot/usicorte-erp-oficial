@@ -48,6 +48,7 @@ interface DanfeEspelhoA4Props {
   formaPagamento?: 'A_VISTA' | 'A_PRAZO' | string;
   duplicatas?: DuplicataDanfe[];
   clienteDestinatario?: ClienteDanfeDestinatario;
+  hideHeaderToolbar?: boolean;
 }
 
 // Gera padrão gráfico de código de barras Code-128 para a Chave de Acesso
@@ -117,7 +118,8 @@ export default function DanfeEspelhoA4({
   isTransmitting = false,
   formaPagamento,
   duplicatas: duplicatasProp,
-  clienteDestinatario
+  clienteDestinatario,
+  hideHeaderToolbar = false
 }: DanfeEspelhoA4Props) {
   const isCancelada = isNfeCancelada(quote.status_nfe);
   const isAutorizada = isNfeAutorizada(quote.status_nfe);
@@ -359,18 +361,13 @@ export default function DanfeEspelhoA4({
   };
 
   return (
-    <div className="danfe-inner-overlay fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex flex-col items-center overflow-y-auto p-2 sm:p-4 print:p-0 print:m-0 print:bg-white print:static print:z-auto print:inset-auto print:overflow-visible print:h-auto print:block print:w-full">
+    <div className="danfe-inner-overlay w-full flex flex-col items-center py-2 print:py-0 print:block print:w-full print:m-0 print:p-0">
       {/* Estilos CSS Scoped para isolamento e formatação oficial A4 Portrait da DANFE */}
       <style>{`
         @media print {
           @page {
             size: A4 portrait;
-            margin: 0mm !important;
-          }
-
-          body {
-            margin: 0 !important;
-            padding: 0 !important;
+            margin: 5mm;
           }
 
           *, *:before, *:after {
@@ -378,15 +375,15 @@ export default function DanfeEspelhoA4({
             print-color-adjust: exact !important;
           }
 
-          /* Reseta os containers pais para fluxo limpo */
           html, body {
-            width: 210mm !important;
-            height: 297mm !important;
-            max-height: 297mm !important;
+            width: 100% !important;
+            height: auto !important;
+            min-height: 100% !important;
+            max-height: none !important;
             margin: 0 !important;
             padding: 0 !important;
             background: #ffffff !important;
-            overflow: hidden !important;
+            overflow: visible !important;
           }
 
           #root, #app-root, main,
@@ -399,6 +396,7 @@ export default function DanfeEspelhoA4({
           #container-impressao-danfe {
             display: block !important;
             position: static !important;
+            inset: auto !important;
             overflow: visible !important;
             height: auto !important;
             max-height: none !important;
@@ -417,7 +415,7 @@ export default function DanfeEspelhoA4({
             visibility: hidden;
           }
 
-          /* Ocultar explicitamente outros relatórios, resumos de pedidos, propostas e componentes da tela */
+          /* Ocultar explicitamente outros relatórios e botões */
           #container-impressao,
           #container-impressao *,
           #container-impressao-vendas,
@@ -467,64 +465,44 @@ export default function DanfeEspelhoA4({
           }
 
           /* 3. Container da folha A4 em formato exato */
-          .danfe-print-container {
-            position: absolute !important;
-            top: 0 !important;
-            left: 0 !important;
-            width: 210mm !important;
-            max-width: 210mm !important;
-            height: 297mm !important;
-            max-height: 297mm !important;
-            min-height: 297mm !important;
-            margin: 0 !important;
-            padding: 5mm !important;
-            box-sizing: border-box !important;
-            background: #ffffff !important;
-            font-family: Arial, Helvetica, sans-serif !important;
-            font-size: 7pt !important;
-            display: flex !important;
-            flex-direction: column !important;
-            justify-content: space-between !important;
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
-            overflow: hidden !important;
-            border: none !important;
-            box-shadow: none !important;
-            z-index: 99999 !important;
-          }
-
-          .danfe-print-container .danfe-print-container {
-            position: static !important;
-            width: 100% !important;
-            height: 100% !important;
-            max-width: 100% !important;
-            max-height: 100% !important;
-            padding: 0 !important;
-            margin: 0 !important;
-          }
-
+          .danfe-print-container,
           #folha-danfe-a4,
           .danfe-folha-a4 {
             display: flex !important;
             flex-direction: column !important;
             justify-content: space-between !important;
-            width: 210mm !important;
-            max-width: 210mm !important;
-            height: 297mm !important;
-            max-height: 297mm !important;
-            min-height: 297mm !important;
-            margin: 0 !important;
-            padding: 5mm !important;
+            position: relative !important;
+            top: auto !important;
+            left: auto !important;
+            width: 100% !important;
+            max-width: 200mm !important;
+            min-height: 287mm !important;
+            height: auto !important;
+            max-height: none !important;
+            margin: 0 auto !important;
+            padding: 0 !important;
             box-sizing: border-box !important;
             background: #ffffff !important;
             font-family: Arial, Helvetica, sans-serif !important;
             font-size: 7pt !important;
-            visibility: visible !important;
-            overflow: hidden !important;
-            border: none !important;
+            border: 1px solid #000 !important;
+            overflow: visible !important;
             box-shadow: none !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
+            page-break-after: auto !important;
+            break-after: auto !important;
+          }
+
+          .danfe-print-container .danfe-print-container {
+            position: static !important;
+            width: 100% !important;
+            height: auto !important;
+            max-width: 100% !important;
+            max-height: none !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            border: none !important;
           }
 
           /* Canhoto superior com exatamente 15mm */
@@ -534,6 +512,9 @@ export default function DanfeEspelhoA4({
             max-height: 15mm !important;
             overflow: hidden !important;
             box-sizing: border-box !important;
+            width: 100% !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
           }
 
           /* Bloco do Emitente com 85mm fixos */
@@ -566,131 +547,148 @@ export default function DanfeEspelhoA4({
             min-height: 20mm !important;
             display: flex !important;
             flex-direction: column !important;
-            overflow: hidden !important;
+            overflow: visible !important;
+            width: 100% !important;
           }
 
-          /* Bloco Dados Adicionais fixado no rodapé com 35mm de altura */
+          /* Bloco Dados Adicionais fixado no rodapé */
           .danfe-bloco-rodape {
             margin-top: auto !important;
             flex-shrink: 0 !important;
+            width: 100% !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
           }
 
           .danfe-bloco-rodape-quadro {
-            height: 35mm !important;
-            min-height: 35mm !important;
-            max-height: 35mm !important;
-            overflow: hidden !important;
+            min-height: 32mm !important;
             box-sizing: border-box !important;
+            overflow: visible !important;
+            width: 100% !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
+
+          table {
+            page-break-inside: auto !important;
+            break-inside: auto !important;
+          }
+
+          tr {
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
           }
         }
       `}</style>
       
-      {/* Barra de Ações Superior (Oculta na Impressão) */}
-      <div className="w-full max-w-[210mm] bg-slate-900 border border-slate-800 rounded-t-xl px-4 py-3 flex items-center justify-between gap-3 text-slate-100 shadow-xl shrink-0 print:hidden mb-2">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <div className={`p-1.5 rounded-lg ${
-            isCancelada 
-              ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' 
-              : isPrevia 
-                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' 
-                : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-          }`}>
-            {isCancelada ? <Ban className="w-5 h-5 shrink-0 text-rose-400" /> : <FileText className="w-5 h-5 shrink-0" />}
-          </div>
-          <div className="min-w-0">
-            <h2 className="font-bold text-sm tracking-wide flex items-center gap-2 truncate">
-              {isCancelada 
-                ? 'DANFE de NF-e Cancelada (Sem Valor Fiscal)' 
+      {/* Barra de Ações Superior (Oculta na Impressão e quando desativada) */}
+      {!hideHeaderToolbar && (
+        <div className="w-full max-w-[210mm] bg-slate-900 border border-slate-800 rounded-t-xl px-4 py-3 flex items-center justify-between gap-3 text-slate-100 shadow-xl shrink-0 print:hidden mb-2">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className={`p-1.5 rounded-lg ${
+              isCancelada 
+                ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' 
                 : isPrevia 
-                  ? 'Espelho DANFE (Prévia Oficial A4)' 
-                  : 'DANFE Oficial - Modelo 55'}
-              <span className={`text-[10px] font-mono px-2 py-0.5 rounded uppercase tracking-wider ${
-                isCancelada 
-                  ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' 
+                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' 
+                  : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+            }`}>
+              {isCancelada ? <Ban className="w-5 h-5 shrink-0 text-rose-400" /> : <FileText className="w-5 h-5 shrink-0" />}
+            </div>
+            <div className="min-w-0">
+              <h2 className="font-bold text-sm tracking-wide flex items-center gap-2 truncate">
+                {isCancelada 
+                  ? 'DANFE de NF-e Cancelada (Sem Valor Fiscal)' 
                   : isPrevia 
-                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' 
-                    : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-              }`}>
-                {isCancelada ? 'CANCELADA (STATUS 101)' : isPrevia ? 'Modo Conferência' : 'Emitida SEFAZ'}
-              </span>
-            </h2>
-            <p className="text-[11px] text-slate-400 truncate">
-              NF-e Nº {formatarNumeroDanfe(numeroNfe)} • Série {serie} • {destinatario.nome}
-            </p>
+                    ? 'Espelho DANFE (Prévia Oficial A4)' 
+                    : 'DANFE Oficial - Modelo 55'}
+                <span className={`text-[10px] font-mono px-2 py-0.5 rounded uppercase tracking-wider ${
+                  isCancelada 
+                    ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30' 
+                    : isPrevia 
+                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' 
+                      : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                }`}>
+                  {isCancelada ? 'CANCELADA (STATUS 101)' : isPrevia ? 'Modo Conferência' : 'Emitida SEFAZ'}
+                </span>
+              </h2>
+              <p className="text-[11px] text-slate-400 truncate">
+                NF-e Nº {formatarNumeroDanfe(numeroNfe)} • Série {serie} • {destinatario.nome}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {onOpenEdit && !isCancelada && (
+              <button
+                type="button"
+                onClick={onOpenEdit}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
+              >
+                Revisar Dados
+              </button>
+            )}
+
+            {!isPrevia && !isCancelada && (
+              <button
+                type="button"
+                onClick={handleDownloadXml}
+                disabled={isDownloadingXml}
+                className="px-3.5 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold rounded-lg transition-all shadow-md flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                title="Baixar arquivo XML oficial da NF-e (Modelo 55)"
+              >
+                <Download className="w-4 h-4" />
+                <span>{isDownloadingXml ? 'Baixando...' : 'Baixar XML'}</span>
+              </button>
+            )}
+
+            {isAutorizada && onCancelar && (
+              <button
+                type="button"
+                onClick={onCancelar}
+                className="px-3.5 py-1.5 bg-rose-700 hover:bg-rose-600 text-white text-xs font-bold rounded-lg transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
+                title="Cancelar NF-e Homologada na SEFAZ"
+              >
+                <Ban className="w-4 h-4" />
+                <span>CANCELAR NF-E</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={handlePrint}
+              className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg transition-all shadow-md shadow-indigo-600/30 flex items-center gap-1.5 cursor-pointer"
+              title="Imprimir DANFE na folha A4 oficial"
+            >
+              <Printer className="w-4 h-4" />
+              <span>{isCancelada ? 'Imprimir Cancelada' : 'Imprimir DANFE'}</span>
+            </button>
+
+            {isPrevia && !isCancelada && onTransmitir && (
+              <button
+                type="button"
+                onClick={onTransmitir}
+                disabled={isTransmitting}
+                className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg transition-all shadow-md shadow-emerald-600/30 flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                title="Transmitir esta nota para a SEFAZ"
+              >
+                <Send className="w-4 h-4" />
+                <span>{isTransmitting ? 'Transmitindo...' : 'Transmitir SEFAZ'}</span>
+              </button>
+            )}
+
+            {onClose && (
+              <button
+                type="button"
+                onClick={onClose}
+                className="p-1.5 bg-slate-800 hover:bg-rose-600 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
+                title="Fechar"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            )}
           </div>
         </div>
-
-        <div className="flex items-center gap-2">
-          {onOpenEdit && !isCancelada && (
-            <button
-              type="button"
-              onClick={onOpenEdit}
-              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
-            >
-              Revisar Dados
-            </button>
-          )}
-
-          {!isPrevia && !isCancelada && (
-            <button
-              type="button"
-              onClick={handleDownloadXml}
-              disabled={isDownloadingXml}
-              className="px-3.5 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold rounded-lg transition-all shadow-md flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-              title="Baixar arquivo XML oficial da NF-e (Modelo 55)"
-            >
-              <Download className="w-4 h-4" />
-              <span>{isDownloadingXml ? 'Baixando...' : 'Baixar XML'}</span>
-            </button>
-          )}
-
-          {isAutorizada && onCancelar && (
-            <button
-              type="button"
-              onClick={onCancelar}
-              className="px-3.5 py-1.5 bg-rose-700 hover:bg-rose-600 text-white text-xs font-bold rounded-lg transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
-              title="Cancelar NF-e Homologada na SEFAZ"
-            >
-              <Ban className="w-4 h-4" />
-              <span>CANCELAR NF-E</span>
-            </button>
-          )}
-
-          <button
-            type="button"
-            onClick={handlePrint}
-            className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg transition-all shadow-md shadow-indigo-600/30 flex items-center gap-1.5 cursor-pointer"
-            title="Imprimir DANFE na folha A4 oficial"
-          >
-            <Printer className="w-4 h-4" />
-            <span>{isCancelada ? 'Imprimir Cancelada' : 'Imprimir DANFE'}</span>
-          </button>
-
-          {isPrevia && !isCancelada && onTransmitir && (
-            <button
-              type="button"
-              onClick={onTransmitir}
-              disabled={isTransmitting}
-              className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-lg transition-all shadow-md shadow-emerald-600/30 flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-              title="Transmitir esta nota para a SEFAZ"
-            >
-              <Send className="w-4 h-4" />
-              <span>{isTransmitting ? 'Transmitindo...' : 'Transmitir SEFAZ'}</span>
-            </button>
-          )}
-
-          {onClose && (
-            <button
-              type="button"
-              onClick={onClose}
-              className="p-1.5 bg-slate-800 hover:bg-rose-600 text-slate-400 hover:text-white rounded-lg transition-colors cursor-pointer"
-              title="Fechar"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          )}
-        </div>
-      </div>
+      )}
 
       {/* =========================================================================
           FOLHA A4 OFICIAL - ESPELHO RIGOROSO DA DANFE MODELO 55
@@ -698,12 +696,12 @@ export default function DanfeEspelhoA4({
       <div 
         ref={printRef}
         id="folha-danfe-a4"
-        className="danfe-print-container danfe-folha-a4 bg-white text-black shadow-2xl relative select-text font-sans print:shadow-none print:border-none print:m-0 flex flex-col justify-between leading-tight"
+        className="danfe-print-container danfe-folha-a4 bg-white text-black shadow-2xl relative select-text font-sans print:shadow-none print:border-none print:m-0 flex flex-col justify-between leading-tight mx-auto"
         style={{
           width: '210mm',
-          height: '297mm',
+          maxWidth: '100%',
           minHeight: '297mm',
-          maxHeight: '297mm',
+          height: 'auto',
           padding: '5mm',
           boxSizing: 'border-box',
           fontFamily: 'Arial, Helvetica, sans-serif',
@@ -737,8 +735,8 @@ export default function DanfeEspelhoA4({
             1. CANHOTO SUPERIOR (Declaração de Recebimento - Fixo em 15mm)
             ========================================================================= */}
         <div 
-          className="danfe-canhoto-topo border border-black mb-1 overflow-hidden" 
-          style={{ height: '15mm', minHeight: '15mm', maxHeight: '15mm', width: '200mm', border: '1px solid #000' }}
+          className="danfe-canhoto-topo border border-black mb-1 overflow-hidden w-full" 
+          style={{ height: '15mm', minHeight: '15mm', maxHeight: '15mm', border: '1px solid #000' }}
         >
           <div className="flex h-full">
             <div className="p-1 border-r border-black flex flex-col justify-between" style={{ width: '165mm', borderRight: '1px solid #000' }}>
@@ -766,7 +764,7 @@ export default function DanfeEspelhoA4({
         </div>
 
         {/* Linha pontilhada de destaque com tesourinha */}
-        <div className="relative flex items-center justify-center my-0.5 border-b border-dashed border-gray-500" style={{ width: '200mm' }}>
+        <div className="relative flex items-center justify-center my-0.5 border-b border-dashed border-gray-500 w-full">
           <span className="absolute bg-white px-2 text-[6pt] text-gray-500 uppercase tracking-widest flex items-center gap-1 font-mono">
             <Scissors className="w-2.5 h-2.5 rotate-90" /> Destaque aqui
           </span>
@@ -775,7 +773,7 @@ export default function DanfeEspelhoA4({
         {/* =========================================================================
             2. CABEÇALHO DA EMISSÃO (Emitente 85mm + DANFE 35mm + Chave 80mm = 200mm)
             ========================================================================= */}
-        <div className="flex border border-black mb-1 overflow-hidden" style={{ width: '200mm', border: '1px solid #000' }}>
+        <div className="flex border border-black mb-1 overflow-hidden w-full" style={{ border: '1px solid #000' }}>
           {/* Coluna 1: Emitente & Logo (85mm fixos) */}
           <div 
             className="danfe-bloco-emitente border-r border-black flex flex-col items-center justify-center text-center p-1.5 shrink-0 overflow-hidden"
@@ -866,7 +864,7 @@ export default function DanfeEspelhoA4({
         </div>
 
         {/* Natureza da Operação / Inscrição Estadual / CNPJ */}
-        <div className="border border-black mb-1 grid grid-cols-12 divide-x divide-black text-[8px]" style={{ width: '200mm', border: '1px solid #000' }}>
+        <div className="border border-black mb-1 grid grid-cols-12 divide-x divide-black text-[8px] w-full" style={{ border: '1px solid #000' }}>
           <div className="col-span-6 p-1">
             <span className="block text-[6.5px] font-bold uppercase text-gray-600">NATUREZA DA OPERAÇÃO</span>
             <strong className="text-[9px] uppercase">{isPrevia ? 'VENDA DE MERCADORIA (MODO DE CONFERÊNCIA)' : 'VENDA DE PRODUÇÃO DO ESTABELECIMENTO / MERCADORIA'}</strong>
@@ -884,10 +882,10 @@ export default function DanfeEspelhoA4({
         {/* =========================================================================
             3. DESTINATÁRIO / REMETENTE
             ========================================================================= */}
-        <div className="text-[7.5px] font-black uppercase tracking-wider text-gray-800 mb-0.5" style={{ width: '200mm' }}>
+        <div className="text-[7.5px] font-black uppercase tracking-wider text-gray-800 mb-0.5 w-full">
           DESTINATÁRIO / REMETENTE
         </div>
-        <div className="border border-black mb-1 divide-y divide-black text-[8px]" style={{ width: '200mm', border: '1px solid #000' }}>
+        <div className="border border-black mb-1 divide-y divide-black text-[8px] w-full" style={{ border: '1px solid #000' }}>
           {/* Linha 1 */}
           <div className="grid grid-cols-12 divide-x divide-black">
             <div className="col-span-7 p-1">
@@ -952,10 +950,10 @@ export default function DanfeEspelhoA4({
         {/* =========================================================================
             4. FATURA / DUPLICATAS
             ========================================================================= */}
-        <div className="text-[7.5px] font-black uppercase tracking-wider text-gray-800 mb-0.5" style={{ width: '200mm' }}>
+        <div className="text-[7.5px] font-black uppercase tracking-wider text-gray-800 mb-0.5 w-full">
           FATURA / DUPLICATAS
         </div>
-        <div className="border border-black mb-1 p-1 min-h-[28px] flex items-center" style={{ width: '200mm', border: '1px solid #000' }}>
+        <div className="border border-black mb-1 p-1 min-h-[28px] flex items-center w-full" style={{ border: '1px solid #000' }}>
           {isAVista || duplicatasExibir.length === 0 ? (
             <div className="w-full h-4">
               {/* Quadro rigorosamente vazio para Pagamento À Vista (indPag: 0) */}
@@ -985,10 +983,10 @@ export default function DanfeEspelhoA4({
         {/* =========================================================================
             5. CÁLCULO DO IMPOSTO (GRADE OFICIAL COMPLETA)
             ========================================================================= */}
-        <div className="text-[7.5px] font-black uppercase tracking-wider text-gray-800 mb-0.5" style={{ width: '200mm' }}>
+        <div className="text-[7.5px] font-black uppercase tracking-wider text-gray-800 mb-0.5 w-full">
           CÁLCULO DO IMPOSTO
         </div>
-        <div className="border border-black mb-1 divide-y divide-black text-[8px]" style={{ width: '200mm', border: '1px solid #000' }}>
+        <div className="border border-black mb-1 divide-y divide-black text-[8px] w-full" style={{ border: '1px solid #000' }}>
           {/* Linha 1 */}
           <div className="grid grid-cols-6 divide-x divide-black text-center">
             <div className="p-1">
@@ -1049,10 +1047,10 @@ export default function DanfeEspelhoA4({
         {/* =========================================================================
             6. TRANSPORTADOR / VOLUMES TRANSPORTADOS
             ========================================================================= */}
-        <div className="text-[7.5px] font-black uppercase tracking-wider text-gray-800 mb-0.5" style={{ width: '200mm' }}>
+        <div className="text-[7.5px] font-black uppercase tracking-wider text-gray-800 mb-0.5 w-full">
           TRANSPORTADOR / VOLUMES TRANSPORTADOS
         </div>
-        <div className="border border-black mb-1 divide-y divide-black text-[8px]" style={{ width: '200mm', border: '1px solid #000' }}>
+        <div className="border border-black mb-1 divide-y divide-black text-[8px] w-full" style={{ border: '1px solid #000' }}>
           {/* Linha 1 */}
           <div className="grid grid-cols-12 divide-x divide-black">
             <div className="col-span-5 p-1">
@@ -1129,11 +1127,11 @@ export default function DanfeEspelhoA4({
         {/* =========================================================================
             7. TABELA COMPLETA DE DADOS DO PRODUTO / SERVIÇOS
             ========================================================================= */}
-        <div className="danfe-secao-produtos flex-1 flex flex-col min-h-[20mm] mb-1 overflow-hidden" style={{ width: '200mm' }}>
+        <div className="danfe-secao-produtos flex-1 flex flex-col min-h-[20mm] mb-1 w-full">
           <div className="text-[7.5px] font-black uppercase tracking-wider text-gray-800 mb-0.5 shrink-0">
             DADOS DO PRODUTO / SERVIÇOS
           </div>
-          <div className="border border-black overflow-hidden flex-1 flex flex-col" style={{ border: '1px solid #000' }}>
+          <div className="border border-black flex-1 flex flex-col" style={{ border: '1px solid #000' }}>
             <table className="w-full text-left border-collapse text-[7px] leading-tight">
               <thead className="bg-gray-100 border-b border-black text-center font-bold text-[6px]" style={{ borderBottom: '1px solid #000' }}>
                 <tr>
@@ -1185,15 +1183,15 @@ export default function DanfeEspelhoA4({
         </div>
 
         {/* =========================================================================
-            8. BLOCO DE DADOS ADICIONAIS NO RODAPÉ (Altura fixa de 35mm)
+            8. BLOCO DE DADOS ADICIONAIS NO RODAPÉ (Altura flexível mínima de 32mm)
             ========================================================================= */}
-        <div className="danfe-bloco-rodape mt-auto shrink-0 pt-0.5" style={{ width: '200mm' }}>
+        <div className="danfe-bloco-rodape mt-auto shrink-0 pt-0.5 w-full">
           <div className="text-[7.5px] font-black uppercase tracking-wider text-gray-800 mb-0.5">
             DADOS ADICIONAIS
           </div>
           <div 
-            className="danfe-bloco-rodape-quadro border border-black grid grid-cols-12 divide-x divide-black text-[7px] overflow-hidden" 
-            style={{ height: '35mm', minHeight: '35mm', maxHeight: '35mm', border: '1px solid #000' }}
+            className="danfe-bloco-rodape-quadro border border-black grid grid-cols-12 divide-x divide-black text-[7px]" 
+            style={{ minHeight: '32mm', border: '1px solid #000' }}
           >
             <div className="col-span-8 p-1.5 flex flex-col justify-between leading-normal overflow-hidden" style={{ borderRight: '1px solid #000' }}>
               <div>

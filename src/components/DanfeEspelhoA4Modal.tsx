@@ -636,12 +636,7 @@ export default function DanfeEspelhoA4Modal({
           @media print {
             @page {
               size: A4 portrait;
-              margin: 0mm !important;
-            }
-
-            body {
-              margin: 0 !important;
-              padding: 0 !important;
+              margin: 5mm;
             }
 
             *, *:before, *:after {
@@ -649,15 +644,15 @@ export default function DanfeEspelhoA4Modal({
               print-color-adjust: exact !important;
             }
 
-            /* Reseta os containers pais para fluxo limpo */
             html, body {
-              width: 210mm !important;
-              height: 297mm !important;
-              max-height: 297mm !important;
+              width: 100% !important;
+              height: auto !important;
+              min-height: 100% !important;
+              max-height: none !important;
               margin: 0 !important;
               padding: 0 !important;
               background: #ffffff !important;
-              overflow: hidden !important;
+              overflow: visible !important;
             }
 
             #root, #app-root, main,
@@ -670,6 +665,7 @@ export default function DanfeEspelhoA4Modal({
             #container-impressao-danfe {
               display: block !important;
               position: static !important;
+              inset: auto !important;
               overflow: visible !important;
               height: auto !important;
               max-height: none !important;
@@ -688,7 +684,7 @@ export default function DanfeEspelhoA4Modal({
               visibility: hidden;
             }
 
-            /* Ocultar explicitamente outros relatórios, resumos de pedidos, propostas e componentes da tela */
+            /* Ocultar explicitamente outros relatórios e botões */
             #container-impressao,
             #container-impressao *,
             #container-impressao-vendas,
@@ -738,64 +734,44 @@ export default function DanfeEspelhoA4Modal({
             }
 
             /* 3. Container da folha A4 em formato exato */
-            .danfe-print-container {
-              position: absolute !important;
-              top: 0 !important;
-              left: 0 !important;
-              width: 210mm !important;
-              max-width: 210mm !important;
-              height: 297mm !important;
-              max-height: 297mm !important;
-              min-height: 297mm !important;
-              margin: 0 !important;
-              padding: 5mm !important;
-              box-sizing: border-box !important;
-              background: #ffffff !important;
-              font-family: Arial, Helvetica, sans-serif !important;
-              font-size: 7pt !important;
-              display: flex !important;
-              flex-direction: column !important;
-              justify-content: space-between !important;
-              -webkit-print-color-adjust: exact !important;
-              print-color-adjust: exact !important;
-              overflow: hidden !important;
-              border: none !important;
-              box-shadow: none !important;
-              z-index: 99999 !important;
-            }
-
-            .danfe-print-container .danfe-print-container {
-              position: static !important;
-              width: 100% !important;
-              height: 100% !important;
-              max-width: 100% !important;
-              max-height: 100% !important;
-              padding: 0 !important;
-              margin: 0 !important;
-            }
-
+            .danfe-print-container,
             #folha-danfe-a4,
             .danfe-folha-a4 {
               display: flex !important;
               flex-direction: column !important;
               justify-content: space-between !important;
-              width: 210mm !important;
-              max-width: 210mm !important;
-              height: 297mm !important;
-              max-height: 297mm !important;
-              min-height: 297mm !important;
-              margin: 0 !important;
-              padding: 5mm !important;
+              position: relative !important;
+              top: auto !important;
+              left: auto !important;
+              width: 100% !important;
+              max-width: 200mm !important;
+              min-height: 287mm !important;
+              height: auto !important;
+              max-height: none !important;
+              margin: 0 auto !important;
+              padding: 0 !important;
               box-sizing: border-box !important;
               background: #ffffff !important;
               font-family: Arial, Helvetica, sans-serif !important;
               font-size: 7pt !important;
-              visibility: visible !important;
-              overflow: hidden !important;
-              border: none !important;
+              border: 1px solid #000 !important;
+              overflow: visible !important;
               box-shadow: none !important;
               -webkit-print-color-adjust: exact !important;
               print-color-adjust: exact !important;
+              page-break-after: auto !important;
+              break-after: auto !important;
+            }
+
+            .danfe-print-container .danfe-print-container {
+              position: static !important;
+              width: 100% !important;
+              height: auto !important;
+              max-width: 100% !important;
+              max-height: none !important;
+              padding: 0 !important;
+              margin: 0 !important;
+              border: none !important;
             }
 
             /* Canhoto superior com exatamente 15mm */
@@ -805,6 +781,9 @@ export default function DanfeEspelhoA4Modal({
               max-height: 15mm !important;
               overflow: hidden !important;
               box-sizing: border-box !important;
+              width: 100% !important;
+              page-break-inside: avoid !important;
+              break-inside: avoid !important;
             }
 
             /* Bloco do Emitente com 85mm fixos */
@@ -837,21 +816,36 @@ export default function DanfeEspelhoA4Modal({
               min-height: 20mm !important;
               display: flex !important;
               flex-direction: column !important;
-              overflow: hidden !important;
+              overflow: visible !important;
+              width: 100% !important;
             }
 
-            /* Bloco Dados Adicionais fixado no rodapé com 35mm de altura */
+            /* Bloco Dados Adicionais fixado no rodapé */
             .danfe-bloco-rodape {
               margin-top: auto !important;
               flex-shrink: 0 !important;
+              width: 100% !important;
+              page-break-inside: avoid !important;
+              break-inside: avoid !important;
             }
 
             .danfe-bloco-rodape-quadro {
-              height: 35mm !important;
-              min-height: 35mm !important;
-              max-height: 35mm !important;
-              overflow: hidden !important;
+              min-height: 32mm !important;
               box-sizing: border-box !important;
+              overflow: visible !important;
+              width: 100% !important;
+              page-break-inside: avoid !important;
+              break-inside: avoid !important;
+            }
+
+            table {
+              page-break-inside: auto !important;
+              break-inside: auto !important;
+            }
+
+            tr {
+              page-break-inside: avoid !important;
+              break-inside: avoid !important;
             }
           }
         `}</style>
@@ -870,6 +864,7 @@ export default function DanfeEspelhoA4Modal({
               formaPagamento={formaPagamento}
               duplicatas={duplicatas}
               clienteDestinatario={clienteDestinatario || undefined}
+              hideHeaderToolbar={true}
             />
           </div>
         </div>
