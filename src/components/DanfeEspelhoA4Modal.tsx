@@ -636,7 +636,7 @@ export default function DanfeEspelhoA4Modal({
           @media print {
             @page {
               size: A4 portrait;
-              margin: 5mm;
+              margin: 0mm !important;
             }
 
             *, *:before, *:after {
@@ -646,9 +646,9 @@ export default function DanfeEspelhoA4Modal({
 
             /* Reseta os containers pais para fluxo normal da folha A4 */
             html, body {
-              width: 100% !important;
-              height: 287mm !important;
-              max-height: 287mm !important;
+              width: 210mm !important;
+              height: 297mm !important;
+              max-height: 297mm !important;
               margin: 0 !important;
               padding: 0 !important;
               background: #ffffff !important;
@@ -663,7 +663,8 @@ export default function DanfeEspelhoA4Modal({
             #screen-estoque, #screen-financeiro, #screen-empresa, #screen-php,
             #screen-dashboard, #screen-relatorios,
             .danfe-modal-overlay, .danfe-modal-dialog, .danfe-modal-scroll,
-            .danfe-inner-overlay {
+            .danfe-inner-overlay,
+            #container-impressao-danfe {
               display: block !important;
               position: static !important;
               overflow: visible !important;
@@ -728,47 +729,48 @@ export default function DanfeEspelhoA4Modal({
             /* 2. Tornar visível exclusivamente o container do DANFE e seus elementos filhos */
             .danfe-print-container,
             .danfe-print-container *,
-            #container-impressao-danfe,
-            #container-impressao-danfe *,
             #folha-danfe-a4,
             #folha-danfe-a4 * {
               visibility: visible !important;
             }
 
-            /* 3. Posicionar o container do DANFE em absolute (left: 0, top: 0, width: 100%) ocupando exatamente a altura da folha A4 (287mm) */
-            .danfe-print-container,
-            #container-impressao-danfe {
+            /* 3. Posicionar o container do DANFE em absolute (left: 0, top: 0) ocupando exatamente a folha A4 (210mm x 297mm) com padding de 5mm */
+            .danfe-print-container {
+              width: 210mm !important;
+              height: 297mm !important;
+              max-width: 210mm !important;
+              max-height: 297mm !important;
+              min-height: 297mm !important;
+              padding: 5mm !important;
+              box-sizing: border-box !important;
+              position: absolute !important;
+              top: 0 !important;
+              left: 0 !important;
+              background: #fff !important;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
               display: flex !important;
               flex-direction: column !important;
               justify-content: space-between !important;
-              position: absolute !important;
-              left: 0 !important;
-              top: 0 !important;
-              width: 100% !important;
-              max-width: 100% !important;
-              height: 287mm !important;
-              max-height: 287mm !important;
-              margin: 0 !important;
-              padding: 0 !important;
-              background: #ffffff !important;
-              box-shadow: none !important;
-              border: none !important;
               overflow: hidden !important;
-              box-sizing: border-box !important;
+              page-break-inside: avoid !important;
+              break-inside: avoid !important;
+              page-break-after: avoid !important;
+              break-after: avoid !important;
+              margin: 0 !important;
+              border: none !important;
+              box-shadow: none !important;
               z-index: 99999 !important;
-              -webkit-print-color-adjust: exact !important;
-              print-color-adjust: exact !important;
             }
 
-            /* Quando houver aninhamento de .danfe-print-container, o interno fica relativo e preenche 100% */
             .danfe-print-container .danfe-print-container {
-              position: relative !important;
-              left: auto !important;
-              top: auto !important;
+              position: static !important;
               width: 100% !important;
               height: 100% !important;
-              max-height: 287mm !important;
-              margin: 0 auto !important;
+              max-width: 100% !important;
+              max-height: 100% !important;
+              padding: 0 !important;
+              margin: 0 !important;
             }
 
             #folha-danfe-a4,
@@ -776,21 +778,26 @@ export default function DanfeEspelhoA4Modal({
               display: flex !important;
               flex-direction: column !important;
               justify-content: space-between !important;
-              width: 100% !important;
-              max-width: 100% !important;
-              height: 287mm !important;
-              max-height: 287mm !important;
-              min-height: 287mm !important;
-              margin: 0 auto !important;
-              padding: 2.5mm 3.5mm !important;
-              box-shadow: none !important;
-              border: 1px solid #000000 !important;
+              width: 210mm !important;
+              height: 297mm !important;
+              max-width: 210mm !important;
+              max-height: 297mm !important;
+              min-height: 297mm !important;
+              padding: 5mm !important;
               box-sizing: border-box !important;
+              position: absolute !important;
+              top: 0 !important;
+              left: 0 !important;
+              margin: 0 !important;
               background: #ffffff !important;
               page-break-inside: avoid !important;
               break-inside: avoid !important;
+              page-break-after: avoid !important;
+              break-after: avoid !important;
               visibility: visible !important;
               overflow: hidden !important;
+              border: none !important;
+              box-shadow: none !important;
               -webkit-print-color-adjust: exact !important;
               print-color-adjust: exact !important;
             }
@@ -820,7 +827,7 @@ export default function DanfeEspelhoA4Modal({
 
         {/* Conteúdo com Scroll da Folha A4 */}
         <div className="danfe-modal-scroll p-4 sm:p-6 overflow-y-auto flex-1 bg-slate-950/60 flex justify-center print:static print:p-0 print:m-0 print:bg-transparent print:overflow-visible print:h-auto print:max-h-none print:block print:w-full">
-          <div id="container-impressao-danfe" className="danfe-print-container w-full max-w-[820px] print:max-w-none print:w-full print:m-0 print:p-0">
+          <div id="container-impressao-danfe" className="w-full max-w-[820px] print:w-full print:max-w-none print:m-0 print:p-0">
             <DanfeEspelhoA4
               quote={quote}
               client={client}
