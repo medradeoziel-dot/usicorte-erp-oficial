@@ -24,7 +24,8 @@ import {
   ListOrdered,
   CreditCard,
   QrCode,
-  Wallet
+  Wallet,
+  Loader2
 } from 'lucide-react';
 import { CompanyFiscalData } from '../types';
 import { 
@@ -43,6 +44,8 @@ export default function CompanySettingsModule({ onBackToDashboard }: CompanySett
   const [formData, setFormData] = useState<CompanyFiscalData>(DEFAULT_COMPANY_DATA);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [isSavingNfeNumber, setIsSavingNfeNumber] = useState<boolean>(false);
+  const [isSavingSerie, setIsSavingSerie] = useState<boolean>(false);
   const [isSearchingCep, setIsSearchingCep] = useState<boolean>(false);
   const [statusMessage, setStatusMessage] = useState<{ text: string; type: 'success' | 'error' | 'info' | null }>({
     text: '',
@@ -88,22 +91,52 @@ export default function CompanySettingsModule({ onBackToDashboard }: CompanySett
   };
 
   const handleSalvarUltimoNumeroNfe = async (numeroEspecifico?: number) => {
-    const valor = numeroEspecifico !== undefined 
+    const rawVal = numeroEspecifico !== undefined 
       ? numeroEspecifico 
-      : (Number(formData.ultimo_numero_nfe) || 0);
+      : formData.ultimo_numero_nfe;
+
+    const valor = typeof rawVal === 'number' && !isNaN(rawVal)
+      ? rawVal
+      : parseInt(String(rawVal || 0), 10);
 
     const validVal = isNaN(valor) || valor < 0 ? 0 : valor;
+    const serieVal = Number(formData.serie_nfe) || 1;
 
+    setIsSavingNfeNumber(true);
     try {
-      const res = await updateEmitenteNfeConfig(validVal, formData.serie_nfe || 1);
+      const res = await updateEmitenteNfeConfig(validVal, serieVal);
       if (res.success) {
-        setFormData(prev => ({ ...prev, ultimo_numero_nfe: validVal }));
-        showStatus('Número da NF-e atualizado com sucesso!', 'success');
+        setFormData(prev => ({ ...prev, ultimo_numero_nfe: validVal, serie_nfe: serieVal }));
+        const prox = validVal + 1;
+        showStatus(`Último número salvo com sucesso no banco de dados! Próxima NF-e: Nº ${String(prox).padStart(6, '0')} (Série ${serieVal})`, 'success');
       } else {
         showStatus('Aviso: Número da NF-e salvo localmente.', 'info');
       }
     } catch (e: any) {
       showStatus(`Erro ao atualizar número da NF-e: ${e?.message || 'Falha de conexão'}`, 'error');
+    } finally {
+      setIsSavingNfeNumber(false);
+    }
+  };
+
+  const handleSalvarSerieNfe = async (serieEspecifica?: number) => {
+    const sVal = serieEspecifica !== undefined ? serieEspecifica : Number(formData.serie_nfe);
+    const validSerie = isNaN(sVal) || sVal < 1 ? 1 : sVal;
+    const ultimoNum = Number(formData.ultimo_numero_nfe) || 0;
+
+    setIsSavingSerie(true);
+    try {
+      const res = await updateEmitenteNfeConfig(ultimoNum, validSerie);
+      if (res.success) {
+        setFormData(prev => ({ ...prev, serie_nfe: validSerie }));
+        showStatus(`Série da NF-e atualizada com sucesso para ${validSerie}!`, 'success');
+      } else {
+        showStatus('Aviso: Série da NF-e salva localmente.', 'info');
+      }
+    } catch (e: any) {
+      showStatus(`Erro ao salvar série da NF-e: ${e?.message || 'Falha de conexão'}`, 'error');
+    } finally {
+      setIsSavingSerie(false);
     }
   };
 
@@ -910,44 +943,48 @@ export default function CompanySettingsModule({ onBackToDashboard }: CompanySett
                   <ListOrdered className="w-3.5 h-3.5 text-blue-400" />
                   <span>Último Número de NF-e Emitida *</span>
                 </span>
-                <span className="text-[10px] text-slate-500 font-mono">Ex: 537</span>
+                <span className="text-[10px] text-slate-500 font-mono">Ex: 3149</span>
               </label>
-              <input
-                type="number"
-                min="0"
-                step="1"
-                value={formData.ultimo_numero_nfe !== undefined ? formData.ultimo_numero_nfe : 0}
-                onChange={(e) => {
-                  const val = parseInt(e.target.value, 10);
-                  const validVal = isNaN(val) || val < 0 ? 0 : val;
-                  setFormData(prev => ({
-                    ...prev,
-                    ultimo_numero_nfe: validVal
-                  }));
-                }}
-                onBlur={(e) => {
-                  const val = parseInt(e.target.value, 10);
-                  const validVal = isNaN(val) || val < 0 ? 0 : val;
-                  handleSalvarUltimoNumeroNfe(validVal);
-                }}
-                placeholder="537"
-                className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm outline-none focus:border-blue-500 text-blue-300 font-mono font-bold text-base transition-colors"
-                required
-              />
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mt-1">
-                <span className="text-[11px] text-slate-400">
-                  Guarda o último número emitido (coluna <code>ultimo_numero_nfe</code> na tabela <code>emitente</code>). A próxima NF-e gerada ou conferida terá o número <strong>{(Number(formData.ultimo_numero_nfe) || 0) + 1}</strong>.
-                </span>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={formData.ultimo_numero_nfe !== undefined && formData.ultimo_numero_nfe !== null ? formData.ultimo_numero_nfe : ''}
+                  onChange={(e) => {
+                    const str = e.target.value;
+                    if (str === '') {
+                      setFormData(prev => ({
+                        ...prev,
+                        ultimo_numero_nfe: '' as any
+                      }));
+                    } else {
+                      const val = parseInt(str, 10);
+                      const validVal = isNaN(val) || val < 0 ? 0 : val;
+                      setFormData(prev => ({
+                        ...prev,
+                        ultimo_numero_nfe: validVal
+                      }));
+                    }
+                  }}
+                  placeholder="3149"
+                  className="flex-1 px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm outline-none focus:border-blue-500 text-blue-300 font-mono font-bold text-base transition-colors"
+                  required
+                />
                 <button
                   type="button"
+                  disabled={isSavingNfeNumber}
                   onClick={() => handleSalvarUltimoNumeroNfe()}
-                  className="px-3 py-1 bg-blue-600/20 hover:bg-blue-600/40 text-blue-300 hover:text-white border border-blue-500/30 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all shrink-0 cursor-pointer w-fit self-end sm:self-auto"
-                  title="Gravar este valor imediatamente no Supabase"
+                  className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 active:scale-95 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all shrink-0 cursor-pointer shadow-lg shadow-blue-600/25 disabled:opacity-50"
+                  title="Gravar este valor imediatamente no Supabase na tabela emitente"
                 >
-                  <Save className="w-3.5 h-3.5" />
+                  {isSavingNfeNumber ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                   <span>Salvar Número</span>
                 </button>
               </div>
+              <span className="text-[11px] text-slate-400">
+                Guarda o último número emitido (coluna <code>ultimo_numero_nfe</code> na tabela <code>emitente</code>). A próxima NF-e gerada terá o número <strong>{(Number(formData.ultimo_numero_nfe) || 0) + 1}</strong>.
+              </span>
             </div>
 
             {/* Campo Numérico: Série da NF-e */}
@@ -956,30 +993,40 @@ export default function CompanySettingsModule({ onBackToDashboard }: CompanySett
                 <span>Série da NF-e *</span>
                 <span className="text-[10px] text-slate-500 font-mono">Padrão: 1</span>
               </label>
-              <input
-                type="number"
-                min="1"
-                step="1"
-                value={formData.serie_nfe !== undefined ? formData.serie_nfe : 1}
-                onChange={(e) => {
-                  const val = parseInt(e.target.value, 10);
-                  const validVal = isNaN(val) || val < 1 ? 1 : val;
-                  setFormData(prev => ({
-                    ...prev,
-                    serie_nfe: validVal
-                  }));
-                }}
-                onBlur={(e) => {
-                  const val = parseInt(e.target.value, 10);
-                  const validVal = isNaN(val) || val < 1 ? 1 : val;
-                  updateEmitenteNfeConfig(formData.ultimo_numero_nfe || 0, validVal).then(() => {
-                    showStatus('Série da NF-e atualizada com sucesso!', 'success');
-                  });
-                }}
-                placeholder="1"
-                className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm outline-none focus:border-blue-500 text-slate-100 font-mono font-bold"
-                required
-              />
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={formData.serie_nfe !== undefined && formData.serie_nfe !== null ? formData.serie_nfe : 1}
+                  onChange={(e) => {
+                    const str = e.target.value;
+                    if (str === '') {
+                      setFormData(prev => ({ ...prev, serie_nfe: '' as any }));
+                    } else {
+                      const val = parseInt(str, 10);
+                      const validVal = isNaN(val) || val < 1 ? 1 : val;
+                      setFormData(prev => ({
+                        ...prev,
+                        serie_nfe: validVal
+                      }));
+                    }
+                  }}
+                  placeholder="1"
+                  className="flex-1 px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm outline-none focus:border-blue-500 text-slate-100 font-mono font-bold"
+                  required
+                />
+                <button
+                  type="button"
+                  disabled={isSavingSerie}
+                  onClick={() => handleSalvarSerieNfe()}
+                  className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-200 hover:text-white border border-slate-700 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all shrink-0 cursor-pointer disabled:opacity-50"
+                  title="Salvar série fiscal da NF-e no Supabase"
+                >
+                  {isSavingSerie ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                  <span>Salvar Série</span>
+                </button>
+              </div>
               <span className="text-[11px] text-slate-400">
                 Série fiscal de emissão da NF-e gravada na tabela <code>emitente</code> (coluna <code>serie_nfe</code>).
               </span>
@@ -989,10 +1036,10 @@ export default function CompanySettingsModule({ onBackToDashboard }: CompanySett
             <div className="md:col-span-12 p-4 bg-slate-950 border border-slate-800 rounded-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
               <div className="space-y-1">
                 <div className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
-                  <span>Prévia da Próxima Nota Fiscal Eletrônica:</span>
+                  <span>Prévia da Sequência Fiscal (NF-e Modelo 55):</span>
                 </div>
                 <div className="text-[11px] text-slate-400">
-                  Totalmente separada da cotação. A cotação continuará identificada no rodapé como referência comercial.
+                  Totalmente separada da cotação. A numeração avança automaticamente (+1) a cada NF-e emitida na SEFAZ.
                 </div>
               </div>
 
@@ -1000,20 +1047,22 @@ export default function CompanySettingsModule({ onBackToDashboard }: CompanySett
                 const ultimo = Number(formData.ultimo_numero_nfe) || 0;
                 const proxNfe = ultimo + 1;
                 const proxNfeFormatado = String(proxNfe).padStart(6, '0');
+                const posteriorNfe = ultimo + 2;
+                const posteriorNfeFormatado = String(posteriorNfe).padStart(6, '0');
                 const serieAtual = formData.serie_nfe || 1;
 
                 return (
                   <div className="flex flex-wrap items-center gap-2 font-mono text-xs">
-                    <div className="px-3 py-1.5 bg-blue-950/70 border border-blue-600/40 text-blue-300 rounded-lg font-black flex flex-col">
-                      <span className="text-[9px] font-sans text-blue-400 uppercase font-semibold">Próxima NF-e</span>
+                    <div className="px-3.5 py-2 bg-blue-950/70 border border-blue-600/40 text-blue-300 rounded-lg font-black flex flex-col">
+                      <span className="text-[9px] font-sans text-blue-400 uppercase font-semibold">PRÓXIMA NF-E</span>
                       <span>Nº {proxNfeFormatado} (Série {serieAtual})</span>
                     </div>
 
                     <ArrowRight className="w-4 h-4 text-slate-600" />
 
-                    <div className="px-3 py-1.5 bg-slate-900 border border-slate-800 text-slate-400 rounded-lg flex flex-col">
-                      <span className="text-[9px] font-sans text-slate-500 uppercase font-semibold">NF-e Posterior</span>
-                      <span>Nº {String(proxNfe + 1).padStart(6, '0')} (Série {serieAtual})</span>
+                    <div className="px-3.5 py-2 bg-slate-900 border border-slate-800 text-slate-400 rounded-lg flex flex-col">
+                      <span className="text-[9px] font-sans text-slate-500 uppercase font-semibold">NF-E POSTERIOR</span>
+                      <span>Nº {posteriorNfeFormatado} (Série {serieAtual})</span>
                     </div>
                   </div>
                 );

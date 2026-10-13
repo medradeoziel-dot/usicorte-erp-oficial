@@ -1,6 +1,6 @@
 import { Quote, QuoteItem, Client } from '../types';
 import { db, updateCotacaoNfeStatusDb, isUuid, inserirNotaFiscalDb, fetchNotasFiscaisDb, NotaFiscalDb, cancelarNotaFiscalSupabase, resolveStatusNfeFinal } from '../lib/db';
-import { fetchCompanyData, CompanyFiscalData, DEFAULT_COMPANY_DATA, incrementEmitenteUltimoNumeroNfe, getLocalCompanyData } from './companyService';
+import { fetchCompanyData, CompanyFiscalData, DEFAULT_COMPANY_DATA, incrementEmitenteUltimoNumeroNfe, updateEmitenteNfeConfig, fetchEmitenteNfeConfig, getLocalCompanyData } from './companyService';
 import { generateBarcodeSvg } from '../utils/barcode';
 import { formatarMedidasLimpa, getObservacaoEspecificaItem } from '../utils/calculator';
 
@@ -1613,12 +1613,13 @@ export async function transmitirNfeSefaz(
 
   // 5. Geração de Numeração e Chave de Acesso
   // O número da NF-e DEVE SER: ultimo_numero_nfe + 1 (totalmente independente do número da cotação)
-  const ultimoNfeNum = typeof companyData.ultimo_numero_nfe === 'number' && !isNaN(companyData.ultimo_numero_nfe)
-    ? companyData.ultimo_numero_nfe
-    : 0;
+  const nfeConfig = await fetchEmitenteNfeConfig();
+  const ultimoNfeNum = typeof nfeConfig.ultimoNumeroNfe === 'number' && !isNaN(nfeConfig.ultimoNumeroNfe)
+    ? nfeConfig.ultimoNumeroNfe
+    : (typeof companyData.ultimo_numero_nfe === 'number' && !isNaN(companyData.ultimo_numero_nfe) ? companyData.ultimo_numero_nfe : 0);
   const proximoNumeroNfe = ultimoNfeNum + 1;
   const numeroNfe = String(proximoNumeroNfe).padStart(6, '0');
-  const serie = String(companyData.serie_nfe || '1');
+  const serie = String(nfeConfig.serieNfe || companyData.serie_nfe || '1');
   const dataEmissao = new Date();
 
   const chaveAcesso = gerarChaveAcessoNfe(

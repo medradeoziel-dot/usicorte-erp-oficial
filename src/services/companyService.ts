@@ -858,27 +858,25 @@ export async function updateEmitenteNfeConfig(
       .maybeSingle();
 
     if (!selectErr && row?.id) {
-      const { data: updData, error: updErr } = await db
+      const { error: updErr } = await db
         .from('emitente')
         .update(updatePayload)
-        .eq('id', row.id)
-        .select();
+        .eq('id', row.id);
 
-      if (!updErr && updData && updData.length > 0) {
+      if (!updErr) {
         supabaseSuccess = true;
-      } else if (updErr) {
+      } else {
         lastError = updErr;
         console.warn('Aviso: UPDATE emitente por id falhou:', updErr.message);
       }
     } else {
       // Se não encontrou ID específico, tenta UPDATE na tabela emitente
-      const { data: updAllData, error: updAllErr } = await db
+      const { error: updAllErr } = await db
         .from('emitente')
         .update(updatePayload)
-        .neq('ultimo_numero_nfe', -999999)
-        .select();
+        .neq('id', '00000000-0000-0000-0000-000000000000');
 
-      if (!updAllErr && updAllData && updAllData.length > 0) {
+      if (!updAllErr) {
         supabaseSuccess = true;
       } else {
         // Se a tabela emitente está vazia, insere o registro inicial completo
