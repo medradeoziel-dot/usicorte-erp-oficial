@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { Quote, Client } from '../types';
 import { CompanyFiscalData, DEFAULT_COMPANY_DATA, getLocalCompanyData } from '../services/companyService';
 import DanfeEspelhoA4 from './DanfeEspelhoA4';
@@ -305,9 +306,12 @@ export default function DanfeEspelhoA4Modal({
     }
   };
 
-  return (
-    <div className="danfe-modal-overlay fixed inset-0 z-[60] flex items-center justify-center p-2 sm:p-4 bg-slate-950/85 backdrop-blur-xs print:static print:z-auto print:inset-auto print:p-0 print:m-0 print:bg-transparent print:overflow-visible print:h-auto print:max-h-none print:block">
-      <div className="danfe-modal-dialog bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl max-w-5xl w-full max-h-[96vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200 print:static print:border-none print:shadow-none print:bg-transparent print:max-w-none print:max-h-none print:w-full print:h-auto print:overflow-visible print:block print:m-0 print:p-0 print:animate-none print:transform-none">
+  if (!isOpen) return null;
+
+  const modalNode = (
+    <div className="danfe-modal-portal">
+      <div className="danfe-modal-overlay fixed inset-0 z-[60] flex items-center justify-center p-2 sm:p-4 bg-slate-950/85 backdrop-blur-xs print:static print:z-auto print:inset-auto print:p-0 print:m-0 print:bg-transparent print:overflow-visible print:h-auto print:max-h-none print:block">
+        <div className="danfe-modal-dialog bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl max-w-5xl w-full max-h-[96vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200 print:static print:border-none print:shadow-none print:bg-transparent print:max-w-none print:max-h-none print:w-full print:h-auto print:overflow-visible print:block print:m-0 print:p-0 print:animate-none print:transform-none">
         
         {/* Modal Header */}
         <div className="p-4 bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 border-b border-slate-700 flex items-center justify-between shrink-0 no-print">
@@ -655,12 +659,20 @@ export default function DanfeEspelhoA4Modal({
               overflow: visible !important;
             }
 
-            #root, #app-root, #app-root > div, main,
-            #screen-clientes, #screen-produtos, #screen-orcamento, #screen-vendas,
-            #screen-calculadora, #screen-ordem-servico, #screen-movimentacoes,
-            #screen-estoque, #screen-financeiro, #screen-empresa, #screen-php,
-            #screen-dashboard, #screen-relatorios,
-            .danfe-modal-overlay, .danfe-modal-dialog, .danfe-modal-scroll {
+            /* Oculta completamente a raiz do app para isolamento total da DANFE */
+            body.print-danfe #root {
+              display: none !important;
+              visibility: hidden !important;
+              height: 0 !important;
+              margin: 0 !important;
+              padding: 0 !important;
+              overflow: hidden !important;
+            }
+
+            .danfe-modal-portal,
+            .danfe-modal-overlay,
+            .danfe-modal-dialog,
+            .danfe-modal-scroll {
               display: block !important;
               position: static !important;
               inset: auto !important;
@@ -677,55 +689,11 @@ export default function DanfeEspelhoA4Modal({
               animation: none !important;
               transition: none !important;
               float: none !important;
+              width: 100% !important;
             }
 
-            /* Ocultação total e imediata dos elementos de telas e controles fora da DANFE */
-            .screen-header,
-            .filtros-bar,
-            .tabela-container,
-            .tabela-consulta,
-            #tabelaDados,
-            .opcoes-pesquisa,
-            .botoes-impressao,
-            #screen-relatorios > *:not(.danfe-modal-overlay),
-            #screen-vendas > *:not(.danfe-modal-overlay),
-            #screen-orcamento > *:not(.danfe-modal-overlay),
-            #container-impressao,
-            #container-impressao *,
-            #container-impressao-vendas,
-            #container-impressao-vendas *,
-            #print-area,
-            #print-area *,
-            .print-area,
-            .print-area *,
-            .container-impressao-vendas,
-            .container-impressao-vendas *,
-            .secao-pedido,
-            .secao-pedido *,
-            .secao-proposta,
-            .secao-proposta *,
-            .secao-proposta-resumida,
-            .secao-proposta-resumida *,
-            .secao-corte,
-            .secao-corte *,
-            .secao-etiqueta,
-            .secao-etiqueta *,
-            .secao-empresa,
-            .secao-empresa *,
-            .secao-corte-80mm,
-            .secao-corte-80mm *,
-            .print-container:not(.danfe-print-container),
-            .print-container:not(.danfe-print-container) *,
             .no-print,
-            .btn-no-print,
-            nav,
-            aside,
-            sidebar,
-            header,
-            footer,
-            .topbar,
-            .sidebar,
-            .footerbar {
+            .btn-no-print {
               display: none !important;
               visibility: hidden !important;
               height: 0 !important;
@@ -733,30 +701,14 @@ export default function DanfeEspelhoA4Modal({
               padding: 0 !important;
             }
 
-            /* 1. Esconder todos os elementos de fundo da página */
-            body * {
-              visibility: hidden;
-            }
-
-            /* 2. Tornar visível exclusivamente o container do DANFE e seus elementos filhos */
-            .danfe-print-container,
-            .danfe-print-container *,
-            #folha-danfe-a4,
-            #folha-danfe-a4 *,
-            #container-impressao-danfe,
-            #container-impressao-danfe * {
-              visibility: visible !important;
-            }
-
-            /* Container de impressão do DANFE alinhado imediatamente ao topo */
             #container-impressao-danfe {
               display: block !important;
-              position: relative !important;
+              position: static !important;
               top: 0 !important;
               left: 0 !important;
               right: 0 !important;
               width: 100% !important;
-              max-width: 210mm !important;
+              max-width: 100% !important;
               margin: 0 auto !important;
               margin-top: 0 !important;
               padding: 0 !important;
@@ -778,50 +730,37 @@ export default function DanfeEspelhoA4Modal({
               padding-top: 0 !important;
             }
 
-            /* 3. Container da folha A4 alinhado rigorosamente ao topo da folha */
             .danfe-print-container,
             #folha-danfe-a4,
             .danfe-folha-a4 {
               display: flex !important;
               flex-direction: column !important;
-              justify-content: flex-start !important;
-              position: relative !important;
+              justify-content: space-between !important;
+              position: static !important;
               top: 0 !important;
               left: auto !important;
               width: 100% !important;
-              max-width: 210mm !important;
-              min-height: 0 !important;
+              max-width: 202mm !important;
+              min-height: 285mm !important;
+              max-height: 289mm !important;
               height: auto !important;
-              max-height: none !important;
               margin: 0 auto !important;
               margin-top: 0 !important;
-              padding: 0 2mm 0 2mm !important;
+              padding: 0 1.5mm 1mm 1.5mm !important;
               padding-top: 0 !important;
               box-sizing: border-box !important;
               background: #ffffff !important;
               font-family: Arial, Helvetica, sans-serif !important;
               font-size: 7pt !important;
-              border: none !important;
-              overflow: visible !important;
+              border: 1px solid #000000 !important;
+              overflow: hidden !important;
               box-shadow: none !important;
-              -webkit-print-color-adjust: exact !important;
-              print-color-adjust: exact !important;
-              page-break-after: auto !important;
-              break-after: auto !important;
+              page-break-after: avoid !important;
+              break-after: avoid !important;
+              page-break-inside: avoid !important;
+              break-inside: avoid !important;
             }
 
-            .danfe-print-container .danfe-print-container {
-              position: static !important;
-              width: 100% !important;
-              height: auto !important;
-              max-width: 100% !important;
-              max-height: none !important;
-              padding: 0 !important;
-              margin: 0 !important;
-              border: none !important;
-            }
-
-            /* Canhoto superior com exatamente 15mm e margem zerada no topo */
             .danfe-canhoto-topo {
               margin-top: 0 !important;
               padding-top: 0 !important;
@@ -835,15 +774,13 @@ export default function DanfeEspelhoA4Modal({
               break-inside: avoid !important;
             }
 
-            /* Bloco do Emitente com 85mm fixos */
             .danfe-bloco-emitente {
-              width: 85mm !important;
-              min-width: 85mm !important;
-              max-width: 85mm !important;
+              width: 83mm !important;
+              min-width: 83mm !important;
+              max-width: 83mm !important;
               box-sizing: border-box !important;
             }
 
-            /* Quadro central DANFE com 35mm fixos */
             .danfe-bloco-danfe {
               width: 35mm !important;
               min-width: 35mm !important;
@@ -851,15 +788,12 @@ export default function DanfeEspelhoA4Modal({
               box-sizing: border-box !important;
             }
 
-            /* Quadro da Chave de Acesso + Código de barras com 80mm fixos */
             .danfe-bloco-chave {
-              width: 80mm !important;
-              min-width: 80mm !important;
-              max-width: 80mm !important;
+              flex: 1 1 auto !important;
+              min-width: 78mm !important;
               box-sizing: border-box !important;
             }
 
-            /* Tabela de produtos preenche o restante central */
             .danfe-secao-produtos {
               flex: 1 1 auto !important;
               min-height: 20mm !important;
@@ -869,7 +803,6 @@ export default function DanfeEspelhoA4Modal({
               width: 100% !important;
             }
 
-            /* Bloco Dados Adicionais fixado no rodapé */
             .danfe-bloco-rodape {
               margin-top: auto !important;
               flex-shrink: 0 !important;
@@ -888,8 +821,8 @@ export default function DanfeEspelhoA4Modal({
             }
 
             table {
-              page-break-inside: auto !important;
-              break-inside: auto !important;
+              page-break-inside: avoid !important;
+              break-inside: avoid !important;
             }
 
             tr {
@@ -1026,6 +959,9 @@ export default function DanfeEspelhoA4Modal({
           onClose={() => setShowCancelarModal(false)}
         />
       )}
+      </div>
     </div>
   );
+
+  return typeof document !== 'undefined' ? createPortal(modalNode, document.body) : modalNode;
 }

@@ -386,12 +386,20 @@ export default function DanfeEspelhoA4({
             overflow: visible !important;
           }
 
-          #root, #app-root, #app-root > div, main,
-          #screen-clientes, #screen-produtos, #screen-orcamento, #screen-vendas,
-          #screen-calculadora, #screen-ordem-servico, #screen-movimentacoes,
-          #screen-estoque, #screen-financeiro, #screen-empresa, #screen-php,
-          #screen-dashboard, #screen-relatorios,
-          .danfe-modal-overlay, .danfe-modal-dialog, .danfe-modal-scroll {
+          /* Oculta completamente a raiz do app na impressão da DANFE */
+          body.print-danfe #root {
+            display: none !important;
+            visibility: hidden !important;
+            height: 0 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            overflow: hidden !important;
+          }
+
+          .danfe-modal-portal,
+          .danfe-modal-overlay,
+          .danfe-modal-dialog,
+          .danfe-modal-scroll {
             display: block !important;
             position: static !important;
             inset: auto !important;
@@ -408,55 +416,11 @@ export default function DanfeEspelhoA4({
             animation: none !important;
             transition: none !important;
             float: none !important;
+            width: 100% !important;
           }
 
-          /* Ocultação total e imediata dos elementos de telas e controles fora da DANFE */
-          .screen-header,
-          .filtros-bar,
-          .tabela-container,
-          .tabela-consulta,
-          #tabelaDados,
-          .opcoes-pesquisa,
-          .botoes-impressao,
-          #screen-relatorios > *:not(.danfe-modal-overlay),
-          #screen-vendas > *:not(.danfe-modal-overlay),
-          #screen-orcamento > *:not(.danfe-modal-overlay),
-          #container-impressao,
-          #container-impressao *,
-          #container-impressao-vendas,
-          #container-impressao-vendas *,
-          #print-area,
-          #print-area *,
-          .print-area,
-          .print-area *,
-          .container-impressao-vendas,
-          .container-impressao-vendas *,
-          .secao-pedido,
-          .secao-pedido *,
-          .secao-proposta,
-          .secao-proposta *,
-          .secao-proposta-resumida,
-          .secao-proposta-resumida *,
-          .secao-corte,
-          .secao-corte *,
-          .secao-etiqueta,
-          .secao-etiqueta *,
-          .secao-empresa,
-          .secao-empresa *,
-          .secao-corte-80mm,
-          .secao-corte-80mm *,
-          .print-container:not(.danfe-print-container),
-          .print-container:not(.danfe-print-container) *,
           .no-print,
-          .btn-no-print,
-          nav,
-          aside,
-          sidebar,
-          header,
-          footer,
-          .topbar,
-          .sidebar,
-          .footerbar {
+          .btn-no-print {
             display: none !important;
             visibility: hidden !important;
             height: 0 !important;
@@ -464,30 +428,14 @@ export default function DanfeEspelhoA4({
             padding: 0 !important;
           }
 
-          /* 1. Esconder todos os elementos de fundo da página */
-          body * {
-            visibility: hidden;
-          }
-
-          /* 2. Tornar visível exclusivamente o container do DANFE e seus elementos filhos */
-          .danfe-print-container,
-          .danfe-print-container *,
-          #folha-danfe-a4,
-          #folha-danfe-a4 *,
-          #container-impressao-danfe,
-          #container-impressao-danfe * {
-            visibility: visible !important;
-          }
-
-          /* Container de impressão do DANFE alinhado imediatamente ao topo */
           #container-impressao-danfe {
             display: block !important;
-            position: relative !important;
+            position: static !important;
             top: 0 !important;
             left: 0 !important;
             right: 0 !important;
             width: 100% !important;
-            max-width: 210mm !important;
+            max-width: 100% !important;
             margin: 0 auto !important;
             margin-top: 0 !important;
             padding: 0 !important;
@@ -509,50 +457,37 @@ export default function DanfeEspelhoA4({
             padding-top: 0 !important;
           }
 
-          /* 3. Container da folha A4 alinhado rigorosamente ao topo da folha */
           .danfe-print-container,
           #folha-danfe-a4,
           .danfe-folha-a4 {
             display: flex !important;
             flex-direction: column !important;
-            justify-content: flex-start !important;
-            position: relative !important;
+            justify-content: space-between !important;
+            position: static !important;
             top: 0 !important;
             left: auto !important;
             width: 100% !important;
-            max-width: 210mm !important;
-            min-height: 0 !important;
+            max-width: 202mm !important;
+            min-height: 285mm !important;
+            max-height: 289mm !important;
             height: auto !important;
-            max-height: none !important;
             margin: 0 auto !important;
             margin-top: 0 !important;
-            padding: 0 2mm 0 2mm !important;
+            padding: 0 1.5mm 1mm 1.5mm !important;
             padding-top: 0 !important;
             box-sizing: border-box !important;
             background: #ffffff !important;
             font-family: Arial, Helvetica, sans-serif !important;
             font-size: 7pt !important;
-            border: none !important;
-            overflow: visible !important;
+            border: 1px solid #000000 !important;
+            overflow: hidden !important;
             box-shadow: none !important;
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
-            page-break-after: auto !important;
-            break-after: auto !important;
+            page-break-after: avoid !important;
+            break-after: avoid !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
           }
 
-          .danfe-print-container .danfe-print-container {
-            position: static !important;
-            width: 100% !important;
-            height: auto !important;
-            max-width: 100% !important;
-            max-height: none !important;
-            padding: 0 !important;
-            margin: 0 !important;
-            border: none !important;
-          }
-
-          /* Canhoto superior com exatamente 15mm e margem zerada no topo */
           .danfe-canhoto-topo {
             margin-top: 0 !important;
             padding-top: 0 !important;
@@ -566,15 +501,13 @@ export default function DanfeEspelhoA4({
             break-inside: avoid !important;
           }
 
-          /* Bloco do Emitente com 85mm fixos */
           .danfe-bloco-emitente {
-            width: 85mm !important;
-            min-width: 85mm !important;
-            max-width: 85mm !important;
+            width: 83mm !important;
+            min-width: 83mm !important;
+            max-width: 83mm !important;
             box-sizing: border-box !important;
           }
 
-          /* Quadro central DANFE com 35mm fixos */
           .danfe-bloco-danfe {
             width: 35mm !important;
             min-width: 35mm !important;
@@ -582,15 +515,12 @@ export default function DanfeEspelhoA4({
             box-sizing: border-box !important;
           }
 
-          /* Quadro da Chave de Acesso + Código de barras com 80mm fixos */
           .danfe-bloco-chave {
-            width: 80mm !important;
-            min-width: 80mm !important;
-            max-width: 80mm !important;
+            flex: 1 1 auto !important;
+            min-width: 78mm !important;
             box-sizing: border-box !important;
           }
 
-          /* Tabela de produtos preenche o restante central */
           .danfe-secao-produtos {
             flex: 1 1 auto !important;
             min-height: 20mm !important;
@@ -600,7 +530,6 @@ export default function DanfeEspelhoA4({
             width: 100% !important;
           }
 
-          /* Bloco Dados Adicionais fixado no rodapé */
           .danfe-bloco-rodape {
             margin-top: auto !important;
             flex-shrink: 0 !important;
@@ -619,8 +548,8 @@ export default function DanfeEspelhoA4({
           }
 
           table {
-            page-break-inside: auto !important;
-            break-inside: auto !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
           }
 
           tr {
@@ -745,18 +674,19 @@ export default function DanfeEspelhoA4({
       <div 
         ref={printRef}
         id="folha-danfe-a4"
-        className="danfe-print-container danfe-folha-a4 bg-white text-black shadow-2xl relative select-text font-sans print:shadow-none print:border-none print:m-0 print:mt-0 print:p-0 print:pt-0 print:top-0 print:min-h-0 print:h-auto flex flex-col justify-between leading-tight mx-auto"
+        className="danfe-print-container danfe-folha-a4 bg-white text-black shadow-2xl relative select-text font-sans flex flex-col justify-between leading-tight mx-auto print:shadow-none print:m-0 print:top-0 print:border-black"
         style={{
-          width: '210mm',
-          maxWidth: '100%',
-          minHeight: '297mm',
+          width: '100%',
+          maxWidth: '202mm',
+          minHeight: '286mm',
+          maxHeight: '289mm',
           height: 'auto',
-          padding: '0 3mm 3mm 3mm',
+          padding: '0 2mm 1mm 2mm',
           paddingTop: 0,
           boxSizing: 'border-box',
           fontFamily: 'Arial, Helvetica, sans-serif',
           fontSize: '7pt',
-          border: '1px solid #000'
+          border: '1px solid #000000'
         }}
       >
         
@@ -789,12 +719,12 @@ export default function DanfeEspelhoA4({
           style={{ height: '15mm', minHeight: '15mm', maxHeight: '15mm', border: '1px solid #000' }}
         >
           <div className="flex h-full">
-            <div className="p-1 border-r border-black flex flex-col justify-between" style={{ width: '165mm', borderRight: '1px solid #000' }}>
+            <div className="p-1 border-r border-black flex flex-col justify-between flex-1" style={{ borderRight: '1px solid #000' }}>
               <div className="text-[6.5pt] uppercase font-semibold leading-tight text-gray-800">
-                RECEBEMOS DE <strong>{emitente.razaoSocial}</strong> OS PRODUTOS E/OU SERVIÇOS CONSTANTES DA NOTA FISCAL ELETRÔNICA INDICADA AO LADO.
+                RECEBEMOS DE <strong className="text-black">{emitente.razaoSocial}</strong> OS PRODUTOS E/OU SERVIÇOS CONSTANTES DA NOTA FISCAL ELETRÔNICA INDICADA AO LADO. EMISSÃO: <strong>{dataEmissaoFormatada}</strong> • DESTINATÁRIO: <strong className="uppercase">{destinatario.nome}</strong> • VALOR TOTAL: <strong>{formatCurrency(valorTotalNota)}</strong>
               </div>
               <div className="flex gap-2 pt-0.5 border-t border-black text-[5.5pt]" style={{ borderTop: '1px solid #000' }}>
-                <div className="border-r border-black pr-2" style={{ width: '45mm', borderRight: '1px solid #000' }}>
+                <div className="border-r border-black pr-2 shrink-0" style={{ width: '45mm', borderRight: '1px solid #000' }}>
                   <span className="block font-bold uppercase text-gray-600">DATA DE RECEBIMENTO</span>
                   <div className="font-mono text-gray-400">___ / ___ / ______</div>
                 </div>
@@ -805,7 +735,7 @@ export default function DanfeEspelhoA4({
               </div>
             </div>
 
-            <div className="p-1 text-center flex flex-col justify-center items-center bg-gray-50/50" style={{ width: '35mm' }}>
+            <div className="p-1 text-center flex flex-col justify-center items-center bg-gray-50/50 shrink-0" style={{ width: '35mm' }}>
               <span className="font-extrabold text-[10pt] leading-none">NF-e</span>
               <span className="font-bold text-[7.5pt] mt-0.5 leading-tight">Nº {formatarNumeroDanfe(numeroNfe)}</span>
               <span className="text-[6pt] text-gray-700 leading-none">SÉRIE {serie}</span>
@@ -821,13 +751,13 @@ export default function DanfeEspelhoA4({
         </div>
 
         {/* =========================================================================
-            2. CABEÇALHO DA EMISSÃO (Emitente 85mm + DANFE 35mm + Chave 80mm = 200mm)
+            2. CABEÇALHO DA EMISSÃO (Emitente 83mm + DANFE 35mm + Chave Flexível = 100%)
             ========================================================================= */}
         <div className="flex border border-black mb-1 overflow-hidden w-full" style={{ border: '1px solid #000' }}>
-          {/* Coluna 1: Emitente & Logo (85mm fixos) */}
+          {/* Coluna 1: Emitente & Logo (83mm fixos) */}
           <div 
             className="danfe-bloco-emitente border-r border-black flex flex-col items-center justify-center text-center p-1.5 shrink-0 overflow-hidden"
-            style={{ width: '85mm', minWidth: '85mm', maxWidth: '85mm', borderRight: '1px solid #000' }}
+            style={{ width: '83mm', minWidth: '83mm', maxWidth: '83mm', borderRight: '1px solid #000' }}
           >
             {/* 1. Logo Usicorte Metais */}
             <div className="flex items-center justify-center w-full mb-0.5">
@@ -876,10 +806,10 @@ export default function DanfeEspelhoA4({
             </div>
           </div>
 
-          {/* Coluna 3: Código de Barras & Chave de Acesso (80mm fixos) */}
+          {/* Coluna 3: Código de Barras & Chave de Acesso (flexível com min-width) */}
           <div 
-            className="danfe-bloco-chave flex flex-col justify-between p-1 shrink-0 overflow-hidden"
-            style={{ width: '80mm', minWidth: '80mm', maxWidth: '80mm' }}
+            className="danfe-bloco-chave flex flex-col justify-between p-1 shrink-0 overflow-hidden flex-1"
+            style={{ minWidth: '78mm' }}
           >
             <div className="min-w-0">
               <BarcodeSimulado chave={chaveAcessoRaw} />
@@ -1225,6 +1155,26 @@ export default function DanfeEspelhoA4({
                     <td className="p-0.5 border-r border-black text-right font-mono">0,00</td>
                     <td className="p-0.5 border-r border-black text-center font-mono" style={{ borderRight: '1px solid #000' }}>0%</td>
                     <td className="p-0.5 text-center font-mono">0%</td>
+                  </tr>
+                ))}
+                {/* Linhas vazias organizadas para preenchimento harmônico do espelho quando há poucos itens */}
+                {Array.from({ length: Math.max(0, 6 - itensFiscais.length) }).map((_, emptyIdx) => (
+                  <tr key={`empty-${emptyIdx}`} className="h-[17px]">
+                    <td className="p-0.5 border-r border-black text-center font-mono" style={{ borderRight: '1px solid #000' }}>&nbsp;</td>
+                    <td className="p-0.5 border-r border-black" style={{ borderRight: '1px solid #000' }}>&nbsp;</td>
+                    <td className="p-0.5 border-r border-black text-center font-mono" style={{ borderRight: '1px solid #000' }}>&nbsp;</td>
+                    <td className="p-0.5 border-r border-black text-center font-mono" style={{ borderRight: '1px solid #000' }}>&nbsp;</td>
+                    <td className="p-0.5 border-r border-black text-center font-mono" style={{ borderRight: '1px solid #000' }}>&nbsp;</td>
+                    <td className="p-0.5 border-r border-black text-center font-mono" style={{ borderRight: '1px solid #000' }}>&nbsp;</td>
+                    <td className="p-0.5 border-r border-black text-right font-mono" style={{ borderRight: '1px solid #000' }}>&nbsp;</td>
+                    <td className="p-0.5 border-r border-black text-right font-mono" style={{ borderRight: '1px solid #000' }}>&nbsp;</td>
+                    <td className="p-0.5 border-r border-black text-right font-mono" style={{ borderRight: '1px solid #000' }}>&nbsp;</td>
+                    <td className="p-0.5 border-r border-black text-right font-mono" style={{ borderRight: '1px solid #000' }}>&nbsp;</td>
+                    <td className="p-0.5 border-r border-black text-right font-mono" style={{ borderRight: '1px solid #000' }}>&nbsp;</td>
+                    <td className="p-0.5 border-r border-black text-right font-mono" style={{ borderRight: '1px solid #000' }}>&nbsp;</td>
+                    <td className="p-0.5 border-r border-black text-right font-mono" style={{ borderRight: '1px solid #000' }}>&nbsp;</td>
+                    <td className="p-0.5 border-r border-black text-center font-mono" style={{ borderRight: '1px solid #000' }}>&nbsp;</td>
+                    <td className="p-0.5 text-center font-mono">&nbsp;</td>
                   </tr>
                 ))}
               </tbody>
