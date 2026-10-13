@@ -734,14 +734,14 @@ export default function DanfeEspelhoA4Modal({
               visibility: visible !important;
             }
 
-            /* 3. Posicionar o container do DANFE em absolute (left: 0, top: 0) ocupando exatamente a folha A4 (210mm x 297mm) com padding de 5mm */
+            /* 3. Posicionar o container do DANFE em absolute (left: 0, top: 0) ocupando exatamente a folha A4 (210mm x 297mm) com padding de 4mm */
             .danfe-print-container {
               width: 210mm !important;
               height: 297mm !important;
               max-width: 210mm !important;
               max-height: 297mm !important;
               min-height: 297mm !important;
-              padding: 5mm !important;
+              padding: 4mm !important;
               box-sizing: border-box !important;
               position: absolute !important;
               top: 0 !important;
@@ -783,7 +783,7 @@ export default function DanfeEspelhoA4Modal({
               max-width: 210mm !important;
               max-height: 297mm !important;
               min-height: 297mm !important;
-              padding: 5mm !important;
+              padding: 4mm !important;
               box-sizing: border-box !important;
               position: absolute !important;
               top: 0 !important;

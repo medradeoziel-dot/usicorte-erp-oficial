@@ -463,14 +463,14 @@ export default function DanfeEspelhoA4({
             visibility: visible !important;
           }
 
-          /* 3. Posicionar o container do DANFE em absolute (left: 0, top: 0) ocupando exatamente a folha A4 (210mm x 297mm) com padding de 5mm */
+          /* 3. Posicionar o container do DANFE em absolute (left: 0, top: 0) ocupando exatamente a folha A4 (210mm x 297mm) com padding de 4mm */
           .danfe-print-container {
             width: 210mm !important;
             height: 297mm !important;
             max-width: 210mm !important;
             max-height: 297mm !important;
             min-height: 297mm !important;
-            padding: 5mm !important;
+            padding: 4mm !important;
             box-sizing: border-box !important;
             position: absolute !important;
             top: 0 !important;
@@ -512,7 +512,7 @@ export default function DanfeEspelhoA4({
             max-width: 210mm !important;
             max-height: 297mm !important;
             min-height: 297mm !important;
-            padding: 5mm !important;
+            padding: 4mm !important;
             box-sizing: border-box !important;
             position: absolute !important;
             top: 0 !important;
@@ -667,7 +667,7 @@ export default function DanfeEspelhoA4({
       <div 
         ref={printRef}
         id="folha-danfe-a4"
-        className="danfe-print-container danfe-folha-a4 w-full max-w-[210mm] min-h-[297mm] bg-white text-black p-[6mm] shadow-2xl relative select-text border border-gray-300 font-sans print:shadow-none print:border-none print:p-[5mm] print:m-0 print:w-[210mm] print:max-w-[210mm] print:h-[297mm] print:max-h-[297mm] print:min-h-[297mm] flex flex-col justify-between text-[8.5px] leading-tight"
+        className="danfe-print-container danfe-folha-a4 w-full max-w-[210mm] min-h-[297mm] bg-white text-black p-[6mm] shadow-2xl relative select-text border border-gray-300 font-sans print:shadow-none print:border-none print:p-[4mm] print:m-0 print:w-[210mm] print:max-w-[210mm] print:h-[297mm] print:max-h-[297mm] print:min-h-[297mm] flex flex-col justify-between text-[8.5px] leading-tight"
         style={{ fontFamily: 'Arial, Helvetica, sans-serif' }}
       >
         
