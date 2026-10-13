@@ -215,28 +215,67 @@
     display: none !important;
   }
 
-  /* Modo DANFE A4 Oficial */
-  body.print-danfe {
+  /* Modo DANFE A4 Oficial: isolamento absoluto (oculta pedidos, propostas e corte) */
+  body.print-danfe,
+  body:has(.danfe-print-container) {
     background: #fff !important;
     padding: 0 !important;
     margin: 0 !important;
   }
+  body.print-danfe #container-impressao,
+  body.print-danfe #container-impressao-vendas,
+  body.print-danfe #print-area,
+  body.print-danfe .print-area,
+  body.print-danfe .container-impressao-vendas,
+  body.print-danfe .secao-pedido,
+  body.print-danfe .secao-proposta,
+  body.print-danfe .secao-proposta-resumida,
+  body.print-danfe .secao-corte,
+  body.print-danfe .secao-etiqueta,
+  body.print-danfe .secao-empresa,
+  body.print-danfe .secao-corte-80mm,
+  body:has(.danfe-print-container) #container-impressao,
+  body:has(.danfe-print-container) #container-impressao-vendas,
+  body:has(.danfe-print-container) #print-area,
+  body:has(.danfe-print-container) .print-area,
+  body:has(.danfe-print-container) .container-impressao-vendas,
+  body:has(.danfe-print-container) .secao-pedido,
+  body:has(.danfe-print-container) .secao-proposta,
+  body:has(.danfe-print-container) .secao-proposta-resumida,
+  body:has(.danfe-print-container) .secao-corte,
+  body:has(.danfe-print-container) .secao-etiqueta,
+  body:has(.danfe-print-container) .secao-empresa,
+  body:has(.danfe-print-container) .secao-corte-80mm {
+    display: none !important;
+    visibility: hidden !important;
+  }
+  body.print-danfe .danfe-print-container,
+  body.print-danfe .danfe-print-container *,
   body.print-danfe #container-impressao-danfe,
-  body.print-danfe #container-impressao-danfe * {
+  body.print-danfe #container-impressao-danfe *,
+  body:has(.danfe-print-container) .danfe-print-container,
+  body:has(.danfe-print-container) .danfe-print-container *,
+  body:has(.danfe-print-container) #container-impressao-danfe,
+  body:has(.danfe-print-container) #container-impressao-danfe * {
     visibility: visible !important;
   }
-  body.print-danfe #container-impressao-danfe {
+  body.print-danfe .danfe-print-container,
+  body.print-danfe #container-impressao-danfe,
+  body:has(.danfe-print-container) .danfe-print-container,
+  body:has(.danfe-print-container) #container-impressao-danfe {
     display: block !important;
     position: absolute !important;
     left: 0 !important;
     top: 0 !important;
     width: 100% !important;
-    max-width: 210mm !important;
-    margin: 0 auto !important;
+    max-width: 100% !important;
+    margin: 0 !important;
     padding: 0 !important;
     background: #fff !important;
     box-shadow: none !important;
     border: none !important;
+    box-sizing: border-box !important;
+    z-index: 99999 !important;
   }
 
   /* Modo Fechamento & Extrato de Cotações (Isolado) */

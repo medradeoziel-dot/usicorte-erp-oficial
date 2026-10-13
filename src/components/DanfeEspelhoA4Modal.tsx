@@ -213,6 +213,25 @@ export default function DanfeEspelhoA4Modal({
   const isAutorizada = isNfeAutorizada(currentQuoteState.status_nfe);
   const isPrevia = isPreviaProp !== undefined ? isPreviaProp : (!isAutorizada && !isCancelada);
 
+  // Captura antes e depois da impressão (inclusive via Ctrl+P) para isolamento do DANFE
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleBeforePrint = () => {
+      document.body.classList.add('print-danfe');
+    };
+    const handleAfterPrint = () => {
+      document.body.classList.remove('print-danfe');
+      setIsPrinting(false);
+    };
+    window.addEventListener('beforeprint', handleBeforePrint);
+    window.addEventListener('afterprint', handleAfterPrint);
+    return () => {
+      window.removeEventListener('beforeprint', handleBeforePrint);
+      window.removeEventListener('afterprint', handleAfterPrint);
+      document.body.classList.remove('print-danfe');
+    };
+  }, [isOpen]);
+
   const handlePrint = () => {
     setIsPrinting(true);
     document.body.classList.add('print-danfe');
@@ -612,9 +631,114 @@ export default function DanfeEspelhoA4Modal({
           )}
         </div>
 
+        {/* Estilos CSS Scoped para isolamento absoluto da impressão da DANFE */}
+        <style>{`
+          @media print {
+            @page {
+              size: A4 portrait;
+              margin: 4mm 5mm;
+            }
+
+            /* 1. Esconder todos os elementos de fundo da página */
+            body * {
+              visibility: hidden !important;
+            }
+
+            /* Ocultar explicitamente outros relatórios, resumos de pedidos, propostas e componentes da tela */
+            #container-impressao,
+            #container-impressao *,
+            #container-impressao-vendas,
+            #container-impressao-vendas *,
+            #print-area,
+            #print-area *,
+            .print-area,
+            .print-area *,
+            .container-impressao-vendas,
+            .container-impressao-vendas *,
+            .secao-pedido,
+            .secao-pedido *,
+            .secao-proposta,
+            .secao-proposta *,
+            .secao-proposta-resumida,
+            .secao-proposta-resumida *,
+            .secao-corte,
+            .secao-corte *,
+            .secao-etiqueta,
+            .secao-etiqueta *,
+            .secao-empresa,
+            .secao-empresa *,
+            .secao-corte-80mm,
+            .secao-corte-80mm *,
+            .print-container:not(.danfe-print-container),
+            .print-container:not(.danfe-print-container) *,
+            .no-print,
+            .btn-no-print,
+            nav,
+            aside,
+            sidebar,
+            header,
+            footer {
+              display: none !important;
+              visibility: hidden !important;
+            }
+
+            /* 2. Tornar visível apenas o container do DANFE */
+            .danfe-print-container,
+            .danfe-print-container *,
+            #container-impressao-danfe,
+            #container-impressao-danfe *,
+            #folha-danfe-a4,
+            #folha-danfe-a4 * {
+              visibility: visible !important;
+            }
+
+            /* 3. Garantir que o DANFE ocupe 100% da largura da folha A4 na vertical (portrait) sem cortar as bordas nem sobrepor o espelho da cotação */
+            .danfe-print-container,
+            #container-impressao-danfe {
+              display: block !important;
+              position: absolute !important;
+              left: 0 !important;
+              top: 0 !important;
+              width: 100% !important;
+              max-width: 100% !important;
+              margin: 0 !important;
+              padding: 0 !important;
+              background: #ffffff !important;
+              box-shadow: none !important;
+              border: none !important;
+              overflow: visible !important;
+              box-sizing: border-box !important;
+              z-index: 99999 !important;
+            }
+
+            #folha-danfe-a4 {
+              display: block !important;
+              width: 100% !important;
+              max-width: 100% !important;
+              min-height: auto !important;
+              margin: 0 auto !important;
+              padding: 2.5mm 3.5mm !important;
+              box-shadow: none !important;
+              border: 1px solid #000000 !important;
+              box-sizing: border-box !important;
+              background: #ffffff !important;
+              page-break-inside: avoid !important;
+              break-inside: avoid !important;
+            }
+
+            html, body {
+              background: #ffffff !important;
+              overflow: visible !important;
+              height: auto !important;
+              margin: 0 !important;
+              padding: 0 !important;
+            }
+          }
+        `}</style>
+
         {/* Conteúdo com Scroll da Folha A4 */}
-        <div className="p-4 sm:p-6 overflow-y-auto flex-1 bg-slate-950/60 flex justify-center">
-          <div id="container-impressao-danfe" className="w-full max-w-[820px]">
+        <div className="p-4 sm:p-6 overflow-y-auto flex-1 bg-slate-950/60 flex justify-center print:p-0 print:bg-transparent print:overflow-visible print:block">
+          <div id="container-impressao-danfe" className="danfe-print-container w-full max-w-[820px] print:max-w-none print:w-full print:m-0 print:p-0">
             <DanfeEspelhoA4
               quote={quote}
               client={client}
