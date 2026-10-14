@@ -161,6 +161,8 @@ export interface Quote {
   cliente_nome?: string;
   forma_pagamento?: string;
   indPag?: number;
+  // Exclusão Lógica (Soft Delete)
+  deletado_em?: string | null;
 }
 
 export interface ViaCepResponse {

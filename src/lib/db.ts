@@ -238,6 +238,8 @@ export interface SupabaseCotacao {
   xml_conteudo?: string;
   mensagem_erro_nfe?: string;
   nfe_emitida_em?: string;
+  // Exclusão lógica (soft delete)
+  deletado_em?: string | null;
 }
 
 export interface SupabaseCotacaoItem {
@@ -929,7 +931,10 @@ export function mapSupabaseStatusToQuote(status?: string, situacao?: string): 'R
   return 'Rascunho';
 }
 
-export async function saveCotacaoDb(quote: Quote): Promise<{ data: any; error: any }> {
+export async function saveCotacaoDb(
+  quote: Quote,
+  originalQuoteNumber?: string
+): Promise<{ data: any; error: any }> {
   try {
     const isFaturado = String(quote.status || '').toLowerCase().includes('faturad') || String((quote as any).situacao || '').toUpperCase() === 'FATURADO';
     const cotacaoPayload: any = {
@@ -958,23 +963,53 @@ export async function saveCotacaoDb(quote: Quote): Promise<{ data: any; error: a
       nfe_emitida_em: quote.nfe_emitida_em
     };
 
-    // 1. Busca se a cotação já existe no Supabase (pelo ID direto ou pelo Número)
+    // 1. Busca se a cotação já existe no Supabase para garantir UPDATE correto (UPSERT)
     let existingRecords: { id: string; numero: string; created_at?: string }[] = [];
 
-    // Prioridade 1: Buscar pelo ID direto apenas se for um UUID válido
-    if (quote.id && isUuid(quote.id)) {
-      const { data: byId } = await db
-        .from('cotacoes')
-        .select('id, numero, created_at')
-        .eq('id', quote.id)
-        .maybeSingle();
+    // Prioridade 1: Buscar pelo ID direto
+    if (quote.id) {
+      if (isUuid(quote.id)) {
+        const { data: byId } = await db
+          .from('cotacoes')
+          .select('id, numero, created_at')
+          .eq('id', quote.id)
+          .maybeSingle();
 
-      if (byId) {
-        existingRecords = [byId];
+        if (byId) {
+          existingRecords = [byId];
+        }
+      } else {
+        try {
+          const { data: byRawId } = await db
+            .from('cotacoes')
+            .select('id, numero, created_at')
+            .or(`id.eq.${quote.id},numero.eq.${quote.id}`)
+            .limit(1)
+            .maybeSingle();
+
+          if (byRawId) {
+            existingRecords = [byRawId];
+          }
+        } catch {}
       }
     }
 
-    // Prioridade 2: Se não encontrou por ID, busca pelo número de cotação
+    // Prioridade 2: Buscar pelo número original de cotação (quando estiver em modo edição)
+    if (existingRecords.length === 0 && originalQuoteNumber && originalQuoteNumber.trim()) {
+      const cleanOrig = originalQuoteNumber.trim();
+      const { data: byOrig } = await db
+        .from('cotacoes')
+        .select('id, numero, created_at')
+        .eq('numero', cleanOrig)
+        .limit(1)
+        .maybeSingle();
+
+      if (byOrig) {
+        existingRecords = [byOrig];
+      }
+    }
+
+    // Prioridade 3: Se não encontrou por ID ou número original, busca pelo número de cotação atual
     if (existingRecords.length === 0 && quote.quoteNumber && quote.quoteNumber.trim()) {
       const { data: byNumero } = await db
         .from('cotacoes')
@@ -992,24 +1027,29 @@ export async function saveCotacaoDb(quote: Quote): Promise<{ data: any; error: a
       // É UPDATE de registro existente
       cotacaoId = existingRecords[0].id;
 
-      // Se existiam duplicatas antigas com o mesmo número, remove os registros e itens extras
+      // Se existiam duplicatas antigas com o mesmo número, aplica exclusão lógica (soft delete)
       if (existingRecords.length > 1) {
         const duplicateIds = existingRecords.slice(1).map(r => r.id);
         for (const extraId of duplicateIds) {
           try {
-            await db.from('cotacao_itens').delete().eq('cotacao_id', extraId);
-            await db.from('cotacoes').delete().eq('id', extraId);
+            await db.from('cotacoes').update({
+              deletado_em: new Date().toISOString(),
+              status: 'cancelado',
+              situacao: 'CANCELADO',
+              updated_at: new Date().toISOString()
+            }).eq('id', extraId);
           } catch (e) {
-            console.warn("Aviso ao limpar cotação duplicada antiga:", e);
+            console.warn("Aviso ao desativar duplicata antiga:", e);
           }
         }
       }
 
-      // Executa o UPDATE no registro existente pelo seu ID
+      // Executa o UPDATE no registro existente pelo seu ID oficial
       let { error: updateErr } = await db
         .from('cotacoes')
         .update({
           ...cotacaoPayload,
+          deletado_em: null, // garante reativação se estava com soft delete
           updated_at: new Date().toISOString()
         })
         .eq('id', cotacaoId);
@@ -1039,7 +1079,7 @@ export async function saveCotacaoDb(quote: Quote): Promise<{ data: any; error: a
         return { data: null, error: updateErr };
       }
 
-      // Limpa TODOS os itens antigos associados a essa cotação para garantir lista sincronizada
+      // Limpa os itens antigos associados a essa cotação para sincronizar a lista atualizada
       const { error: delItensErr } = await db
         .from('cotacao_itens')
         .delete()
@@ -1050,15 +1090,20 @@ export async function saveCotacaoDb(quote: Quote): Promise<{ data: any; error: a
       }
     } else {
       // É INSERT de novo registro
+      const insertObj: any = { ...cotacaoPayload };
+      if (quote.id && isUuid(quote.id)) {
+        insertObj.id = quote.id;
+      }
+
       let { data: created, error: insertErr } = await db
         .from('cotacoes')
-        .insert(cotacaoPayload)
+        .insert(insertObj)
         .select()
         .single();
 
       // Fallback sem campos de NF-e se colunas ainda não existirem no schema
       if (insertErr) {
-        const basicPayload = {
+        const basicPayload: any = {
           numero: cotacaoPayload.numero,
           data: cotacaoPayload.data,
           cliente_nome: cotacaoPayload.cliente_nome,
@@ -1071,6 +1116,9 @@ export async function saveCotacaoDb(quote: Quote): Promise<{ data: any; error: a
           valor_total: cotacaoPayload.valor_total,
           cliente_id: cotacaoPayload.cliente_id
         };
+        if (quote.id && isUuid(quote.id)) {
+          basicPayload.id = quote.id;
+        }
         const fbInsert = await db.from('cotacoes').insert(basicPayload).select().single();
         created = fbInsert.data;
         insertErr = fbInsert.error;
@@ -1167,7 +1215,8 @@ export async function saveCotacaoDb(quote: Quote): Promise<{ data: any; error: a
         itensErr = fb2.error;
       }
       if (itensErr) {
-        console.warn("Erro ao inserir itens da cotação no Supabase:", itensErr);
+        console.error("Erro ao inserir itens da cotação no Supabase:", itensErr);
+        return { data: { id: cotacaoId, ...cotacaoPayload }, error: itensErr };
       }
     }
 
@@ -1587,10 +1636,11 @@ export async function fetchCotacoesDb(
       return cached.data;
     }
 
-    // Consulta otimizada com projeção e ordenação indexada (mais recentes primeiro)
+    // Consulta otimizada ignorando registros com exclusão lógica (.is('deletado_em', null))
     let q = db
       .from('cotacoes')
       .select('*, cotacao_itens(*)')
+      .is('deletado_em', null)
       .order('created_at', { ascending: false, nullsFirst: false });
 
     // 1. Filtro server-side por cliente
@@ -1635,7 +1685,43 @@ export async function fetchCotacoesDb(
       q = q.limit(options.limit);
     }
 
-    const { data, error, status } = await q;
+    let { data, error, status } = await q;
+
+    // Fallback: se a coluna 'deletado_em' ainda não existir na tabela cotacoes do Supabase
+    if (error && (error.code === '42703' || error.message?.toLowerCase().includes('deletado_em') || error.code === 'PGRST204')) {
+      let retryQ = db
+        .from('cotacoes')
+        .select('*, cotacao_itens(*)')
+        .order('created_at', { ascending: false, nullsFirst: false });
+
+      if (filtroCliente && filtroCliente.trim()) {
+        retryQ = retryQ.ilike('cliente_nome', `%${filtroCliente.trim()}%`);
+      }
+      if (filtroStatus && filtroStatus !== 'todas' && filtroStatus !== 'todos') {
+        if (filtroStatus === 'ativas') {
+          retryQ = retryQ.in('status', ['pendente', 'aprovado', 'rascunho']);
+        } else {
+          retryQ = retryQ.eq('status', filtroStatus);
+        }
+      }
+      if (options?.situacao) {
+        retryQ = retryQ.eq('situacao', options.situacao);
+      }
+      if (options?.dataInicio) {
+        retryQ = retryQ.gte('data', options.dataInicio);
+      }
+      if (options?.dataFim) {
+        retryQ = retryQ.lte('data', options.dataFim);
+      }
+      if (options?.limit && options.limit > 0) {
+        retryQ = retryQ.limit(options.limit);
+      }
+      const retryRes = await retryQ;
+      data = retryRes.data;
+      error = retryRes.error;
+      status = retryRes.status;
+    }
+
     if (error) {
       if (!isNotFoundError(error, status)) {
         console.warn("Erro ao carregar cotações do Supabase:", error.message);
@@ -1647,7 +1733,10 @@ export async function fetchCotacoesDb(
     if (data && Array.isArray(data)) {
       result = (data as SupabaseCotacao[]).filter((c: any) => {
         const num = String(c.numero || c.id || '');
-        return !num.includes('021935') && !num.includes('21935');
+        if (num.includes('021935') || num.includes('21935')) return false;
+        // Filtro rigoroso: ignora registros com exclusão lógica
+        if (c.deletado_em) return false;
+        return true;
       });
     }
 
@@ -1682,6 +1771,7 @@ export async function fetchUltimosItensCotacaoDb(limit = 10): Promise<{ itens: a
 
     const filtered = (data || []).filter((it: any) => {
       const q = Array.isArray(it.cotacoes) ? it.cotacoes[0] : it.cotacoes;
+      if (q && q.deletado_em) return false;
       const num = String(q?.numero || q?.id || '');
       return !num.includes('021935') && !num.includes('21935');
     });
@@ -2013,54 +2103,87 @@ export async function deleteCotacaoDb(idOrNumero: string): Promise<{ error: any 
   try {
     if (!idOrNumero) return { error: new Error('ID ou Número da cotação não informado') };
 
-    // 1. Localiza a cotação se for pelo número
+    const agoraIso = new Date().toISOString();
     let cotacaoId = idOrNumero;
-    if (!isUuid(idOrNumero)) {
+    let cotacaoNumero = idOrNumero;
+
+    // 1. Localiza a cotação se for pelo número ou por ID
+    if (isUuid(idOrNumero)) {
       const { data: found } = await db
         .from('cotacoes')
-        .select('id')
+        .select('id, numero')
+        .eq('id', idOrNumero)
+        .maybeSingle();
+      if (found) {
+        cotacaoNumero = found.numero;
+      }
+    } else {
+      const { data: found } = await db
+        .from('cotacoes')
+        .select('id, numero')
         .eq('numero', idOrNumero)
         .maybeSingle();
       if (found?.id) {
         cotacaoId = found.id;
+        cotacaoNumero = found.numero;
       }
     }
 
-    // 2. Deleta itens filhos da cotação e parcelas de contas a receber vinculadas
-    if (cotacaoId) {
+    // 2. EXCLUSÃO LÓGICA (SOFT DELETE)
+    // Atualiza status para 'cancelado', situacao para 'CANCELADO' e deletado_em com timestamp atual
+    const softDeletePayload: Record<string, any> = {
+      deletado_em: agoraIso,
+      status: 'cancelado',
+      situacao: 'CANCELADO',
+      updated_at: agoraIso
+    };
+
+    let updateQuery = isUuid(cotacaoId)
+      ? db.from('cotacoes').update(softDeletePayload).eq('id', cotacaoId)
+      : db.from('cotacoes').update(softDeletePayload).or(`id.eq.${cotacaoId},numero.eq.${cotacaoNumero}`);
+
+    let { error: errUpdate } = await updateQuery;
+
+    // Fallback caso a coluna deletado_em não exista no schema do Supabase
+    if (errUpdate && (errUpdate.code === '42703' || errUpdate.message?.toLowerCase().includes('deletado_em') || errUpdate.code === 'PGRST204')) {
+      const fallbackPayload = {
+        status: 'cancelado',
+        situacao: 'CANCELADO',
+        updated_at: agoraIso
+      };
+      const fbQuery = isUuid(cotacaoId)
+        ? db.from('cotacoes').update(fallbackPayload).eq('id', cotacaoId)
+        : db.from('cotacoes').update(fallbackPayload).or(`id.eq.${cotacaoId},numero.eq.${cotacaoNumero}`);
+      const fbRes = await fbQuery;
+      errUpdate = fbRes.error;
+    }
+
+    // Se houver número e não for UUID, garante atualização também pelo número
+    if (!errUpdate && cotacaoNumero && cotacaoNumero !== cotacaoId) {
       try {
-        await db
-          .from('contas_a_receber')
-          .delete()
-          .eq('cotacao_id', cotacaoId);
-      } catch (e) {
-        console.warn("Aviso ao limpar contas_a_receber vinculadas à cotação:", e);
-      }
-
-      await db
-        .from('cotacao_itens')
-        .delete()
-        .eq('cotacao_id', cotacaoId);
+        await db.from('cotacoes').update(softDeletePayload).eq('numero', cotacaoNumero);
+      } catch {}
     }
 
-    // 3. Deleta a cotação (por id e por número)
-    const { error: errId } = await db
-      .from('cotacoes')
-      .delete()
-      .eq('id', cotacaoId);
-
+    // 3. Atualiza cache em memória e cache local
     invalidateCotacoesCache();
-    if (errId && !isUuid(idOrNumero)) {
-      const { error: errNum } = await db
-        .from('cotacoes')
-        .delete()
-        .eq('numero', idOrNumero);
-      return { error: errNum || errId };
-    }
 
-    return { error: errId };
+    try {
+      const localStr = localStorage.getItem('s_orcamentos');
+      if (localStr) {
+        const orcs = JSON.parse(localStr);
+        if (Array.isArray(orcs)) {
+          const filtered = orcs.filter(
+            (o: any) => o.id !== cotacaoId && o.quoteNumber !== cotacaoNumero && o.id !== idOrNumero && o.quoteNumber !== idOrNumero
+          );
+          localStorage.setItem('s_orcamentos', JSON.stringify(filtered));
+        }
+      }
+    } catch {}
+
+    return { error: errUpdate };
   } catch (err) {
-    console.error("Erro ao excluir cotação:", err);
+    console.error("Erro ao aplicar soft delete na cotação:", err);
     return { error: err };
   }
 }

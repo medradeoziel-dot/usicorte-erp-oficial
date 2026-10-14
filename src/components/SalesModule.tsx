@@ -253,6 +253,7 @@ export default function SalesModule({
   const [editingOriginalQuoteNumber, setEditingOriginalQuoteNumber] = useState<string | null>(() => quoteToEdit?.quoteNumber || quoteToEdit?.id || null);
   const [editingQuoteCreatedAt, setEditingQuoteCreatedAt] = useState<string | null>(() => quoteToEdit?.createdAt || null);
   const [quoteForCancelNfe, setQuoteForCancelNfe] = useState<Quote | null>(null);
+  const [isSavingQuote, setIsSavingQuote] = useState<boolean>(false);
 
   const editingQuoteIdRef = useRef<string | null>(quoteToEdit?.id || null);
   const editingQuoteNumberRef = useRef<string | null>(quoteToEdit?.quoteNumber || quoteToEdit?.id || null);
@@ -2048,7 +2049,9 @@ export default function SalesModule({
   const totalQuoteWeightKg = Number(items.reduce((sum, item) => sum + (Number(item.totalWeightKg) || 0), 0).toFixed(3));
 
   // Save full quote to history (localStorage & Supabase)
-  const handleSaveFullQuote = () => {
+  const handleSaveFullQuote = async () => {
+    if (isSavingQuote) return;
+
     if (items.length === 0) {
       setErrorMessage('Adicione pelo menos 1 item antes de salvar o orçamento.');
       setTimeout(() => setErrorMessage(null), 3500);
@@ -2074,6 +2077,8 @@ export default function SalesModule({
       return;
     }
 
+    // RESOLVE O ID CORRETO PARA ATUALIZAÇÃO (UPSERT):
+    // Ao editar uma cotação existente, garante que o sistema envie o ID correto para atualização
     const targetId = editingQuoteId || cleanNum;
 
     const currentQuoteObject: Quote = {
@@ -2103,97 +2108,100 @@ export default function SalesModule({
       updatedAt: new Date().toISOString()
     };
 
-    const existsIndex = savedQuotes.findIndex(
-      q => (editingQuoteId && (q.id === editingQuoteId || String(q.id).toLowerCase() === String(editingQuoteId).toLowerCase())) ||
-           (editingOriginalQuoteNumber && (
-             (q.quoteNumber && q.quoteNumber.trim().toLowerCase() === editingOriginalQuoteNumber.trim().toLowerCase()) ||
-             (q.id && String(q.id).trim().toLowerCase() === editingOriginalQuoteNumber.trim().toLowerCase())
-           )) ||
-           (q.quoteNumber && q.quoteNumber.trim().toLowerCase() === cleanNum.toLowerCase()) ||
-           (q.id && q.id === cleanNum)
-    );
+    setIsSavingQuote(true);
 
-    let updatedQuotes: Quote[];
+    try {
+      // 2. TRATAMENTO DE ERROS NO SALVAMENTO/EDIÇÃO:
+      // Chamada assíncrona ao Supabase com try/catch. Caso falhe, exibe toast/alerta de erro e impede fechamento da tela.
+      const saveRes = await saveCotacaoDb(currentQuoteObject, editingOriginalQuoteNumber || undefined);
 
-    if (existsIndex >= 0) {
-      updatedQuotes = [...savedQuotes];
-      updatedQuotes[existsIndex] = {
-        ...savedQuotes[existsIndex],
-        ...currentQuoteObject,
-        id: savedQuotes[existsIndex].id || targetId
-      };
-    } else {
-      updatedQuotes = [currentQuoteObject, ...savedQuotes];
+      if (saveRes.error) {
+        console.error('Erro retornado pelo Supabase ao gravar cotação:', saveRes.error);
+        const errMsg = saveRes.error.message || (typeof saveRes.error === 'string' ? saveRes.error : 'Falha na comunicação com o banco de dados');
+        setErrorMessage(`⚠️ Falha ao salvar cotação no banco de dados: ${errMsg}. Os dados permanecem na tela para não haver perda. Tente salvar novamente.`);
+        setTimeout(() => setErrorMessage(null), 8000);
+        return; // Interrompe imediatamente para NÃO simular sucesso nem abrir modal
+      }
+
+      // Se salvou com sucesso no Supabase, registra o ID oficial confirmado pelo banco
+      const confirmedId = saveRes.data?.id || targetId;
+      currentQuoteObject.id = confirmedId;
+      setEditingQuoteId(confirmedId);
+      editingQuoteIdRef.current = confirmedId;
+      setEditingOriginalQuoteNumber(cleanNum);
+      editingQuoteNumberRef.current = cleanNum;
+
+      // 3. Atualiza lista em memória e cache
+      const existsIndex = savedQuotes.findIndex(
+        q => (confirmedId && (q.id === confirmedId || String(q.id).toLowerCase() === String(confirmedId).toLowerCase())) ||
+             (cleanNum && (q.quoteNumber && q.quoteNumber.trim().toLowerCase() === cleanNum.toLowerCase())) ||
+             (editingOriginalQuoteNumber && (q.quoteNumber === editingOriginalQuoteNumber || q.id === editingOriginalQuoteNumber))
+      );
+
+      let updatedQuotes: Quote[];
+      if (existsIndex >= 0) {
+        updatedQuotes = [...savedQuotes];
+        updatedQuotes[existsIndex] = {
+          ...savedQuotes[existsIndex],
+          ...currentQuoteObject,
+          id: confirmedId
+        };
+      } else {
+        updatedQuotes = [currentQuoteObject, ...savedQuotes];
+      }
+      setSavedQuotes(updatedQuotes);
+      try { localStorage.removeItem('s_orcamentos'); } catch {}
+
+      // Sequência Automática do Emitente
+      const isAutoSequential = !isEditing && autoSuggestedNumber && cleanNum.toLowerCase() === autoSuggestedNumber.trim().toLowerCase();
+      if (isAutoSequential) {
+        incrementEmitenteQuoteSequential(autoSuggestedSeq).catch(err => {
+          console.warn('Erro ao atualizar proximo_numero_sequencial no Supabase:', err);
+        });
+        const nextSeq = autoSuggestedSeq + 1;
+        setAutoSuggestedSeq(nextSeq);
+        const prefix = cleanNum.replace(/\d+$/, '');
+        const nextNumStr = `${prefix}${String(nextSeq).padStart(6, '0')}`;
+        setAutoSuggestedNumber(nextNumStr);
+      }
+
+      // Se a cotação estiver Aprovada ou Faturada, realiza a baixa no estoque
+      if (quoteStatus === 'Aprovado' || quoteStatus === 'Faturado') {
+        const baixaRes = baixarEstoquePorCotacao(currentQuoteObject);
+        const finRes = gerarContasReceberPorCotacao(currentQuoteObject);
+        if (baixaRes.itensBaixados > 0) {
+          console.log(`Estoque atualizado: ${baixaRes.itensBaixados} itens baixados (${baixaRes.pesoTotalBaixadoKg} kg).`);
+        }
+        if (finRes) {
+          console.log(`Lançamento a receber gerado: R$ ${finRes.valor}.`);
+        }
+      }
+
+      // Normaliza os dados completos para emissão de qualquer modelo de impressão
+      const normalizedSavedQuote = normalizeQuoteForPrint(currentQuoteObject);
+      setLastSavedQuoteForPrint(normalizedSavedQuote);
+
+      // Notificação Toast de Sucesso e abertura do Modal de Opções de Impressão
+      setSuccessMessage(`✅ Orçamento ${cleanNum} salvo com sucesso no banco de dados!`);
+      setShowPrintOptionsModal(true);
+
+      setTimeout(() => {
+        setSuccessMessage(null);
+      }, 4500);
+
+    } catch (err: any) {
+      console.error('Exceção ao gravar cotação no Supabase:', err);
+      setErrorMessage(`❌ Erro inesperado ao gravar no banco: ${err?.message || 'Falha de conexão'}. Seus dados foram mantidos na tela.`);
+      setTimeout(() => setErrorMessage(null), 8000);
+    } finally {
+      setIsSavingQuote(false);
     }
-
-    // 3. Preservação da Sequência Automática:
-    // Ao salvar um orçamento com número digitado manualmente, mantenha a sequência do 'proximo_numero_sequencial' da aba Emitente intacta.
-    // Somente avança a numeração do emitente (+1) se o usuário utilizou a numeração sequencial automática sugerida (não editada).
-    const isAutoSequential = !isEditing && autoSuggestedNumber && cleanNum.toLowerCase() === autoSuggestedNumber.trim().toLowerCase();
-
-    if (isAutoSequential) {
-      incrementEmitenteQuoteSequential(autoSuggestedSeq).catch(err => {
-        console.warn('Erro ao atualizar proximo_numero_sequencial no Supabase:', err);
-      });
-      const nextSeq = autoSuggestedSeq + 1;
-      setAutoSuggestedSeq(nextSeq);
-      const prefix = cleanNum.replace(/\d+$/, '');
-      const nextNumStr = `${prefix}${String(nextSeq).padStart(6, '0')}`;
-      setAutoSuggestedNumber(nextNumStr);
-    } else {
-      console.log(`[Cotação] Número manual "${cleanNum}" gravado. Sequência do emitente preservada intacta.`);
-    }
-
-    setSavedQuotes(updatedQuotes);
-    try { localStorage.removeItem('s_orcamentos'); } catch {}
-    setEditingOriginalQuoteNumber(cleanNum);
-    editingQuoteNumberRef.current = cleanNum;
-
-    // Se a cotação estiver Aprovada ou Faturada, realiza a baixa automática no estoque e gera contas a receber
-    if (quoteStatus === 'Aprovado' || quoteStatus === 'Faturado') {
-      const baixaRes = baixarEstoquePorCotacao(currentQuoteObject);
-      const finRes = gerarContasReceberPorCotacao(currentQuoteObject);
-      if (baixaRes.itensBaixados > 0) {
-        console.log(`Estoque atualizado: ${baixaRes.itensBaixados} itens baixados (${baixaRes.pesoTotalBaixadoKg} kg).`);
-      }
-      if (finRes) {
-        console.log(`Lançamento a receber gerado: R$ ${finRes.valor}.`);
-      }
-    }
-
-    // Persiste e atualiza diretamente no Supabase
-    saveCotacaoDb(currentQuoteObject).then(res => {
-      if (res.data?.id) {
-        currentQuoteObject.id = res.data.id;
-        setEditingQuoteId(res.data.id);
-        editingQuoteIdRef.current = res.data.id;
-      }
-      if (res.error) {
-        console.warn('Aviso ao gravar no Supabase:', res.error);
-        setErrorMessage(`Aviso ao gravar no Supabase: ${res.error.message || 'Falha de comunicação'}`);
-      }
-    }).catch((err) => {
-      console.error('Erro na gravação direta no Supabase:', err);
-      setErrorMessage(`Erro ao gravar no Supabase: ${err?.message || 'Falha de rede'}`);
-    });
-
-    // Normaliza os dados completos para emissão de qualquer modelo de impressão
-    const normalizedSavedQuote = normalizeQuoteForPrint(currentQuoteObject);
-    setLastSavedQuoteForPrint(normalizedSavedQuote);
-
-    // Notificação Toast e abertura automática do Modal de Opções de Impressão
-    setSuccessMessage('Orçamento salvo com sucesso!');
-    setShowPrintOptionsModal(true);
-
-    setTimeout(() => {
-      setSuccessMessage(null);
-      setErrorMessage(null);
-    }, 4500);
   };
 
   // Aprovar cotação com 1 clique (baixa estoque + gera contas a receber + UPDATE direto no Supabase)
-  const handleApproveAndDeductQuote = () => {
-    setQuoteStatus('Aprovado');
+  const handleApproveAndDeductQuote = async () => {
+    if (isSavingQuote) return;
+
     if (items.length === 0) {
       setErrorMessage('Adicione pelo menos 1 item antes de aprovar o orçamento.');
       setTimeout(() => setErrorMessage(null), 3500);
@@ -2248,66 +2256,77 @@ export default function SalesModule({
       updatedAt: new Date().toISOString()
     };
 
-    const existsIndex = savedQuotes.findIndex(
-      q => (editingQuoteId && (q.id === editingQuoteId || String(q.id).toLowerCase() === String(editingQuoteId).toLowerCase())) ||
-           (editingOriginalQuoteNumber && (
-             (q.quoteNumber && q.quoteNumber.trim().toLowerCase() === editingOriginalQuoteNumber.trim().toLowerCase()) ||
-             (q.id && String(q.id).trim().toLowerCase() === editingOriginalQuoteNumber.trim().toLowerCase())
-           )) ||
-           (q.quoteNumber && q.quoteNumber.trim().toLowerCase() === cleanNum.toLowerCase()) ||
-           (q.id && q.id === cleanNum)
-    );
+    setIsSavingQuote(true);
 
-    let updatedQuotes: Quote[];
+    try {
+      // Gravação direta no Supabase com try/catch e verificação de erro
+      const saveRes = await saveCotacaoDb(currentQuoteObject, editingOriginalQuoteNumber || undefined);
 
-    if (existsIndex >= 0) {
-      updatedQuotes = [...savedQuotes];
-      updatedQuotes[existsIndex] = {
-        ...savedQuotes[existsIndex],
-        ...currentQuoteObject,
-        id: savedQuotes[existsIndex].id || targetId
-      };
-    } else {
-      updatedQuotes = [currentQuoteObject, ...savedQuotes];
-    }
-
-    // 3. Preservação da Sequência Automática:
-    // Ao salvar um orçamento com número digitado manualmente, mantenha a sequência do 'proximo_numero_sequencial' da aba Emitente intacta.
-    // Somente avança a numeração do emitente (+1) se o usuário utilizou a numeração sequencial automática sugerida (não editada).
-    const isAutoSequential = !isEditing && autoSuggestedNumber && cleanNum.toLowerCase() === autoSuggestedNumber.trim().toLowerCase();
-
-    if (isAutoSequential) {
-      incrementEmitenteQuoteSequential(autoSuggestedSeq).catch(err => {
-        console.warn('Erro ao atualizar proximo_numero_sequencial no Supabase:', err);
-      });
-      const nextSeq = autoSuggestedSeq + 1;
-      setAutoSuggestedSeq(nextSeq);
-      const prefix = cleanNum.replace(/\d+$/, '');
-      const nextNumStr = `${prefix}${String(nextSeq).padStart(6, '0')}`;
-      setAutoSuggestedNumber(nextNumStr);
-    } else {
-      console.log(`[Cotação] Número manual "${cleanNum}" aprovado. Sequência do emitente preservada intacta.`);
-    }
-
-    setSavedQuotes(updatedQuotes);
-    try { localStorage.removeItem('s_orcamentos'); } catch {}
-    setEditingOriginalQuoteNumber(cleanNum);
-    editingQuoteNumberRef.current = cleanNum;
-
-    // Executa baixa de estoque e contas a receber
-    const baixaRes = baixarEstoquePorCotacao(currentQuoteObject);
-    const finRes = gerarContasReceberPorCotacao(currentQuoteObject);
-
-    // Gravação direta no Supabase
-    saveCotacaoDb(currentQuoteObject).then(res => {
-      if (res.data?.id) {
-        setEditingQuoteId(res.data.id);
-        editingQuoteIdRef.current = res.data.id;
+      if (saveRes.error) {
+        console.error('Erro retornado pelo Supabase ao aprovar cotação:', saveRes.error);
+        const errMsg = saveRes.error.message || 'Falha de comunicação';
+        setErrorMessage(`⚠️ Erro ao salvar cotação aprovada no Supabase: ${errMsg}. Os dados permanecem na tela para nova tentativa.`);
+        setTimeout(() => setErrorMessage(null), 8000);
+        return; // Interrompe para não simular aprovação se falhou no Supabase
       }
-    }).catch(() => {});
 
-    setSuccessMessage(`✅ Cotação ${cleanNum} APROVADA e salva diretamente no Supabase! ${baixaRes.itensBaixados} itens baixados no Estoque (${baixaRes.pesoTotalBaixadoKg} kg) e R$ ${formatCurrency(grandTotal)} lançado no Contas a Receber!`);
-    setTimeout(() => setSuccessMessage(null), 5000);
+      const confirmedId = saveRes.data?.id || targetId;
+      currentQuoteObject.id = confirmedId;
+      setEditingQuoteId(confirmedId);
+      editingQuoteIdRef.current = confirmedId;
+      setEditingOriginalQuoteNumber(cleanNum);
+      editingQuoteNumberRef.current = cleanNum;
+      setQuoteStatus('Aprovado');
+
+      // Executa baixa de estoque e contas a receber
+      const baixaRes = baixarEstoquePorCotacao(currentQuoteObject);
+      const finRes = gerarContasReceberPorCotacao(currentQuoteObject);
+
+      // Atualiza lista em memória
+      const existsIndex = savedQuotes.findIndex(
+        q => (confirmedId && (q.id === confirmedId || String(q.id).toLowerCase() === String(confirmedId).toLowerCase())) ||
+             (cleanNum && q.quoteNumber && q.quoteNumber.trim().toLowerCase() === cleanNum.toLowerCase()) ||
+             (editingOriginalQuoteNumber && (q.quoteNumber === editingOriginalQuoteNumber || q.id === editingOriginalQuoteNumber))
+      );
+
+      let updatedQuotes: Quote[];
+      if (existsIndex >= 0) {
+        updatedQuotes = [...savedQuotes];
+        updatedQuotes[existsIndex] = {
+          ...savedQuotes[existsIndex],
+          ...currentQuoteObject,
+          id: confirmedId
+        };
+      } else {
+        updatedQuotes = [currentQuoteObject, ...savedQuotes];
+      }
+      setSavedQuotes(updatedQuotes);
+      try { localStorage.removeItem('s_orcamentos'); } catch {}
+
+      // Sequência automática do emitente
+      const isAutoSequential = !isEditing && autoSuggestedNumber && cleanNum.toLowerCase() === autoSuggestedNumber.trim().toLowerCase();
+      if (isAutoSequential) {
+        incrementEmitenteQuoteSequential(autoSuggestedSeq).catch(err => {
+          console.warn('Erro ao atualizar proximo_numero_sequencial no Supabase:', err);
+        });
+        const nextSeq = autoSuggestedSeq + 1;
+        setAutoSuggestedSeq(nextSeq);
+        const prefix = cleanNum.replace(/\d+$/, '');
+        const nextNumStr = `${prefix}${String(nextSeq).padStart(6, '0')}`;
+        setAutoSuggestedNumber(nextNumStr);
+      } else {
+        console.log(`[Cotação] Número manual "${cleanNum}" aprovado. Sequência do emitente preservada intacta.`);
+      }
+
+      setSuccessMessage(`✅ Cotação ${cleanNum} APROVADA e salva com sucesso no banco de dados! ${baixaRes.itensBaixados} itens baixados no Estoque (${baixaRes.pesoTotalBaixadoKg} kg) e R$ ${formatCurrency(grandTotal)} lançado no Contas a Receber!`);
+      setTimeout(() => setSuccessMessage(null), 6000);
+    } catch (err: any) {
+      console.error('Exceção ao aprovar cotação no Supabase:', err);
+      setErrorMessage(`❌ Erro inesperado ao aprovar no banco: ${err?.message || 'Falha de conexão'}. Seus dados permanecem intactos na tela.`);
+      setTimeout(() => setErrorMessage(null), 8000);
+    } finally {
+      setIsSavingQuote(false);
+    }
   };
 
   // FLUXO AUTOMÁTICO PARA PRÓXIMA COTAÇÃO AO SALVAR/IMPRIMIR
@@ -2476,19 +2495,30 @@ export default function SalesModule({
     setTimeout(() => setSuccessMessage(null), 5000);
   };
 
-  // Delete quote from history
+  // Delete quote from history (soft delete)
   const handleDeleteSavedQuote = async (id: string) => {
     const quoteToDelete = savedQuotes.find(q => q.id === id || q.quoteNumber === id);
-    const updated = savedQuotes.filter(q => q.id !== id && q.quoteNumber !== id);
-    setSavedQuotes(updated);
-    try { localStorage.removeItem('s_orcamentos'); } catch {}
+    if (!quoteToDelete) return;
 
-    if (quoteToDelete) {
-      try {
-        await deleteCotacaoDb(quoteToDelete.id || quoteToDelete.quoteNumber);
-      } catch (err) {
-        console.warn('Erro ao deletar cotação no Supabase:', err);
+    try {
+      const res = await deleteCotacaoDb(quoteToDelete.id || quoteToDelete.quoteNumber);
+      if (res?.error) {
+        console.warn('Erro ao aplicar soft delete na cotação:', res.error);
+        setErrorMessage(`Erro ao excluir cotação: ${res.error.message || 'Falha de comunicação'}`);
+        setTimeout(() => setErrorMessage(null), 5000);
+        return;
       }
+
+      const updated = savedQuotes.filter(q => q.id !== id && q.quoteNumber !== id && q.id !== quoteToDelete.id && q.quoteNumber !== quoteToDelete.quoteNumber);
+      setSavedQuotes(updated);
+      try { localStorage.removeItem('s_orcamentos'); } catch {}
+
+      setSuccessMessage(`Cotação ${quoteToDelete.quoteNumber || quoteToDelete.id} excluída com sucesso!`);
+      setTimeout(() => setSuccessMessage(null), 3500);
+    } catch (err: any) {
+      console.warn('Erro ao deletar cotação no Supabase:', err);
+      setErrorMessage(`Erro ao excluir cotação: ${err?.message || 'Falha de rede'}`);
+      setTimeout(() => setErrorMessage(null), 5000);
     }
   };
 
@@ -4256,20 +4286,40 @@ export default function SalesModule({
             <div className="space-y-2 pt-2">
               <button
                 onClick={handleApproveAndDeductQuote}
-                className="w-full py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5 shadow-md shadow-emerald-600/30 transition-all cursor-pointer border border-emerald-400/40"
+                disabled={isSavingQuote}
+                className={`w-full py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5 shadow-md shadow-emerald-600/30 transition-all cursor-pointer border border-emerald-400/40 ${isSavingQuote ? 'opacity-60 cursor-not-allowed' : ''}`}
                 title="Aprova o orçamento, dá baixa no estoque de matéria-prima e lança em Contas a Receber"
               >
-                <CheckCircle2 className="w-4 h-4 text-emerald-100" />
-                Aprovar & Baixar Estoque ⚡
+                {isSavingQuote ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-white" />
+                    Gravando no Banco...
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-4 h-4 text-emerald-100" />
+                    Aprovar & Baixar Estoque ⚡
+                  </>
+                )}
               </button>
 
               <div className="grid grid-cols-2 gap-2">
                 <button
                   onClick={handleSaveFullQuote}
-                  className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-100 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs transition-all cursor-pointer border border-slate-700"
+                  disabled={isSavingQuote}
+                  className={`w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-100 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs transition-all cursor-pointer border border-slate-700 ${isSavingQuote ? 'opacity-60 cursor-not-allowed' : ''}`}
                 >
-                  <Save className="w-4 h-4" />
-                  Salvar Orçamento
+                  {isSavingQuote ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
+                      Salvando...
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-4 h-4" />
+                      Salvar Orçamento
+                    </>
+                  )}
                 </button>
 
                 <button

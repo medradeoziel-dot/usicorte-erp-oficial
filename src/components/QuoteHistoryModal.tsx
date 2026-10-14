@@ -155,11 +155,14 @@ export default function QuoteHistoryModal({
     return () => { isMounted = false; };
   }, [quotes, clients]);
 
-  // Deduplicação preventiva por id / quoteNumber
+  // Deduplicação preventiva por id / quoteNumber e exclusão lógica de registros deletados
   const uniqueQuotes = useMemo(() => {
     const seen = new Set<string>();
     const result: Quote[] = [];
     localQuotes.forEach(q => {
+      // Ignora registros deletados (soft delete)
+      if (q.deletado_em || (q as any).deleted_at) return;
+
       const key = (q.quoteNumber || q.id || '').trim().toLowerCase();
       if (key && !seen.has(key)) {
         seen.add(key);
@@ -612,7 +615,9 @@ export default function QuoteHistoryModal({
                       <button
                         onClick={() => {
                           if (confirm(`Deseja realmente excluir o orçamento ${quote.quoteNumber}?`)) {
-                            onDeleteQuote(quote.id);
+                            const target = quote.id || quote.quoteNumber;
+                            onDeleteQuote(target);
+                            setLocalQuotes(prev => prev.filter(q => q.id !== target && q.quoteNumber !== target && q.quoteNumber !== quote.quoteNumber));
                           }
                         }}
                         className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer"
