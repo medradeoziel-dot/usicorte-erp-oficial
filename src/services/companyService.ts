@@ -92,8 +92,112 @@ export const DEFAULT_COMPANY_DATA: CompanyFiscalData = {
 
 const STORAGE_KEY = 's_empresa_emitente';
 
+/**
+ * Desmembra e higieniza qualquer string de endereço de emitente,
+ * extraindo o logradouro limpo, número e bairro sem duplicações repetitivas.
+ */
+export function extrairComponentesEndereco(
+  rawEndereco?: string | null,
+  rawNumero?: string | null,
+  rawBairro?: string | null
+): { logradouro: string; numero: string; bairro: string } {
+  let logradouro = (rawEndereco || '').split('•')[0].trim();
+  let numero = (rawNumero || '').trim();
+  let bairro = (rawBairro || '').trim();
+
+  // Se o endereço bruto contém vírgulas ou hifens de formatações e concatenações anteriores
+  // ex: 'RUA CORONEL IVON CESAR PIMENTEL, 3-41 - PARQUE PAULISTA'
+  if (logradouro.includes(',')) {
+    const partes = logradouro.split(',').map(p => p.trim()).filter(Boolean);
+    const possivelLogradouro = partes[0];
+    
+    // Procura número e bairro nas partes subsequentes caso não tenham sido fornecidos separadamente
+    for (let i = 1; i < partes.length; i++) {
+      const p = partes[i];
+      if (p.includes(' - ')) {
+        const sub = p.split(/\s+-\s+/);
+        if (!numero && sub[0]) numero = sub[0].trim();
+        if (!bairro && sub[1]) bairro = sub[1].trim();
+      } else if (!numero && /^[\d\w\-\/]+$/.test(p)) {
+        numero = p.trim();
+      } else if (!bairro && p.length > 2) {
+        bairro = p.trim();
+      }
+    }
+    
+    if (possivelLogradouro) {
+      logradouro = possivelLogradouro;
+    }
+  }
+
+  // Remove repetições residuais de número e bairro que possam estar presas no logradouro
+  if (numero) {
+    const numEsc = numero.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    logradouro = logradouro.replace(new RegExp(`,?\\s*(?:nº\\s*|no\\s*)?${numEsc}\\b`, 'gi'), '');
+  }
+  if (bairro) {
+    const bEsc = bairro.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    logradouro = logradouro.replace(new RegExp(`(?:\\s*-\\s*|,\\s*)${bEsc}\\b`, 'gi'), '');
+  }
+
+  logradouro = logradouro.replace(/,\s*,/g, ',').replace(/^[\s,-]+|[\s,-]+$/g, '').trim();
+
+  return {
+    logradouro: logradouro || DEFAULT_COMPANY_DATA.street,
+    numero: numero || DEFAULT_COMPANY_DATA.number,
+    bairro: bairro || DEFAULT_COMPANY_DATA.neighborhood
+  };
+}
+
+/**
+ * Constrói a string do endereço do emitente de forma limpa e padronizada:
+ * [logradouro], [numero] - [bairro] • [cidade]/[uf]
+ * Exemplo: "RUA CORONEL IVON CESAR PIMENTEL, 3-41 - PARQUE PAULISTA • BAURU/SP"
+ */
+export function formatarEnderecoEmitenteLimpo(
+  company: {
+    street?: string | null;
+    endereco?: string | null;
+    logradouro?: string | null;
+    number?: string | null;
+    numero?: string | null;
+    complement?: string | null;
+    complemento?: string | null;
+    neighborhood?: string | null;
+    bairro?: string | null;
+    city?: string | null;
+    cidade?: string | null;
+    state?: string | null;
+    uf?: string | null;
+    estado?: string | null;
+  }
+): string {
+  const { logradouro, numero, bairro } = extrairComponentesEndereco(
+    company.street || company.endereco || company.logradouro,
+    company.number || company.numero,
+    company.neighborhood || company.bairro
+  );
+  const cidade = (company.city || company.cidade || DEFAULT_COMPANY_DATA.city).trim().toUpperCase();
+  const uf = (company.state || company.uf || company.estado || DEFAULT_COMPANY_DATA.state).trim().toUpperCase();
+
+  let base = logradouro;
+  if (numero && numero !== 'S/N') {
+    base += `, ${numero}`;
+  }
+  if (bairro) {
+    base += ` - ${bairro}`;
+  }
+  return `${base} • ${cidade}/${uf}`;
+}
+
 export function mapSupabaseToCompany(row: any): CompanyFiscalData {
   if (!row) return DEFAULT_COMPANY_DATA;
+
+  const { logradouro, numero, bairro } = extrairComponentesEndereco(
+    row.endereco || row.logradouro || row.street,
+    row.numero || row.number,
+    row.bairro || row.neighborhood
+  );
 
   return {
     id: row.id ? String(row.id) : DEFAULT_COMPANY_DATA.id,
@@ -117,10 +221,10 @@ export function mapSupabaseToCompany(row: any): CompanyFiscalData {
         : (DEFAULT_COMPANY_DATA.aliquota_icms_simples ?? 2.75)),
 
     cep: row.cep || DEFAULT_COMPANY_DATA.cep,
-    street: row.endereco || row.logradouro || row.street || DEFAULT_COMPANY_DATA.street,
-    number: row.numero || row.number || DEFAULT_COMPANY_DATA.number,
+    street: logradouro,
+    number: numero,
     complement: row.complemento || row.complement || '',
-    neighborhood: row.bairro || row.neighborhood || DEFAULT_COMPANY_DATA.neighborhood,
+    neighborhood: bairro,
     city: row.cidade || row.city || row.municipio || DEFAULT_COMPANY_DATA.city,
     state: (row.uf || row.state || row.estado || DEFAULT_COMPANY_DATA.state).toUpperCase(),
     ibgeCode: row.ibge_cidade || row.ibge_code || row.ibgeCode || DEFAULT_COMPANY_DATA.ibgeCode,
@@ -182,10 +286,10 @@ export function mapSupabaseToCompany(row: any): CompanyFiscalData {
     inscricao_estadual: row.inscricao_estadual || row.ie || DEFAULT_COMPANY_DATA.ie,
     inscricao_municipal: row.inscricao_municipal || row.im || DEFAULT_COMPANY_DATA.im,
     regime_tributario: row.regime_tributario || DEFAULT_COMPANY_DATA.taxRegime,
-    endereco: row.endereco || DEFAULT_COMPANY_DATA.street,
-    numero: row.numero || DEFAULT_COMPANY_DATA.number,
+    endereco: `${logradouro}, ${numero} - ${bairro}`,
+    numero: numero,
     complemento: row.complemento || '',
-    bairro: row.bairro || DEFAULT_COMPANY_DATA.neighborhood,
+    bairro: bairro,
     cidade: row.cidade || DEFAULT_COMPANY_DATA.city,
     uf: (row.uf || row.estado || DEFAULT_COMPANY_DATA.state).toUpperCase(),
     ibge_cidade: row.ibge_cidade || DEFAULT_COMPANY_DATA.ibgeCode,
@@ -217,16 +321,18 @@ export function mapSupabaseToCompany(row: any): CompanyFiscalData {
 }
 
 export function mapCompanyToSupabase(data: CompanyFiscalData): Record<string, any> {
-  const street = data.street || data.endereco || '';
-  const num = data.number || data.numero || '';
-  const neighborhood = data.neighborhood || data.bairro || '';
+  const { logradouro, numero, bairro } = extrairComponentesEndereco(
+    data.street || data.endereco,
+    data.number || data.numero,
+    data.neighborhood || data.bairro
+  );
   
-  let fullEndereco = street;
-  if (num && !fullEndereco.includes(num)) {
-    fullEndereco += `, ${num}`;
+  let fullEndereco = logradouro;
+  if (numero && numero !== 'S/N') {
+    fullEndereco += `, ${numero}`;
   }
-  if (neighborhood && !fullEndereco.includes(neighborhood)) {
-    fullEndereco += ` - ${neighborhood}`;
+  if (bairro) {
+    fullEndereco += ` - ${bairro}`;
   }
 
   const seq = typeof data.proximo_numero_sequencial === 'number' && !isNaN(data.proximo_numero_sequencial)
@@ -240,16 +346,16 @@ export function mapCompanyToSupabase(data: CompanyFiscalData): Record<string, an
   const prefix = data.prefixo_cotacao || data.quotePrefix || 'COT-2026-';
 
   return {
-    razao_social: data.corporateName || data.razao_social || '',
-    nome_fantasia: data.tradeName || data.nome_fantasia || '',
-    cnpj: data.cnpj || '',
-    ie: data.ie || data.inscricao_estadual || '',
-    telefone: data.phone || data.telefone || '',
-    email: data.email || '',
+    razao_social: data.corporateName || data.razao_social || DEFAULT_COMPANY_DATA.corporateName,
+    nome_fantasia: data.tradeName || data.nome_fantasia || DEFAULT_COMPANY_DATA.tradeName,
+    cnpj: data.cnpj || DEFAULT_COMPANY_DATA.cnpj,
+    ie: data.ie || data.inscricao_estadual || DEFAULT_COMPANY_DATA.ie,
+    telefone: data.phone || data.telefone || DEFAULT_COMPANY_DATA.phone,
+    email: data.email || DEFAULT_COMPANY_DATA.email,
     endereco: fullEndereco,
-    cidade: data.city || data.cidade || '',
-    estado: (data.state || data.uf || 'SP').toUpperCase(),
-    cep: data.cep || '',
+    cidade: data.city || data.cidade || DEFAULT_COMPANY_DATA.city,
+    estado: (data.state || data.uf || DEFAULT_COMPANY_DATA.state).toUpperCase(),
+    cep: data.cep || DEFAULT_COMPANY_DATA.cep,
     proximo_numero_sequencial: seq,
     prefixo_cotacao: prefix,
     ultimo_numero_nfe: typeof data.ultimo_numero_nfe === 'number' && !isNaN(data.ultimo_numero_nfe)
@@ -275,21 +381,23 @@ export function mapCompanyToSupabase(data: CompanyFiscalData): Record<string, an
  */
 export function getLocalCompanyData(): CompanyFiscalData {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (parsed.email && (parsed.email.toLowerCase().includes('luan.usicorte') || parsed.email.toLowerCase().includes('financeiro.usicorte'))) {
-        parsed.email = DEFAULT_COMPANY_DATA.email;
+    if (typeof localStorage !== 'undefined') {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.email && (parsed.email.toLowerCase().includes('luan.usicorte') || parsed.email.toLowerCase().includes('financeiro.usicorte'))) {
+          parsed.email = DEFAULT_COMPANY_DATA.email;
+        }
+        if (parsed.phone && (parsed.phone.includes('3203-1742') || parsed.phone.includes('32031742'))) {
+          parsed.phone = DEFAULT_COMPANY_DATA.phone;
+          parsed.telefone = DEFAULT_COMPANY_DATA.telefone;
+        }
+        if (!parsed.mobile || parsed.mobile.includes('3203-1742')) {
+          parsed.mobile = DEFAULT_COMPANY_DATA.mobile;
+          parsed.celular = DEFAULT_COMPANY_DATA.celular;
+        }
+        return { ...DEFAULT_COMPANY_DATA, ...parsed };
       }
-      if (parsed.phone && (parsed.phone.includes('3203-1742') || parsed.phone.includes('32031742'))) {
-        parsed.phone = DEFAULT_COMPANY_DATA.phone;
-        parsed.telefone = DEFAULT_COMPANY_DATA.telefone;
-      }
-      if (!parsed.mobile || parsed.mobile.includes('3203-1742')) {
-        parsed.mobile = DEFAULT_COMPANY_DATA.mobile;
-        parsed.celular = DEFAULT_COMPANY_DATA.celular;
-      }
-      return { ...DEFAULT_COMPANY_DATA, ...parsed };
     }
   } catch (e) {
     console.warn('Erro ao ler dados locais da empresa:', e);
@@ -300,13 +408,12 @@ export function getLocalCompanyData(): CompanyFiscalData {
 /**
  * Busca dados da empresa do Supabase (tabela emitente) com fallback garantido para LocalStorage
  */
-export async function fetchCompanyData(): Promise<CompanyFiscalData> {
-  // 1. Tenta carregar do Supabase (tabela emitente)
+export async function fetchCompanyData(forceFresh: boolean = false): Promise<CompanyFiscalData> {
+  // 1. Tenta carregar do Supabase (tabela emitente) em tempo real
   try {
     let data: any = null;
-    let error: any = null;
 
-    // Busca direta segura sem order('created_at') para evitar quebra caso a coluna não exista
+    // Busca direta segura da tabela emitente
     const res = await db
       .from('emitente')
       .select('*')
@@ -330,10 +437,28 @@ export async function fetchCompanyData(): Promise<CompanyFiscalData> {
     if (data) {
       const local = getLocalCompanyData();
       const mapped = mapSupabaseToCompany(data);
+
+      // Auto-higienização: se o endereço gravado no Supabase continha concatenações repetitivas,
+      // atualiza a linha no banco de dados com a string limpa para nunca mais duplicar
+      const enderecoLimpo = `${mapped.street}, ${mapped.number} - ${mapped.neighborhood}`;
+      if (data.id && data.endereco && data.endereco !== enderecoLimpo && (data.endereco.includes(', ' + mapped.number) || data.endereco.includes(' - ' + mapped.neighborhood))) {
+        db.from('emitente').update({ endereco: enderecoLimpo }).eq('id', data.id).then(() => {}, () => {});
+      }
+
       const merged: CompanyFiscalData = {
         ...DEFAULT_COMPANY_DATA,
         ...local,
-        ...mapped,
+        ...mapped, // Sobrescreve local com os dados atualizados do Supabase (Razão Social, Nome Fantasia, CNPJ, IE, Endereço, etc.)
+        street: mapped.street,
+        number: mapped.number,
+        neighborhood: mapped.neighborhood,
+        endereco: enderecoLimpo,
+        city: mapped.city,
+        state: mapped.state,
+        corporateName: mapped.corporateName,
+        tradeName: mapped.tradeName,
+        cnpj: mapped.cnpj,
+        ie: mapped.ie,
         chavePix: data.chave_pix !== null && data.chave_pix !== undefined ? data.chave_pix : (mapped.chavePix ?? local.chavePix),
         tipoChavePix: data.tipo_chave_pix !== null && data.tipo_chave_pix !== undefined ? data.tipo_chave_pix : (mapped.tipoChavePix ?? local.tipoChavePix),
         favorecidoPix: data.favorecido_pix !== null && data.favorecido_pix !== undefined ? data.favorecido_pix : (mapped.favorecidoPix ?? local.favorecidoPix),
@@ -355,7 +480,9 @@ export async function fetchCompanyData(): Promise<CompanyFiscalData> {
           : (mapped.aliquota_icms_simples ?? local.aliquota_icms_simples ?? 2.75),
         updated_at: data.updated_at || data.created_at || new Date().toISOString()
       };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+      }
       return merged;
     }
   } catch (err) {

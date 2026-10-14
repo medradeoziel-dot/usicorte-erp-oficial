@@ -1,6 +1,16 @@
 import { Quote, QuoteItem, Client } from '../types';
 import { db, updateCotacaoNfeStatusDb, isUuid, inserirNotaFiscalDb, fetchNotasFiscaisDb, NotaFiscalDb, cancelarNotaFiscalSupabase, resolveStatusNfeFinal } from '../lib/db';
-import { fetchCompanyData, CompanyFiscalData, DEFAULT_COMPANY_DATA, incrementEmitenteUltimoNumeroNfe, updateEmitenteNfeConfig, fetchEmitenteNfeConfig, getLocalCompanyData } from './companyService';
+import { 
+  fetchCompanyData, 
+  CompanyFiscalData, 
+  DEFAULT_COMPANY_DATA, 
+  incrementEmitenteUltimoNumeroNfe, 
+  updateEmitenteNfeConfig, 
+  fetchEmitenteNfeConfig, 
+  getLocalCompanyData,
+  formatarEnderecoEmitenteLimpo,
+  extrairComponentesEndereco
+} from './companyService';
 import { generateBarcodeSvg } from '../utils/barcode';
 import { formatarMedidasLimpa, getObservacaoEspecificaItem } from '../utils/calculator';
 
@@ -119,6 +129,8 @@ export const buscarInscricaoEstadual = (cliente: any): string => {
   return 'ISENTO';
 };
 
+export { formatarEnderecoEmitenteLimpo, extrairComponentesEndereco };
+
 /**
  * 1. CORREÇÃO DO ENDEREÇO DO EMITENTE (REMOVER DUPLICAÇÕES DE TEXTO):
  * Formata a string de endereço montando os campos de forma limpa sem repetições
@@ -129,11 +141,12 @@ export const montarEnderecoSemDuplicacao = (
   complemento?: string | null,
   bairro?: string | null
 ): string => {
+  const comp = extrairComponentesEndereco(logradouro, numero, bairro);
   const partes: string[] = [];
-  if (logradouro) partes.push(logradouro.trim());
-  if (numero && !logradouro?.includes(numero)) partes.push(numero.trim());
-  if (complemento) partes.push(complemento.trim());
-  if (bairro && !logradouro?.includes(bairro)) partes.push(bairro.trim());
+  if (comp.logradouro) partes.push(comp.logradouro);
+  if (comp.numero && comp.numero !== 'S/N') partes.push(comp.numero);
+  if (complemento && complemento.trim()) partes.push(complemento.trim());
+  if (comp.bairro) partes.push(comp.bairro);
   return partes.join(', ');
 };
 
@@ -1583,18 +1596,24 @@ export async function transmitirNfeSefaz(
   quote: Quote,
   client?: Client | null
 ): Promise<NfeTransmissionResult> {
-  const companyData: CompanyFiscalData = await fetchCompanyData();
+  const companyData: CompanyFiscalData = await fetchCompanyData(true);
 
   // 1. Dados do Emitente
+  const { logradouro, numero, bairro } = extrairComponentesEndereco(
+    companyData.street || companyData.endereco,
+    companyData.number || companyData.numero,
+    companyData.neighborhood || companyData.bairro
+  );
+
   const emitente: DadosEmitenteNfe = {
     razaoSocial: companyData.corporateName || companyData.razao_social || 'L. M. BANZATTO METAIS',
     nomeFantasia: companyData.tradeName || companyData.nome_fantasia || 'USICORTE METAIS',
     cnpj: companyData.cnpj || '25.038.430/0001-23',
     ie: companyData.ie || companyData.inscricao_estadual || '20963213114',
     im: companyData.im || companyData.inscricao_municipal || '558747',
-    endereco: companyData.street || companyData.endereco || 'RUA CORONEL IVON CESAR PIMENTEL',
-    numero: companyData.number || companyData.numero || '3-41',
-    bairro: companyData.neighborhood || companyData.bairro || 'PARQUE PAULISTA',
+    endereco: logradouro,
+    numero: numero,
+    bairro: bairro,
     cidade: companyData.city || companyData.cidade || 'BAURU',
     uf: (companyData.state || companyData.uf || 'SP').toUpperCase(),
     cep: companyData.cep || '17031-350',

@@ -21,8 +21,8 @@ import {
 } from '../services/nfeService';
 import CancelarNfeModal from './CancelarNfeModal';
 import DanfeEspelhoA4Modal from './DanfeEspelhoA4Modal';
-import { updateCotacaoNfeStatusDb, fetchItensByCotacaoId } from '../lib/db';
-import { fetchCompanyData, CompanyFiscalData, DEFAULT_COMPANY_DATA, updateEmitenteNfeConfig } from '../services/companyService';
+import { updateCotacaoNfeStatusDb, fetchItensByCotacaoId, db } from '../lib/db';
+import { fetchCompanyData, CompanyFiscalData, DEFAULT_COMPANY_DATA, updateEmitenteNfeConfig, formatarEnderecoEmitenteLimpo } from '../services/companyService';
 import { formatCurrency } from '../utils/calculator';
 import Logo from './Logo';
 import { 
@@ -236,12 +236,12 @@ export default function EmissaoNfeModal({
     }
   };
 
-  // 1. Busca os dados oficiais do Emitente (UsiCorte Metais - busca da tabela 'emitente')
+  // 1. Busca os dados oficiais do Emitente (UsiCorte Metais - busca direta e em tempo real da tabela 'emitente')
   useEffect(() => {
     let isMounted = true;
     async function loadEmitente() {
       try {
-        const data = await fetchCompanyData();
+        const data = await fetchCompanyData(true);
         if (isMounted) {
           setCompany(data);
         }
@@ -253,20 +253,51 @@ export default function EmissaoNfeModal({
     }
     loadEmitente();
 
+    // 1. Atualização em tempo real quando alterado no módulo de configurações da empresa
     const handleCompanyUpdate = (e: CustomEvent) => {
-      if (isMounted && e.detail) {
-        setCompany(prev => ({
-          ...prev,
-          ...e.detail,
-          ultimo_numero_nfe: e.detail.ultimo_numero_nfe !== undefined ? e.detail.ultimo_numero_nfe : prev.ultimo_numero_nfe
-        }));
+      if (isMounted) {
+        if (e.detail) {
+          setCompany(prev => ({
+            ...prev,
+            ...e.detail,
+            ultimo_numero_nfe: e.detail.ultimo_numero_nfe !== undefined ? e.detail.ultimo_numero_nfe : prev.ultimo_numero_nfe
+          }));
+        }
+        loadEmitente();
       }
     };
     window.addEventListener('company-data-updated', handleCompanyUpdate as EventListener);
 
+    // 2. Atualização ao retornar o foco na janela
+    const handleWindowFocus = () => {
+      if (isMounted) {
+        loadEmitente();
+      }
+    };
+    window.addEventListener('focus', handleWindowFocus);
+
+    // 3. Inscrição em tempo real no Supabase na tabela 'emitente'
+    const channelName = `realtime_emitente_modal_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const channel = db
+      .channel(channelName)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'emitente' },
+        () => {
+          if (isMounted) {
+            loadEmitente();
+          }
+        }
+      )
+      .subscribe();
+
     return () => { 
       isMounted = false;
       window.removeEventListener('company-data-updated', handleCompanyUpdate as EventListener);
+      window.removeEventListener('focus', handleWindowFocus);
+      try {
+        db.removeChannel(channel);
+      } catch {}
     };
   }, []);
 
@@ -623,8 +654,8 @@ export default function EmissaoNfeModal({
                     <strong className="text-slate-200 font-mono">{company.ie || company.inscricao_estadual || '20963213114'}</strong>
                   </div>
                 </div>
-                <p className="text-[11px] text-slate-400 pt-1">
-                  {montarEnderecoSemDuplicacao(company.street || company.endereco, company.number || company.numero, company.complement || (company as any).complemento, company.neighborhood || company.bairro)} • {company.city || company.cidade}/{company.state || company.uf || 'SP'}
+                <p className="text-[11px] text-slate-400 pt-1 font-sans">
+                  {formatarEnderecoEmitenteLimpo(company)}
                 </p>
               </div>
             </div>

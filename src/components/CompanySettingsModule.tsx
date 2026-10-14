@@ -32,6 +32,7 @@ import {
   fetchCompanyData, 
   saveCompanyData, 
   updateEmitenteNfeConfig,
+  formatarEnderecoEmitenteLimpo,
   DEFAULT_COMPANY_DATA 
 } from '../services/companyService';
 import { formatCNPJ, formatCPF, formatCEP, formatPhone } from '../utils/validators';
@@ -796,7 +797,7 @@ export default function CompanySettingsModule({ onBackToDashboard }: CompanySett
               <div className="space-y-0.5 text-center font-sans">
                 <div className="font-black text-slate-100 uppercase text-xs">{formData.corporateName || 'RAZÃO SOCIAL'}</div>
                 <div className="text-[11px] text-slate-300 font-mono">CNPJ: {formData.cnpj || '00.000.000/0000-00'} | IE: {formData.ie || 'ISENTO'}</div>
-                <div className="text-[10px] text-slate-400">{formData.street}, {formData.number} - {formData.neighborhood}, {formData.city}/{formData.state}</div>
+                <div className="text-[10px] text-slate-400">{formatarEnderecoEmitenteLimpo(formData)}</div>
                 <div className="text-[10px] text-slate-400 font-mono">FONE: {formData.phone} | {formData.email}</div>
               </div>
             </div>
