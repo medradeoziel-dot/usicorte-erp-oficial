@@ -40,8 +40,10 @@ export const DEFAULT_COMPANY_DATA: CompanyFiscalData = {
   logoUrl: '',
 
   // 4. Responsável Legal
-  legalRepresentativeName: 'MARCOS MARTINS',
-  legalRepresentativeDoc: '092.345.510/0001-94',
+  legalRepresentativeName: '',
+  legalRepresentativeDoc: '',
+  responsavel_legal: '',
+  cpf_responsavel: '',
 
   // 5. Numeração Sequencial de Cotações / Pedidos
   nextQuoteSequential: 140,
@@ -83,8 +85,8 @@ export const DEFAULT_COMPANY_DATA: CompanyFiscalData = {
   codigo_pais: '1058',
   telefone: '(14) 99880-9362',
   celular: '(14) 99819-6873',
-  nome_responsavel: 'MARCOS MARTINS',
-  documento_responsavel: '092.345.510/0001-94',
+  nome_responsavel: '',
+  documento_responsavel: '',
   chave_pix: '25.038.430/0001-23',
   tipo_chave_pix: 'CNPJ',
   favorecido_pix: 'L. M. BANZATTO METAIS',
@@ -248,8 +250,18 @@ export function mapSupabaseToCompany(row: any): CompanyFiscalData {
     logradouro: logradouro || row.logradouro || DEFAULT_COMPANY_DATA.street,
     logoUrl: row.logo_url || row.logoUrl || '',
 
-    legalRepresentativeName: row.nome_responsavel || row.legal_representative_name || row.legalRepresentativeName || DEFAULT_COMPANY_DATA.legalRepresentativeName,
-    legalRepresentativeDoc: row.documento_responsavel || row.legal_representative_doc || row.legalRepresentativeDoc || DEFAULT_COMPANY_DATA.legalRepresentativeDoc,
+    legalRepresentativeName: row.responsavel_legal !== undefined && row.responsavel_legal !== null
+      ? row.responsavel_legal
+      : (row.nome_responsavel || row.legal_representative_name || row.legalRepresentativeName || ''),
+    legalRepresentativeDoc: row.cpf_responsavel !== undefined && row.cpf_responsavel !== null
+      ? row.cpf_responsavel
+      : (row.documento_responsavel || row.legal_representative_doc || row.legalRepresentativeDoc || ''),
+    responsavel_legal: row.responsavel_legal !== undefined && row.responsavel_legal !== null
+      ? row.responsavel_legal
+      : (row.nome_responsavel || row.legal_representative_name || row.legalRepresentativeName || ''),
+    cpf_responsavel: row.cpf_responsavel !== undefined && row.cpf_responsavel !== null
+      ? row.cpf_responsavel
+      : (row.documento_responsavel || row.legal_representative_doc || row.legalRepresentativeDoc || ''),
 
     // 5. Numeração Sequencial
     nextQuoteSequential: typeof row.proximo_numero_sequencial === 'number' && !isNaN(row.proximo_numero_sequencial)
@@ -307,9 +319,12 @@ export function mapSupabaseToCompany(row: any): CompanyFiscalData {
     ibge_cidade: row.ibge_cidade || DEFAULT_COMPANY_DATA.ibgeCode,
     telefone: row.telefone_1 || row.telefone || DEFAULT_COMPANY_DATA.phone,
     celular: row.telefone_2 || row.celular || DEFAULT_COMPANY_DATA.mobile,
-    logo_url: row.logo_url || '',
-    nome_responsavel: row.nome_responsavel || DEFAULT_COMPANY_DATA.legalRepresentativeName,
-    documento_responsavel: row.documento_responsavel || DEFAULT_COMPANY_DATA.legalRepresentativeDoc,
+    nome_responsavel: row.responsavel_legal !== undefined && row.responsavel_legal !== null
+      ? row.responsavel_legal
+      : (row.nome_responsavel || row.legal_representative_name || row.legalRepresentativeName || ''),
+    documento_responsavel: row.cpf_responsavel !== undefined && row.cpf_responsavel !== null
+      ? row.cpf_responsavel
+      : (row.documento_responsavel || row.legal_representative_doc || row.legalRepresentativeDoc || ''),
     proximo_numero_cotacao: typeof row.proximo_numero_sequencial === 'number' && !isNaN(row.proximo_numero_sequencial)
       ? row.proximo_numero_sequencial
       : (typeof row.proximo_numero_cotacao === 'number' && !isNaN(row.proximo_numero_cotacao)
@@ -384,7 +399,13 @@ export function mapCompanyToSupabase(data: CompanyFiscalData): Record<string, an
     banco_conta: data.bancoConta !== undefined ? data.bancoConta : (data.banco_conta || ''),
     banco_titular: data.bancoTitular !== undefined ? data.bancoTitular : (data.banco_titular || ''),
     banco_cnpj: data.bancoCnpj !== undefined ? data.bancoCnpj : (data.banco_cnpj || ''),
-    instrucoes_pagamento: data.instrucoesPagamento !== undefined ? data.instrucoesPagamento : (data.instrucoes_pagamento || '')
+    instrucoes_pagamento: data.instrucoesPagamento !== undefined ? data.instrucoesPagamento : (data.instrucoes_pagamento || ''),
+    responsavel_legal: data.responsavel_legal !== undefined
+      ? data.responsavel_legal
+      : (data.legalRepresentativeName !== undefined ? data.legalRepresentativeName : (data.nome_responsavel || '')),
+    cpf_responsavel: data.cpf_responsavel !== undefined
+      ? data.cpf_responsavel
+      : (data.legalRepresentativeDoc !== undefined ? data.legalRepresentativeDoc : (data.documento_responsavel || ''))
   };
 }
 
@@ -407,6 +428,16 @@ export function getLocalCompanyData(): CompanyFiscalData {
         if (!parsed.mobile || parsed.mobile.includes('3203-1742')) {
           parsed.mobile = DEFAULT_COMPANY_DATA.mobile;
           parsed.celular = DEFAULT_COMPANY_DATA.celular;
+        }
+        if (parsed.legalRepresentativeName === 'MARCOS MARTINS' || parsed.responsavel_legal === 'MARCOS MARTINS' || parsed.nome_responsavel === 'MARCOS MARTINS') {
+          parsed.legalRepresentativeName = '';
+          parsed.responsavel_legal = '';
+          parsed.nome_responsavel = '';
+        }
+        if (parsed.legalRepresentativeDoc === '092.345.510/0001-94' || parsed.cpf_responsavel === '092.345.510/0001-94' || parsed.documento_responsavel === '092.345.510/0001-94') {
+          parsed.legalRepresentativeDoc = '';
+          parsed.cpf_responsavel = '';
+          parsed.documento_responsavel = '';
         }
         return { ...DEFAULT_COMPANY_DATA, ...parsed };
       }
@@ -495,6 +526,24 @@ export async function fetchCompanyData(forceFresh: boolean = false): Promise<Com
         bancoTitular: data.banco_titular !== null && data.banco_titular !== undefined ? data.banco_titular : (mapped.bancoTitular ?? local.bancoTitular),
         bancoCnpj: data.banco_cnpj !== null && data.banco_cnpj !== undefined ? data.banco_cnpj : (mapped.bancoCnpj ?? local.bancoCnpj),
         instrucoesPagamento: data.instrucoes_pagamento !== null && data.instrucoes_pagamento !== undefined ? data.instrucoes_pagamento : (mapped.instrucoesPagamento ?? local.instrucoesPagamento),
+        legalRepresentativeName: data.responsavel_legal !== undefined && data.responsavel_legal !== null
+          ? String(data.responsavel_legal)
+          : (mapped.responsavel_legal || mapped.legalRepresentativeName || local.responsavel_legal || local.legalRepresentativeName || ''),
+        responsavel_legal: data.responsavel_legal !== undefined && data.responsavel_legal !== null
+          ? String(data.responsavel_legal)
+          : (mapped.responsavel_legal || mapped.legalRepresentativeName || local.responsavel_legal || local.legalRepresentativeName || ''),
+        nome_responsavel: data.responsavel_legal !== undefined && data.responsavel_legal !== null
+          ? String(data.responsavel_legal)
+          : (mapped.responsavel_legal || mapped.legalRepresentativeName || local.responsavel_legal || local.legalRepresentativeName || ''),
+        legalRepresentativeDoc: data.cpf_responsavel !== undefined && data.cpf_responsavel !== null
+          ? String(data.cpf_responsavel)
+          : (mapped.cpf_responsavel || mapped.legalRepresentativeDoc || local.cpf_responsavel || local.legalRepresentativeDoc || ''),
+        cpf_responsavel: data.cpf_responsavel !== undefined && data.cpf_responsavel !== null
+          ? String(data.cpf_responsavel)
+          : (mapped.cpf_responsavel || mapped.legalRepresentativeDoc || local.cpf_responsavel || local.legalRepresentativeDoc || ''),
+        documento_responsavel: data.cpf_responsavel !== undefined && data.cpf_responsavel !== null
+          ? String(data.cpf_responsavel)
+          : (mapped.cpf_responsavel || mapped.legalRepresentativeDoc || local.cpf_responsavel || local.legalRepresentativeDoc || ''),
         ultimo_numero_nfe: data.ultimo_numero_nfe !== null && data.ultimo_numero_nfe !== undefined 
           ? Number(data.ultimo_numero_nfe) 
           : (mapped.ultimo_numero_nfe ?? local.ultimo_numero_nfe ?? 0),
@@ -572,6 +621,22 @@ export async function saveCompanyData(data: CompanyFiscalData): Promise<{ succes
         .select()
         .single();
 
+      // Se falhar porque a coluna cpf_responsavel não existe no schema da tabela emitente
+      if (updateError && (updateError.code === 'PGRST204' || updateError.message?.includes('cpf_responsavel'))) {
+        const payloadWithoutCpf = { ...dbPayload };
+        delete (payloadWithoutCpf as any).cpf_responsavel;
+        const retry = await db
+          .from('emitente')
+          .update(payloadWithoutCpf)
+          .eq('id', existing.id)
+          .select()
+          .single();
+        if (!retry.error && retry.data) {
+          updated = retry.data;
+          updateError = null;
+        }
+      }
+
       // Fallback gracioso com colunas essenciais caso alguma coluna extra (como dados bancários) não exista
       if (updateError) {
         console.warn('UPDATE emitente completo falhou, tentando colunas essenciais:', updateError.message);
@@ -590,7 +655,8 @@ export async function saveCompanyData(data: CompanyFiscalData): Promise<{ succes
           proximo_numero_sequencial: dbPayload.proximo_numero_sequencial,
           prefixo_cotacao: dbPayload.prefixo_cotacao,
           ultimo_numero_nfe: dbPayload.ultimo_numero_nfe,
-          serie_nfe: dbPayload.serie_nfe
+          serie_nfe: dbPayload.serie_nfe,
+          responsavel_legal: dbPayload.responsavel_legal
         };
         const fbRes = await db
           .from('emitente')
@@ -609,6 +675,10 @@ export async function saveCompanyData(data: CompanyFiscalData): Promise<{ succes
         const result = {
           ...payload,
           ...mapSupabaseToCompany(updated),
+          legalRepresentativeName: payload.legalRepresentativeName || payload.responsavel_legal || updated.responsavel_legal || '',
+          responsavel_legal: payload.responsavel_legal || payload.legalRepresentativeName || updated.responsavel_legal || '',
+          legalRepresentativeDoc: payload.legalRepresentativeDoc || payload.cpf_responsavel || '',
+          cpf_responsavel: payload.cpf_responsavel || payload.legalRepresentativeDoc || '',
           id: updated.id
         };
         if (typeof localStorage !== 'undefined') {
@@ -622,6 +692,16 @@ export async function saveCompanyData(data: CompanyFiscalData): Promise<{ succes
         .insert([dbPayload])
         .select()
         .single();
+
+      if (insertError && (insertError.code === 'PGRST204' || insertError.message?.includes('cpf_responsavel'))) {
+        const payloadWithoutCpf = { ...dbPayload };
+        delete (payloadWithoutCpf as any).cpf_responsavel;
+        const retryIns = await db.from('emitente').insert([payloadWithoutCpf]).select().single();
+        if (!retryIns.error && retryIns.data) {
+          inserted = retryIns.data;
+          insertError = null;
+        }
+      }
 
       if (insertError) {
         const essentialPayload = {
@@ -639,7 +719,8 @@ export async function saveCompanyData(data: CompanyFiscalData): Promise<{ succes
           proximo_numero_sequencial: dbPayload.proximo_numero_sequencial,
           prefixo_cotacao: dbPayload.prefixo_cotacao,
           ultimo_numero_nfe: dbPayload.ultimo_numero_nfe,
-          serie_nfe: dbPayload.serie_nfe
+          serie_nfe: dbPayload.serie_nfe,
+          responsavel_legal: dbPayload.responsavel_legal
         };
         const fbIns = await db.from('emitente').insert([essentialPayload]).select().single();
         if (!fbIns.error && fbIns.data) {
@@ -652,6 +733,10 @@ export async function saveCompanyData(data: CompanyFiscalData): Promise<{ succes
         const result = {
           ...payload,
           ...mapSupabaseToCompany(inserted),
+          legalRepresentativeName: payload.legalRepresentativeName || payload.responsavel_legal || inserted.responsavel_legal || '',
+          responsavel_legal: payload.responsavel_legal || payload.legalRepresentativeName || inserted.responsavel_legal || '',
+          legalRepresentativeDoc: payload.legalRepresentativeDoc || payload.cpf_responsavel || '',
+          cpf_responsavel: payload.cpf_responsavel || payload.legalRepresentativeDoc || '',
           id: inserted.id
         };
         if (typeof localStorage !== 'undefined') {

@@ -444,6 +444,8 @@ export interface CompanyFiscalData {
   telefone_1?: string;
   telefone_2?: string;
   logradouro?: string;
+  responsavel_legal?: string;
+  cpf_responsavel?: string;
 
   // Aliases em português para integração direta com Supabase
   tipo_pessoa?: string;

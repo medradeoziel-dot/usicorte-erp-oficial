@@ -154,13 +154,24 @@ export default function CompanySettingsModule({ onBackToDashboard }: CompanySett
     }
   };
 
+  const handleRepresentativeNameChange = (value: string) => {
+    setFormData(prev => ({
+      ...prev,
+      legalRepresentativeName: value,
+      responsavel_legal: value,
+      nome_responsavel: value
+    }));
+  };
+
   const handleRepresentativeDocChange = (value: string) => {
     const clean = value.replace(/\D/g, '');
-    if (clean.length <= 11) {
-      setFormData(prev => ({ ...prev, legalRepresentativeDoc: formatCPF(clean) }));
-    } else {
-      setFormData(prev => ({ ...prev, legalRepresentativeDoc: formatCNPJ(clean) }));
-    }
+    const formatted = clean.length <= 11 ? formatCPF(clean) : formatCNPJ(clean);
+    setFormData(prev => ({ 
+      ...prev, 
+      legalRepresentativeDoc: formatted,
+      cpf_responsavel: formatted,
+      documento_responsavel: formatted
+    }));
   };
 
   const handleCepSearch = async () => {
@@ -741,9 +752,9 @@ export default function CompanySettingsModule({ onBackToDashboard }: CompanySett
                   <label className="text-xs font-semibold text-slate-300">Nome do Responsável Legal</label>
                   <input
                     type="text"
-                    value={formData.legalRepresentativeName || ''}
-                    onChange={(e) => handleInputChange('legalRepresentativeName', e.target.value)}
-                    placeholder="MARCOS MARTINS"
+                    value={formData.responsavel_legal !== undefined && formData.responsavel_legal !== null ? formData.responsavel_legal : (formData.legalRepresentativeName || '')}
+                    onChange={(e) => handleRepresentativeNameChange(e.target.value)}
+                    placeholder="Digite o nome do responsável"
                     className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm outline-none focus:border-blue-500 text-slate-100 font-semibold"
                   />
                 </div>
@@ -752,9 +763,9 @@ export default function CompanySettingsModule({ onBackToDashboard }: CompanySett
                   <label className="text-xs font-semibold text-slate-300">CPF / CNPJ do Representante</label>
                   <input
                     type="text"
-                    value={formData.legalRepresentativeDoc || ''}
+                    value={formData.cpf_responsavel !== undefined && formData.cpf_responsavel !== null ? formData.cpf_responsavel : (formData.legalRepresentativeDoc || '')}
                     onChange={(e) => handleRepresentativeDocChange(e.target.value)}
-                    placeholder="092.345.510/0001-94"
+                    placeholder="000.000.000-00"
                     className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm outline-none focus:border-blue-500 text-slate-100 font-mono"
                   />
                 </div>
