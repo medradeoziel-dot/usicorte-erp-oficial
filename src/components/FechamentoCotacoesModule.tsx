@@ -578,6 +578,24 @@ export default function FechamentoCotacoesModule({
     setIsExtratoModalOpen(true);
   };
 
+  // Sincroniza classes no body durante a impressão com a modal aberta (incluindo atalho Ctrl+P)
+  useEffect(() => {
+    if (!isExtratoModalOpen) return;
+    const handleBeforePrint = () => {
+      document.body.classList.add('print-fechamento', 'print-extrato');
+    };
+    const handleAfterPrint = () => {
+      document.body.classList.remove('print-fechamento', 'print-extrato');
+    };
+    window.addEventListener('beforeprint', handleBeforePrint);
+    window.addEventListener('afterprint', handleAfterPrint);
+    return () => {
+      window.removeEventListener('beforeprint', handleBeforePrint);
+      window.removeEventListener('afterprint', handleAfterPrint);
+      document.body.classList.remove('print-fechamento', 'print-extrato');
+    };
+  }, [isExtratoModalOpen]);
+
   // Ação: Imprimir Extrato A4 Formatado em CSS @media print
   const handleImprimirExtrato = () => {
     document.body.classList.remove(
@@ -590,15 +608,20 @@ export default function FechamentoCotacoesModule({
     );
     document.body.classList.add('print-fechamento', 'print-extrato');
 
+    const originalTitle = document.title;
+    const nomeCli = selectedClientInfo?.fantasyName || selectedClientInfo?.name || selectedQuotes[0]?.cliente || 'Cliente';
+    document.title = `Extrato_Cobranca_${String(nomeCli).replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+
     const onAfterPrint = () => {
       document.body.classList.remove('print-fechamento', 'print-extrato');
+      document.title = originalTitle;
       window.removeEventListener('afterprint', onAfterPrint);
     };
     window.addEventListener('afterprint', onAfterPrint);
 
     setTimeout(() => {
       window.print();
-    }, 150);
+    }, 200);
   };
 
   // Ação: Abrir Modal de Baixa de Pagamento
@@ -1337,8 +1360,8 @@ export default function FechamentoCotacoesModule({
 
       {/* 5. MODAL DE PRÉ-VISUALIZAÇÃO DINÂMICA DO EXTRATO DE COBRANÇA (A4 / PDF) */}
       {isExtratoModalOpen && (
-        <div className="extrato-modal-overlay fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 overflow-y-auto print:static print:p-0 print:m-0 print:bg-transparent">
-          <div className="extrato-modal-content bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[95vh] flex flex-col overflow-hidden shadow-2xl print:bg-transparent print:border-none print:border-t-0 print:shadow-none print:max-h-none print:w-full print:rounded-none">
+        <div className="extrato-modal-overlay fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 overflow-y-auto print:static print:p-0 print:m-0 print:bg-transparent print:overflow-visible print:h-auto print:max-h-none print:transform-none">
+          <div className="extrato-modal-content bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[95vh] flex flex-col overflow-hidden shadow-2xl print:bg-transparent print:border-none print:border-t-0 print:shadow-none print:max-h-none print:w-full print:rounded-none print:overflow-visible print:h-auto print:transform-none">
             {/* Topo Modal */}
             <div className="extrato-modal-header p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950 shrink-0 no-print btn-no-print">
               <div className="flex items-center gap-2">
@@ -1381,8 +1404,8 @@ export default function FechamentoCotacoesModule({
             </div>
 
             {/* Conteúdo do Extrato Formatado para A4 */}
-            <div className="extrato-modal-scroll flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-800/40 print:p-0 print:m-0 print:bg-transparent">
-              <div className="extrato-modal-card-wrapper bg-white rounded-xl shadow-2xl border border-slate-300 overflow-hidden print:border-none print:border-t-0 print:shadow-none print:rounded-none print:p-0 print:m-0">
+            <div className="extrato-modal-scroll flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-800/40 print:p-0 print:m-0 print:bg-transparent print:overflow-visible print:h-auto print:max-h-none">
+              <div className="extrato-modal-card-wrapper bg-white rounded-xl shadow-2xl border border-slate-300 overflow-hidden print:border-none print:border-t-0 print:shadow-none print:rounded-none print:p-0 print:m-0 print:overflow-visible print:h-auto print:max-h-none">
                 <ExtratoCobrancaPrint 
                   cotacoes={selectedQuotes}
                   clienteInfo={selectedClientInfo}

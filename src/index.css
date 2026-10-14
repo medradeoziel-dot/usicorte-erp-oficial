@@ -24,7 +24,7 @@
      Oculta rigorosamente toda a interface principal do sistema (inputs, botões, formulários, controles visuais)
      e exibe exclusivamente a área do relatório formatado */
   body * {
-    visibility: hidden;
+    visibility: hidden !important;
   }
 
   /* Exibe exclusivamente a área do relatório formatado */
@@ -35,8 +35,12 @@
   #container-impressao-vendas,
   #container-impressao-vendas *,
   #container-impressao-danfe,
-  #container-impressao-danfe * {
-    visibility: visible;
+  #container-impressao-danfe *,
+  .extrato-print-area,
+  .extrato-print-area *,
+  .secao-extrato,
+  .secao-extrato * {
+    visibility: visible !important;
   }
 
   #print-area,
@@ -55,10 +59,35 @@
     max-height: none !important;
   }
 
-  html, body, #root, #app-root, main, .print-container {
+  /* Contêiner isolado de impressão do Extrato de Cobrança */
+  .extrato-print-area {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    background: white !important;
+    box-shadow: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Remove overflow, transform e altura fixa durante impressão */
+  html, body, #root, #app-root, main, .print-container,
+  .extrato-modal-overlay,
+  .extrato-modal-content,
+  .extrato-modal-scroll,
+  .extrato-modal-card-wrapper {
     overflow: visible !important;
     height: auto !important;
+    min-height: 0 !important;
     max-height: none !important;
+    transform: none !important;
+    filter: none !important;
+    backdrop-filter: none !important;
   }
   
   .no-print {
@@ -471,20 +500,43 @@
   body.print-extrato .extrato-modal-overlay,
   body.print-extrato .extrato-modal-content,
   body.print-extrato .extrato-modal-scroll,
-  body.print-extrato .extrato-modal-card-wrapper {
+  body.print-extrato .extrato-modal-card-wrapper,
+  .extrato-modal-overlay,
+  .extrato-modal-content,
+  .extrato-modal-scroll,
+  .extrato-modal-card-wrapper {
     position: static !important;
-    background: #ffffff !important;
+    background: transparent !important;
     border: none !important;
     box-shadow: none !important;
     padding: 0 !important;
     margin: 0 !important;
     max-height: none !important;
     height: auto !important;
+    min-height: 0 !important;
     width: 100% !important;
     overflow: visible !important;
+    transform: none !important;
+    filter: none !important;
+    backdrop-filter: none !important;
+  }
+
+  /* Exibe o conteúdo da folha do extrato */
+  .extrato-print-area,
+  .extrato-print-area *,
+  body.print-fechamento .extrato-print-area,
+  body.print-fechamento .extrato-print-area *,
+  body.print-extrato .extrato-print-area,
+  body.print-extrato .extrato-print-area *,
+  body.print-fechamento .secao-extrato,
+  body.print-fechamento .secao-extrato *,
+  body.print-extrato .secao-extrato,
+  body.print-extrato .secao-extrato * {
+    visibility: visible !important;
   }
 
   /* Contêiner principal e blocos do Extrato de Cobrança (sem altura fixa, sem margens sobrando) */
+  .extrato-print-area,
   body.print-fechamento .secao-extrato,
   body.print-extrato .secao-extrato,
   .secao-extrato {

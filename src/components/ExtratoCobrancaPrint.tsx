@@ -120,15 +120,29 @@ export default function ExtratoCobrancaPrint({
   const hasPaymentInfo = hasPix || hasBank || Boolean(instrucoesPagamento);
 
   return (
-    <div className="secao-extrato bg-white text-black p-6 sm:p-8 max-w-[850px] mx-auto font-sans leading-relaxed text-xs print:p-0 print:m-0 print:max-w-none print:w-full print:h-auto print:overflow-visible">
+    <div className="extrato-print-area secao-extrato bg-white text-black p-6 sm:p-8 max-w-[850px] mx-auto font-sans leading-relaxed text-xs print:p-0 print:m-0 print:max-w-none print:w-full print:h-auto print:overflow-visible">
       {/* Regras de impressão específicas para garantir página única / sem páginas em branco extras */}
       <style>{`
         @media print {
-          .secao-extrato {
+          /* Oculta o fundo da aplicação e overlays da modal */
+          body * {
+            visibility: hidden !important;
+          }
+          /* Exibe apenas o conteúdo da folha do extrato */
+          .extrato-print-area, .extrato-print-area * {
+            visibility: visible !important;
+          }
+          .extrato-print-area {
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important;
             height: auto !important;
             min-height: 0 !important;
             max-height: none !important;
             overflow: visible !important;
+            background: white !important;
+            box-shadow: none !important;
             margin: 0 !important;
             padding: 0 !important;
             page-break-after: avoid !important;
