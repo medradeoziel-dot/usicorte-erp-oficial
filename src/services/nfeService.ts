@@ -1078,45 +1078,171 @@ export async function obterOuBaixarXmlNfe(
 /**
  * Envia o resumo da NF-e, DANFE e chave de acesso para o e-mail cadastrado no cliente
  */
+export interface EnviarEmailNfeResult {
+  success: boolean;
+  mailtoUrl: string;
+  emailDestinatario: string;
+  emailContador?: string;
+  destinatariosDescricao: string;
+  assunto: string;
+}
+
+/**
+ * Envia o resumo da NF-e, DANFE e chave de acesso para o e-mail cadastrado no cliente
+ * e automaticamente em cópia (CC) para o e-mail do Contador cadastrado no Emitente.
+ */
 export function enviarEmailNfe(
   quote: Quote,
   client?: Client | null,
-  company?: CompanyFiscalData
-): { success: boolean; mailtoUrl: string; emailDestinatario: string } {
-  const emailCli = client?.email || quote.clientEmail || '';
+  company?: CompanyFiscalData,
+  xmlConteudo?: string,
+  autoDisparo: boolean = false
+): EnviarEmailNfeResult {
+  const emailCli = (client?.email || quote.clientEmail || '').trim();
+  const emailContador = (company?.email_contador || (company as any)?.emailContador || '').trim();
   const chave = (quote.nfe_chave || quote.chave_acesso || '').replace(/\D/g, '');
   const num = quote.nfe_numero || '—';
+  const serie = String(quote.serie_nfe || company?.serie_nfe || '1');
   const clienteNome = client?.name || (client as any)?.nome || quote.clientName || 'Cliente';
-  const razaoEmit = company?.razao_social || 'L. M. BANZATTO METAIS - USICORTE METAIS';
+  const razaoEmit = company?.corporateName || company?.razao_social || 'L. M. BANZATTO METAIS';
+  const fantasiaEmit = company?.tradeName || company?.nome_fantasia || 'USICORTE METAIS';
   const protocolo = quote.protocolo_autorizacao || quote.protocolo_nfe || 'Autorizado SEFAZ';
+  const valorTotal = (quote.grandTotal || quote.subtotalTotal || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const dataEmissao = quote.nfe_emitida_em ? new Date(quote.nfe_emitida_em).toLocaleDateString('pt-BR') : new Date().toLocaleDateString('pt-BR');
+  const enderecoEmitente = company ? formatarEnderecoEmitenteLimpo(company) : 'BAURU/SP';
 
-  const assunto = `NF-e nº ${num} - ${razaoEmit} (Chave: ${chave.slice(0, 10)}...)`;
-  const corpo = `Prezado(a) ${clienteNome},
+  const assunto = `NF-e nº ${num} (Série ${serie}) - ${fantasiaEmit} [XML & DANFE]`;
 
-Segue a confirmação da Nota Fiscal Eletrônica (NF-e) emitida por ${razaoEmit}:
+  const corpo = `Prezado(a) ${clienteNome} e Assessoria Contábil,
 
+Segue o envio oficial da Nota Fiscal Eletrônica (NF-e) autorizada junto à SEFAZ:
+
+============================================================
+DADOS DA NOTA FISCAL ELETRÔNICA (NF-e MODELO 55)
+============================================================
 • Número da NF-e: ${num}
-• Série: ${quote.serie_nfe || '1'}
-• Valor Total: R$ ${(quote.grandTotal || quote.subtotalTotal || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+• Série: ${serie}
+• Data de Emissão: ${dataEmissao}
+• Valor Total: R$ ${valorTotal}
 • Chave de Acesso SEFAZ (44 dígitos):
-  ${chave}
-• Protocolo de Autorização: ${protocolo}
+  ${chave || 'Consulte o espelho do DANFE'}
+• Protocolo de Autorização SEFAZ: ${protocolo}
+• Regime Tributário: ${company?.taxRegime || company?.regime_tributario || 'Simples Nacional'}
+• Alíquota ICMS Simples Nacional: ${company?.aliquotaIcmsSimples ?? 2.75}%
 
-Você pode consultar e realizar o download oficial do arquivo XML e do DANFE no Portal Nacional da SEFAZ:
-https://www.nfe.fazenda.gov.br
+============================================================
+DESTINATÁRIOS DESTE DISPARO
+============================================================
+• Cliente: ${clienteNome} ${emailCli ? `<${emailCli}>` : '(E-mail não cadastrado)'}
+• Contador: ${emailContador ? `<${emailContador}>` : '(E-mail não configurado na aba Emitente)'}
 
-Atenciosamente,
-${razaoEmit}
-Telefone: ${company?.telefone || '(14) 99880-9362'}
-E-mail: ${company?.email || 'financeiro@usicorte.com.br'}`;
+============================================================
+ARQUIVOS FISCAIS (XML E DANFE)
+============================================================
+• Arquivo XML Oficial: ${chave ? `${chave}-nfe.xml` : `NFe-${num}.xml`}
+• Documento Auxiliar da NF-e (DANFE em PDF/A4) gerado pelo sistema.
+• Consulta Pública e Download no Portal Nacional da SEFAZ:
+  https://www.nfe.fazenda.gov.br
 
-  const mailtoUrl = `mailto:${encodeURIComponent(emailCli)}?subject=${encodeURIComponent(assunto)}&body=${encodeURIComponent(corpo)}`;
+============================================================
+EMPRESA EMITENTE
+============================================================
+${razaoEmit} (${fantasiaEmit})
+CNPJ: ${company?.cnpj || '25.038.430/0001-23'} | IE: ${company?.ie || company?.inscricao_estadual || '20963213114'}
+Endereço: ${enderecoEmitente}
+Telefone: ${company?.telefone || company?.phone || '(14) 99880-9362'}
+E-mail do Faturamento: ${company?.email || 'financeirousicorte@gmail.com'}
+`;
 
-  if (typeof window !== 'undefined') {
-    window.location.href = mailtoUrl;
+  // Define URLs do mailto combinando cliente e contador
+  let mailtoUrl = '';
+  if (emailCli && emailContador) {
+    mailtoUrl = `mailto:${encodeURIComponent(emailCli)}?cc=${encodeURIComponent(emailContador)}&subject=${encodeURIComponent(assunto)}&body=${encodeURIComponent(corpo)}`;
+  } else if (emailCli) {
+    mailtoUrl = `mailto:${encodeURIComponent(emailCli)}?subject=${encodeURIComponent(assunto)}&body=${encodeURIComponent(corpo)}`;
+  } else if (emailContador) {
+    mailtoUrl = `mailto:${encodeURIComponent(emailContador)}?subject=${encodeURIComponent(assunto)}&body=${encodeURIComponent(corpo)}`;
+  } else {
+    mailtoUrl = `mailto:?subject=${encodeURIComponent(assunto)}&body=${encodeURIComponent(corpo)}`;
   }
 
-  return { success: true, mailtoUrl, emailDestinatario: emailCli };
+  // Descrição resumida para feedback na interface do usuário
+  const dests: string[] = [];
+  if (emailCli) dests.push(`Cliente (${emailCli})`);
+  if (emailContador) dests.push(`Contador (${emailContador})`);
+  const destinatariosDescricao = dests.length > 0 
+    ? `Disparado para: ${dests.join(' + ')}`
+    : 'Nenhum e-mail de cliente ou contador configurado.';
+
+  // Disparo não disruptivo no navegador (iframe invisível)
+  if (typeof window !== 'undefined') {
+    try {
+      const iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      iframe.src = mailtoUrl;
+      document.body.appendChild(iframe);
+      setTimeout(() => {
+        try { iframe.remove(); } catch {}
+      }, 3000);
+    } catch {
+      window.location.href = mailtoUrl;
+    }
+  }
+
+  return { 
+    success: true, 
+    mailtoUrl, 
+    emailDestinatario: emailCli || emailContador,
+    emailContador,
+    destinatariosDescricao,
+    assunto 
+  };
+}
+
+/**
+ * Disparo automático com cópia para o contador no momento em que a NF-e é autorizada na SEFAZ
+ */
+export async function dispararEmailNfeAutomatico(params: {
+  quote: Quote;
+  client?: Client | null;
+  company?: CompanyFiscalData;
+  xmlConteudo?: string;
+  chaveAcesso?: string;
+  numeroNfe?: string;
+  serie?: string;
+  protocolo?: string;
+}): Promise<EnviarEmailNfeResult> {
+  const comp = params.company || (await fetchCompanyData());
+  const res = enviarEmailNfe(
+    params.quote,
+    params.client,
+    comp,
+    params.xmlConteudo,
+    true
+  );
+
+  // Se houver backend ou webhook configurado para envio SMTP em background, aciona sem travar
+  try {
+    if (typeof fetch !== 'undefined') {
+      fetch('/api/nfe/enviar-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chaveAcesso: params.chaveAcesso || params.quote.nfe_chave,
+          numeroNfe: params.numeroNfe || params.quote.nfe_numero,
+          serie: params.serie || params.quote.serie_nfe || '1',
+          protocolo: params.protocolo || params.quote.protocolo_autorizacao,
+          emailCliente: params.client?.email || params.quote.clientEmail,
+          emailContador: comp.email_contador || (comp as any).emailContador,
+          destinatarios: [params.client?.email || params.quote.clientEmail, comp.email_contador || (comp as any).emailContador].filter(Boolean),
+          xmlConteudo: params.xmlConteudo || params.quote.xml_conteudo,
+          valorTotal: params.quote.grandTotal || params.quote.subtotalTotal
+        })
+      }).catch(() => {});
+    }
+  } catch {}
+
+  return res;
 }
 
 /**

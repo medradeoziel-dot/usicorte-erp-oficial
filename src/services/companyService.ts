@@ -28,6 +28,8 @@ export const DEFAULT_COMPANY_DATA: CompanyFiscalData = {
 
   // 3. Contato e Mídia
   email: 'financeirousicorte@gmail.com',
+  email_contador: '',
+  emailContador: '',
   website: 'WWW.USICORTEMETAIS.COM.BR',
   phone: '(14) 99880-9362',
   mobile: '(14) 99819-6873',
@@ -231,6 +233,8 @@ export function mapSupabaseToCompany(row: any): CompanyFiscalData {
     countryCode: row.codigo_pais || row.country_code || row.countryCode || DEFAULT_COMPANY_DATA.countryCode,
 
     email: row.email || row.e_mail || DEFAULT_COMPANY_DATA.email,
+    email_contador: row.email_contador || row.emailContador || '',
+    emailContador: row.email_contador || row.emailContador || '',
     website: row.website || row.site || DEFAULT_COMPANY_DATA.website,
     phone: row.telefone || row.phone || DEFAULT_COMPANY_DATA.phone,
     mobile: row.celular || row.mobile || row.whatsapp || DEFAULT_COMPANY_DATA.mobile,
@@ -352,6 +356,7 @@ export function mapCompanyToSupabase(data: CompanyFiscalData): Record<string, an
     ie: data.ie || data.inscricao_estadual || DEFAULT_COMPANY_DATA.ie,
     telefone: data.phone || data.telefone || DEFAULT_COMPANY_DATA.phone,
     email: data.email || DEFAULT_COMPANY_DATA.email,
+    email_contador: data.email_contador !== undefined ? data.email_contador : (data.emailContador || ''),
     endereco: fullEndereco,
     cidade: data.city || data.cidade || DEFAULT_COMPANY_DATA.city,
     estado: (data.state || data.uf || DEFAULT_COMPANY_DATA.state).toUpperCase(),
@@ -459,6 +464,12 @@ export async function fetchCompanyData(forceFresh: boolean = false): Promise<Com
         tradeName: mapped.tradeName,
         cnpj: mapped.cnpj,
         ie: mapped.ie,
+        email_contador: data.email_contador !== null && data.email_contador !== undefined 
+          ? String(data.email_contador) 
+          : (mapped.email_contador || local.email_contador || ''),
+        emailContador: data.email_contador !== null && data.email_contador !== undefined 
+          ? String(data.email_contador) 
+          : (mapped.emailContador || local.emailContador || ''),
         chavePix: data.chave_pix !== null && data.chave_pix !== undefined ? data.chave_pix : (mapped.chavePix ?? local.chavePix),
         tipoChavePix: data.tipo_chave_pix !== null && data.tipo_chave_pix !== undefined ? data.tipo_chave_pix : (mapped.tipoChavePix ?? local.tipoChavePix),
         favorecidoPix: data.favorecido_pix !== null && data.favorecido_pix !== undefined ? data.favorecido_pix : (mapped.favorecidoPix ?? local.favorecidoPix),
@@ -517,7 +528,9 @@ export async function fetchCompanyData(forceFresh: boolean = false): Promise<Com
 export async function saveCompanyData(data: CompanyFiscalData): Promise<{ success: boolean; data: CompanyFiscalData; error?: any }> {
   // 1. Salva imediatamente no LocalStorage
   const payload = { ...data, updated_at: new Date().toISOString() };
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+  if (typeof localStorage !== 'undefined') {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+  }
 
   // Dispara evento global para que todos os componentes (cabeçalho, relatórios, etc.) atualizem imediatamente
   if (typeof window !== 'undefined') {
@@ -553,6 +566,7 @@ export async function saveCompanyData(data: CompanyFiscalData): Promise<{ succes
           ie: dbPayload.ie,
           telefone: dbPayload.telefone,
           email: dbPayload.email,
+          email_contador: dbPayload.email_contador,
           endereco: dbPayload.endereco,
           cidade: dbPayload.cidade,
           estado: dbPayload.estado,
@@ -581,7 +595,9 @@ export async function saveCompanyData(data: CompanyFiscalData): Promise<{ succes
           ...mapSupabaseToCompany(updated),
           id: updated.id
         };
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(result));
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(result));
+        }
         return { success: true, data: result };
       }
     } else {
@@ -599,6 +615,7 @@ export async function saveCompanyData(data: CompanyFiscalData): Promise<{ succes
           ie: dbPayload.ie,
           telefone: dbPayload.telefone,
           email: dbPayload.email,
+          email_contador: dbPayload.email_contador,
           endereco: dbPayload.endereco,
           cidade: dbPayload.cidade,
           estado: dbPayload.estado,
@@ -621,7 +638,9 @@ export async function saveCompanyData(data: CompanyFiscalData): Promise<{ succes
           ...mapSupabaseToCompany(inserted),
           id: inserted.id
         };
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(result));
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(result));
+        }
         return { success: true, data: result };
       }
     }

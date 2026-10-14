@@ -299,13 +299,9 @@ export default function DanfeEspelhoA4Modal({
   };
 
   const handleEnviarEmail = () => {
-    const res = enviarEmailNfe(currentQuoteState, client, company);
-    if (res.emailDestinatario) {
-      setEmailFeedback(`Cliente: ${res.emailDestinatario}`);
-    } else {
-      setEmailFeedback('Cliente sem e-mail cadastrado (aberto cliente padrão)');
-    }
-    setTimeout(() => setEmailFeedback(null), 4000);
+    const res = enviarEmailNfe(currentQuoteState, client, company, currentQuoteState.xml_conteudo);
+    setEmailFeedback(res.destinatariosDescricao || (res.emailDestinatario ? `Destinatário: ${res.emailDestinatario}` : 'Nenhum e-mail configurado'));
+    setTimeout(() => setEmailFeedback(null), 7000);
   };
 
   const handleOpenNewTab = async () => {

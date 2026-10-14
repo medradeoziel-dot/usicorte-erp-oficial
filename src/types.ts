@@ -406,6 +406,8 @@ export interface CompanyFiscalData {
 
   // Contato e Mídia
   email: string; // E-mail (financeirousicorte@gmail.com)
+  email_contador?: string; // E-mail do Contador (Envio automático de XML e DANFE da NF-e)
+  emailContador?: string;
   website?: string; // Website (WWW.USICORTEMETAIS.COM.BR)
   phone: string; // Telefone ((14) 99880-9362)
   mobile?: string; // Celular / WhatsApp ((14) 99819-6873)

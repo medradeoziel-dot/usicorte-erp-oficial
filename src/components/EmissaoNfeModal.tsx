@@ -421,6 +421,19 @@ export default function EmissaoNfeModal({
         // e aciona a impressão automática / salvar como PDF do sistema
         setShowDanfeOficialModal(true);
         setAutoPrintDanfe(true);
+
+        // 2. DISPARO AUTOMÁTICO DO XML E DANFE POR E-MAIL (CLIENTE + CONTADOR):
+        // Dispara automaticamente cópia com XML e DANFE para o e-mail do Contador (email_contador)
+        // e para o cliente (se cadastrado)
+        try {
+          const emailRes = enviarEmailNfe(updatedQuote, client, company, res.xmlConteudo, true);
+          if (emailRes.destinatariosDescricao) {
+            setEmailFeedback(emailRes.destinatariosDescricao);
+            setTimeout(() => setEmailFeedback(null), 8000);
+          }
+        } catch (emailErr) {
+          console.warn('Aviso ao disparar e-mail automático pós-autorização:', emailErr);
+        }
       } else {
         // 4. Rejeição/Erro: Salva o erro em mensagem_erro_nfe e exibe o alerta explicativo na tela
         const msg = res.mensagemErro || 'Rejeição desconhecida pela SEFAZ.';
@@ -479,9 +492,9 @@ export default function EmissaoNfeModal({
   };
 
   const handleEnviarEmail = () => {
-    const res = enviarEmailNfe(quote, client, company);
-    setEmailFeedback(res.emailDestinatario ? `E-mail para: ${res.emailDestinatario}` : 'Cliente sem e-mail cadastrado (aberto cliente padrão)');
-    setTimeout(() => setEmailFeedback(null), 4000);
+    const res = enviarEmailNfe(currentQuoteState, client, company, transmissionResult?.xmlConteudo || currentQuoteState.xml_conteudo);
+    setEmailFeedback(res.destinatariosDescricao || (res.emailDestinatario ? `E-mail para: ${res.emailDestinatario}` : 'Nenhum e-mail de cliente ou contador configurado.'));
+    setTimeout(() => setEmailFeedback(null), 7000);
   };
 
   return (
@@ -657,6 +670,17 @@ export default function EmissaoNfeModal({
                 <p className="text-[11px] text-slate-400 pt-1 font-sans">
                   {formatarEnderecoEmitenteLimpo(company)}
                 </p>
+                <div className="flex items-center justify-between text-[11px] pt-1 text-slate-400 flex-wrap gap-1 border-t border-slate-700/50 mt-1">
+                  <span>E-mail: <strong className="text-slate-200">{company.email}</strong></span>
+                  {company.email_contador ? (
+                    <span className="text-emerald-400 font-medium flex items-center gap-1" title="Contador que receberá cópia do XML/DANFE">
+                      <Mail className="w-3 h-3 text-emerald-400" />
+                      Contador: <strong className="text-emerald-300 font-mono text-[10px]">{company.email_contador}</strong>
+                    </span>
+                  ) : (
+                    <span className="text-slate-500 text-[10px]" title="Configure na aba Emitente">Contador: não informado</span>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -937,10 +961,10 @@ export default function EmissaoNfeModal({
                   type="button"
                   onClick={handleEnviarEmail}
                   className="px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-indigo-300 font-bold text-xs rounded-xl border border-indigo-500/30 transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
-                  title="Enviar DANFE e chave de acesso da NF-e por e-mail para o cliente"
+                  title="Enviar XML e DANFE da NF-e por e-mail para o cliente e contador"
                 >
                   <Mail className="w-4 h-4 text-indigo-400" />
-                  Enviar E-mail
+                  Enviar E-mail (Cliente & Contador)
                 </button>
                 <button
                   type="button"

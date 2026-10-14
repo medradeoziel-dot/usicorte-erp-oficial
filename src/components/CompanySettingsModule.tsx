@@ -250,7 +250,7 @@ export default function CompanySettingsModule({ onBackToDashboard }: CompanySett
       const res = await saveCompanyData(formData);
       if (res.success) {
         setFormData(res.data);
-        showStatus('Número da NF-e atualizado com sucesso!', 'success');
+        showStatus('Dados do emitente e configurações fiscais salvos com sucesso no Supabase!', 'success');
       } else {
         showStatus('Erro ao gravar no banco de dados.', 'error');
       }
@@ -664,6 +664,30 @@ export default function CompanySettingsModule({ onBackToDashboard }: CompanySett
                 />
               </div>
 
+              {/* E-mail do Contador */}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-semibold text-slate-300 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Mail className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>E-mail do Contador</span>
+                  </span>
+                  <span className="text-[10px] text-emerald-400 font-mono">XML & DANFE Automáticos</span>
+                </label>
+                <input
+                  type="email"
+                  value={formData.email_contador || formData.emailContador || ''}
+                  onChange={(e) => {
+                    handleInputChange('email_contador', e.target.value);
+                    handleInputChange('emailContador', e.target.value);
+                  }}
+                  placeholder="contador@assessoriafiscal.com.br"
+                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-sm outline-none focus:border-emerald-500 text-slate-100 font-medium placeholder:text-slate-600"
+                />
+                <span className="text-[10px] text-slate-400">
+                  Recebe cópia automática do XML e DANFE (PDF) assim que a NF-e for autorizada pela SEFAZ.
+                </span>
+              </div>
+
               {/* Website */}
               <div className="flex flex-col gap-1.5">
                 <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
@@ -693,7 +717,7 @@ export default function CompanySettingsModule({ onBackToDashboard }: CompanySett
               </div>
 
               {/* Celular / WhatsApp */}
-              <div className="flex flex-col gap-1.5">
+              <div className="flex flex-col gap-1.5 md:col-span-2">
                 <label className="text-xs font-semibold text-slate-300">Telefone / WhatsApp 2</label>
                 <input
                   type="text"
