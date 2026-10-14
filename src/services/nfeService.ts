@@ -61,6 +61,18 @@ export interface DadosEmitenteNfe {
   email?: string;
   regimeTributario: string;
   aliquotaIcmsSimples?: number;
+  email_contato?: string;
+  telefone_1?: string;
+  telefone_2?: string;
+  logradouro?: string;
+  razao_social?: string;
+  nome_fantasia?: string;
+  corporateName?: string;
+  tradeName?: string;
+  street?: string;
+  phone?: string;
+  mobile?: string;
+  celular?: string;
 }
 
 export interface DadosDestinatarioNfe {
@@ -2025,6 +2037,21 @@ export function gerarDanfeHtml(
   const ibptEst = totalProdutos * 0.0495;
   const creditoInfo = calcularCreditoIcmsSimples(valorTotal, emitente.aliquotaIcmsSimples || 2.75);
 
+  const { logradouro: emitenteLogradouro, numero: emitenteNumero, bairro: emitenteBairro } = extrairComponentesEndereco(
+    emitente.logradouro || emitente.street || emitente.endereco,
+    emitente.numero,
+    emitente.bairro
+  );
+  const emitenteCidade = (emitente.cidade || 'BAURU').toUpperCase();
+  const emitenteUf = (emitente.uf || 'SP').toUpperCase();
+  const emitenteCep = emitente.cep || '17031-350';
+  const emitenteEmail = emitente.email_contato || emitente.email || 'vendas.usicorte@gmail.com';
+  const emitenteTel1 = emitente.telefone_1 || emitente.telefone || emitente.phone || '(14) 99880-9362';
+  const emitenteTel2 = emitente.telefone_2 || emitente.celular || emitente.mobile || '';
+  const emitenteTelefones = [emitenteTel1, emitenteTel2].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(' / ');
+  const emitenteRazao = emitente.razaoSocial || emitente.razao_social || emitente.corporateName || 'L. M. BANZATTO METAIS';
+  const emitenteFantasia = emitente.nomeFantasia || emitente.nome_fantasia || emitente.tradeName || 'USICORTE METAIS';
+
   const resolvedXml = xmlConteudo || (!isPrevia ? gerarXmlNfe(emitente, destinatario, itens, numeroNfe, serie, chaveAcesso, valorTotal, dataEmissao, protocolo) : '');
 
   const nomeArquivoPdf = obterNomePadraoDanfePdf(numeroNfe, chaveAcesso);
@@ -2187,14 +2214,14 @@ export function gerarDanfeHtml(
             <div style="text-align: center; margin-bottom: 4px;">
               <img src="/logo-usicorte.png" alt="Logo UsiCorte Metais" style="max-height: 38px; height: 36px; width: auto; margin: 0 auto; display: block;" onerror="this.style.display='none'" />
             </div>
-            <div style="font-size: 11px; font-weight: 900; text-transform: uppercase; color: #000; line-height: 1.2;">L. M. BANZATTO METAIS</div>
-            <div style="font-size: 9.5px; font-weight: 800; color: #b91c1c; text-transform: uppercase; margin-top: 2px; line-height: 1.2;">USICORTE METAIS</div>
+            <div style="font-size: 11px; font-weight: 900; text-transform: uppercase; color: #000; line-height: 1.2;">${emitenteRazao}</div>
+            <div style="font-size: 9.5px; font-weight: 800; color: #b91c1c; text-transform: uppercase; margin-top: 2px; line-height: 1.2;">${emitenteFantasia}</div>
             <div style="margin: 6px 0;"></div>
             <div style="font-size: 7.5px; color: #222; line-height: 1.35; text-align: center;">
-              <div>RUA CORONEL INON CESAR PIMENTEL, 3-41</div>
-              <div>PARQUE PAULISTA</div>
-              <div>BAURU - SP - CEP: 17031-350</div>
-              <div style="font-weight: 600; color: #000;">Fone: (14) 99880-9362 • Email: financeiro@usicorte.com.br</div>
+              <div>${emitenteLogradouro}${emitenteNumero && emitenteNumero !== 'S/N' ? `, ${emitenteNumero}` : ''}</div>
+              <div>${emitenteBairro}</div>
+              <div>${emitenteCidade} - ${emitenteUf} - CEP: ${emitenteCep}</div>
+              <div style="font-weight: 600; color: #000;">Fone: ${emitenteTelefones || '(14) 99880-9362'} • Email: ${emitenteEmail}</div>
             </div>
           </td>
           <td style="width: 22%; text-align: center; padding: 4px; border-right: 1px solid #000; vertical-align: middle; background: #fafafa;">
@@ -2592,7 +2619,7 @@ export async function abrirDanfeEmNovaAba(
   }
 
   try {
-    const emitente = await fetchCompanyData();
+    const emitente = await fetchCompanyData(true);
     const cliDanfe = await fetchClienteCompletoParaDanfe(quote, client);
     const clienteUf = (cliDanfe.uf || quote.clientState || 'SP').toUpperCase();
     const itensFiscais = prepararItensFiscais(quote.items, clienteUf);
@@ -2684,7 +2711,7 @@ export async function gerarPreDanfeHtml(
   duplicatas?: DuplicataDanfe[],
   isAVista?: boolean
 ): Promise<string> {
-  const emitente = await fetchCompanyData();
+  const emitente = await fetchCompanyData(true);
   const cliDanfe = await fetchClienteCompletoParaDanfe(quote, client);
   const clienteUf = (cliDanfe.uf || quote.clientState || 'SP').toUpperCase();
   const itensFiscais = prepararItensFiscais(quote.items, clienteUf);

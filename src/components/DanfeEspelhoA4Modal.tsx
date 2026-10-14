@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Quote, Client } from '../types';
-import { CompanyFiscalData, DEFAULT_COMPANY_DATA, getLocalCompanyData } from '../services/companyService';
+import { CompanyFiscalData, DEFAULT_COMPANY_DATA, getLocalCompanyData, fetchCompanyData } from '../services/companyService';
 import DanfeEspelhoA4 from './DanfeEspelhoA4';
 import { 
   abrirDanfeEmNovaAba, 
@@ -103,16 +103,29 @@ export default function DanfeEspelhoA4Modal({
     return String((company.ultimo_numero_nfe || 0) + 1).padStart(6, '0');
   }, [quote, company]);
 
-  // Carrega os dados oficiais da empresa emitente
+  // Carrega os dados oficiais da empresa emitente do Supabase
   useEffect(() => {
+    let isMounted = true;
     if (initialCompany) {
       setCompany(initialCompany);
     } else {
       setCompany(getLocalCompanyData());
     }
 
+    async function carregarEmitenteSupabase() {
+      try {
+        const fresh = await fetchCompanyData(true);
+        if (isMounted && fresh) {
+          setCompany(fresh);
+        }
+      } catch (err) {
+        console.warn('Erro ao carregar emitente do Supabase no modal DANFE:', err);
+      }
+    }
+    carregarEmitenteSupabase();
+
     const handleCompanyUpdate = (e: CustomEvent) => {
-      if (e.detail) {
+      if (e.detail && isMounted) {
         setCompany(prev => ({
           ...prev,
           ...e.detail,
@@ -121,7 +134,10 @@ export default function DanfeEspelhoA4Modal({
       }
     };
     window.addEventListener('company-data-updated', handleCompanyUpdate as EventListener);
-    return () => window.removeEventListener('company-data-updated', handleCompanyUpdate as EventListener);
+    return () => {
+      isMounted = false;
+      window.removeEventListener('company-data-updated', handleCompanyUpdate as EventListener);
+    };
   }, [initialCompany, isOpen]);
 
   // 1. Busca Completa do Cliente no Supabase usando cliente_id ou nome

@@ -22,7 +22,7 @@ import {
 import CancelarNfeModal from './CancelarNfeModal';
 import DanfeEspelhoA4Modal from './DanfeEspelhoA4Modal';
 import { updateCotacaoNfeStatusDb, fetchItensByCotacaoId, db } from '../lib/db';
-import { fetchCompanyData, CompanyFiscalData, DEFAULT_COMPANY_DATA, updateEmitenteNfeConfig, formatarEnderecoEmitenteLimpo } from '../services/companyService';
+import { fetchCompanyData, CompanyFiscalData, DEFAULT_COMPANY_DATA, updateEmitenteNfeConfig, formatarEnderecoEmitenteLimpo, extrairComponentesEndereco } from '../services/companyService';
 import { formatCurrency } from '../utils/calculator';
 import Logo from './Logo';
 import { 
@@ -1116,17 +1116,26 @@ export default function EmissaoNfeModal({
                       <Logo variant="print" className="h-8.5 w-auto max-h-10 mx-auto" />
                     </div>
                     <h2 className="font-extrabold text-[11px] leading-tight uppercase text-black">
-                      L. M. BANZATTO METAIS
+                      {company.corporateName || company.razao_social || 'L. M. BANZATTO METAIS'}
                     </h2>
                     <h3 className="font-bold text-[9.5px] text-red-700 leading-snug uppercase mt-0.5">
-                      USICORTE METAIS
+                      {company.tradeName || company.nome_fantasia || 'USICORTE METAIS'}
                     </h3>
                     <div className="my-1.5 w-full" />
                     <div className="text-[7.5px] leading-snug text-gray-800 font-normal space-y-0.5 w-full">
-                      <div>RUA CORONEL INON CESAR PIMENTEL, 3-41</div>
-                      <div>PARQUE PAULISTA</div>
-                      <div>BAURU - SP - CEP: 17031-350</div>
-                      <div className="font-medium text-gray-900">Fone: (14) 99880-9362 • Email: financeiro@usicorte.com.br</div>
+                      <div>
+                        {extrairComponentesEndereco(company.logradouro || company.street || company.endereco, company.number || company.numero, company.neighborhood || company.bairro).logradouro}
+                        {extrairComponentesEndereco(company.logradouro || company.street || company.endereco, company.number || company.numero, company.neighborhood || company.bairro).numero && extrairComponentesEndereco(company.logradouro || company.street || company.endereco, company.number || company.numero, company.neighborhood || company.bairro).numero !== 'S/N' ? `, ${extrairComponentesEndereco(company.logradouro || company.street || company.endereco, company.number || company.numero, company.neighborhood || company.bairro).numero}` : ''}
+                      </div>
+                      <div>
+                        {extrairComponentesEndereco(company.logradouro || company.street || company.endereco, company.number || company.numero, company.neighborhood || company.bairro).bairro}
+                      </div>
+                      <div>
+                        {(company.city || company.cidade || 'BAURU').toUpperCase()} - {(company.state || company.uf || 'SP').toUpperCase()} - CEP: {company.cep || '17031-350'}
+                      </div>
+                      <div className="font-medium text-gray-900">
+                        Fone: {[company.telefone_1 || company.phone || company.telefone, company.telefone_2 || company.mobile || company.celular].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(' / ') || '(14) 99880-9362'} • Email: {company.email_contato || company.email || 'vendas.usicorte@gmail.com'}
+                      </div>
                     </div>
                   </div>
 

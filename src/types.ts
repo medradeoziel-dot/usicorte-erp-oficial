@@ -439,6 +439,12 @@ export interface CompanyFiscalData {
   bancoCnpj?: string; // CNPJ do Banco
   instrucoesPagamento?: string; // Texto de Observação / Instrução (Ex: WhatsApp/E-mail para envio de comprovante)
 
+  // Campos específicos da tabela emitente do Supabase
+  email_contato?: string;
+  telefone_1?: string;
+  telefone_2?: string;
+  logradouro?: string;
+
   // Aliases em português para integração direta com Supabase
   tipo_pessoa?: string;
   razao_social?: string;

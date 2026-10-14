@@ -1,6 +1,6 @@
 import React, { useRef, useState, useEffect, useMemo } from 'react';
 import { Quote, Client } from '../types';
-import { CompanyFiscalData, DEFAULT_COMPANY_DATA } from '../services/companyService';
+import { CompanyFiscalData, DEFAULT_COMPANY_DATA, fetchCompanyData, getLocalCompanyData, extrairComponentesEndereco } from '../services/companyService';
 import { 
   ItemFiscalNfe, 
   prepararItensFiscais, 
@@ -129,35 +129,90 @@ export default function DanfeEspelhoA4({
   const isPrevia = isPreviaProp !== undefined ? isPreviaProp : (!isAutorizada && !isCancelada);
   const printRef = useRef<HTMLDivElement>(null);
 
-  // 1. Dados do Emitente
-  const rawLogradouro = company.street || company.endereco || (company as any).logradouro || 'RUA CORONEL IVON CESAR PIMENTEL';
-  const rawNumero = company.number || company.numero || '3-41';
-  const rawComplemento = company.complement || (company as any).complemento || '';
-  const rawBairro = company.neighborhood || company.bairro || 'PARQUE PAULISTA';
+  // 1. Dados Oficiais do Emitente (Carregamento direto da tabela 'emitente' do Supabase com fallback local)
+  const [currentCompany, setCurrentCompany] = useState<CompanyFiscalData>(() => company || getLocalCompanyData());
+
+  useEffect(() => {
+    let isMounted = true;
+    async function carregarEmitenteSupabase() {
+      try {
+        const fresh = await fetchCompanyData(true);
+        if (isMounted && fresh) {
+          setCurrentCompany(fresh);
+        }
+      } catch (err) {
+        console.warn('Aviso: Falha ao carregar dados frescos da tabela emitente para o DANFE:', err);
+      }
+    }
+    carregarEmitenteSupabase();
+
+    const handleCompanyUpdate = (e: CustomEvent) => {
+      if (isMounted && e.detail) {
+        setCurrentCompany(prev => ({
+          ...prev,
+          ...e.detail
+        }));
+      }
+    };
+    window.addEventListener('company-data-updated', handleCompanyUpdate as EventListener);
+    return () => {
+      isMounted = false;
+      window.removeEventListener('company-data-updated', handleCompanyUpdate as EventListener);
+    };
+  }, [company]);
+
+  // Montagem dinâmica dos componentes do endereço do Emitente
+  const { logradouro, numero, bairro } = useMemo(() => {
+    return extrairComponentesEndereco(
+      currentCompany.logradouro || currentCompany.street || currentCompany.endereco,
+      currentCompany.number || currentCompany.numero,
+      currentCompany.neighborhood || currentCompany.bairro
+    );
+  }, [currentCompany]);
+
+  const rawComplemento = currentCompany.complement || currentCompany.complemento || '';
+  const cidadeEmitente = (currentCompany.city || currentCompany.cidade || 'BAURU').toUpperCase();
+  const ufEmitente = (currentCompany.state || currentCompany.uf || 'SP').toUpperCase();
+  const cepEmitente = currentCompany.cep || '17031-350';
+
+  // Contatos dinâmicos (email_contato e telefone_1 / telefone_2)
+  const emailContatoEmitente = currentCompany.email_contato || currentCompany.email || 'vendas.usicorte@gmail.com';
+  const tel1 = currentCompany.telefone_1 || currentCompany.phone || currentCompany.telefone || '(14) 99880-9362';
+  const tel2 = currentCompany.telefone_2 || currentCompany.mobile || currentCompany.celular || '';
+  const telefonesFormatadosEmitente = [tel1, tel2].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(' / ');
 
   // 1. CORREÇÃO DO ENDEREÇO DO EMITENTE (REMOVER DUPLICAÇÕES DE TEXTO)
-  const enderecoEmitenteFormatado = montarEnderecoSemDuplicacao(
-    rawLogradouro,
-    rawNumero,
-    rawComplemento,
-    rawBairro
-  );
+  const enderecoEmitenteFormatado = useMemo(() => {
+    return montarEnderecoSemDuplicacao(
+      logradouro,
+      numero,
+      rawComplemento,
+      bairro
+    );
+  }, [logradouro, numero, rawComplemento, bairro]);
 
-  const emitente = {
-    razaoSocial: company.corporateName || company.razao_social || 'L. M. BANZATTO METAIS',
-    nomeFantasia: company.tradeName || company.nome_fantasia || 'USICORTE METAIS',
-    cnpj: company.cnpj || '25.038.430/0001-23',
-    ie: company.ie || company.inscricao_estadual || '20963213114',
+  const emitente = useMemo(() => ({
+    razaoSocial: currentCompany.corporateName || currentCompany.razao_social || 'L. M. BANZATTO METAIS',
+    nomeFantasia: currentCompany.tradeName || currentCompany.nome_fantasia || 'USICORTE METAIS',
+    cnpj: currentCompany.cnpj || '25.038.430/0001-23',
+    ie: currentCompany.ie || currentCompany.inscricao_estadual || '209632312114',
     endereco: enderecoEmitenteFormatado,
-    bairro: rawBairro,
-    cidade: company.city || company.cidade || 'BAURU',
-    uf: company.state || company.uf || 'SP',
-    cep: company.cep || '17031-190',
-    telefone: company.phone || company.telefone || '(14) 3203-2000',
-    email: company.email || 'contato@usicorte.com.br',
-    ultimo_numero_nfe: company.ultimo_numero_nfe,
-    serie_nfe: company.serie_nfe
-  };
+    logradouro,
+    numero,
+    complemento: rawComplemento,
+    bairro,
+    cidade: cidadeEmitente,
+    uf: ufEmitente,
+    cep: cepEmitente,
+    telefone: telefonesFormatadosEmitente,
+    telefones: telefonesFormatadosEmitente,
+    telefone_1: tel1,
+    telefone_2: tel2,
+    email: emailContatoEmitente,
+    email_contato: emailContatoEmitente,
+    ultimo_numero_nfe: currentCompany.ultimo_numero_nfe,
+    serie_nfe: currentCompany.serie_nfe
+  }), [currentCompany, enderecoEmitenteFormatado, logradouro, numero, rawComplemento, bairro, cidadeEmitente, ufEmitente, cepEmitente, telefonesFormatadosEmitente, tel1, tel2, emailContatoEmitente]);
 
   // 1. Linha única de endereço formatada sem sobreposição: Rua, Número, Bairro, CEP, Telefone e E-mail
   const enderecoEmitenteLinhaUnica = useMemo(() => {
@@ -784,21 +839,21 @@ export default function DanfeEspelhoA4({
               <Logo variant="print" className="h-7 w-auto max-h-8 mx-auto" />
             </div>
 
-            {/* 2. Razão Social: "L. M. BANZATTO METAIS" */}
+            {/* 2. Razão Social do Emitente */}
             <h1 className="font-extrabold text-[8.5pt] uppercase tracking-tight text-black leading-tight">
-              L. M. BANZATTO METAIS
+              {emitente.razaoSocial}
             </h1>
 
-            {/* 3. Nome Fantasia: "USICORTE METAIS" */}
+            {/* 3. Nome Fantasia do Emitente */}
             <h2 className="font-bold text-[7.5pt] text-red-700 uppercase leading-snug tracking-normal mt-0.5">
-              USICORTE METAIS
+              {emitente.nomeFantasia}
             </h2>
 
-            {/* 4. BLOCO DO ENDEREÇO E CONTATO */}
+            {/* 4. BLOCO DO ENDEREÇO E CONTATO DINÂMICOS DO EMITENTE */}
             <div className="text-[6pt] leading-tight text-gray-800 font-normal space-y-0.5 w-full mt-1">
-              <div>RUA CORONEL INON CESAR PIMENTEL, 3-41</div>
-              <div>PARQUE PAULISTA - BAURU - SP - CEP: 17031-350</div>
-              <div className="text-gray-900 font-medium">Fone: (14) 99880-9362 • Email: financeiro@usicorte.com.br</div>
+              <div>{emitente.logradouro}{emitente.numero && emitente.numero !== 'S/N' ? `, ${emitente.numero}` : ''}{rawComplemento ? ` - ${rawComplemento}` : ''}</div>
+              <div>{emitente.bairro} - {emitente.cidade} - {emitente.uf} - CEP: {emitente.cep}</div>
+              <div className="text-gray-900 font-medium">Fone: {emitente.telefones || '(14) 99880-9362'} • Email: {emitente.email_contato}</div>
             </div>
           </div>
 
