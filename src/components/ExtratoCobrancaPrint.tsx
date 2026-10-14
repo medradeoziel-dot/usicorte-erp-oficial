@@ -120,8 +120,8 @@ export default function ExtratoCobrancaPrint({
   const hasPaymentInfo = hasPix || hasBank || Boolean(instrucoesPagamento);
 
   return (
-    <div className="extrato-print-area secao-extrato bg-white text-black p-6 sm:p-8 max-w-[850px] mx-auto font-sans leading-relaxed text-xs print:p-0 print:m-0 print:max-w-none print:w-full print:h-auto print:overflow-visible">
-      {/* Regras de impressão específicas para garantir página única / sem páginas em branco extras */}
+    <div className="extrato-print-area secao-extrato bg-white text-black p-6 sm:p-8 max-w-[850px] mx-auto font-sans leading-relaxed text-xs print:p-0 print:mx-auto print:my-0 print:max-w-none print:w-full print:h-auto print:overflow-visible">
+      {/* Regras de impressão específicas para garantir fluxo contínuo e sem quebras forçadas */}
       <style>{`
         @media print {
           /* Oculta o fundo da aplicação e overlays da modal */
@@ -132,23 +132,47 @@ export default function ExtratoCobrancaPrint({
           .extrato-print-area, .extrato-print-area * {
             visibility: visible !important;
           }
+          /* 1. Contêiner principal: margin 0 auto para evitar espaçamentos no topo e em novas páginas */
           .extrato-print-area {
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
+            position: relative !important;
+            left: auto !important;
+            top: auto !important;
+            margin: 0 auto !important;
+            padding: 0 !important;
             width: 100% !important;
+            max-width: 100% !important;
             height: auto !important;
             min-height: 0 !important;
             max-height: none !important;
             overflow: visible !important;
-            background: white !important;
+            background: #ffffff !important;
+            color: #000000 !important;
             box-shadow: none !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            page-break-after: avoid !important;
-            break-after: avoid !important;
+            page-break-before: auto !important;
+            page-break-after: auto !important;
+            break-before: auto !important;
+            break-after: auto !important;
           }
-          .extrato-blocos-cotacoes,
+
+          /* 2. Remove quebras forçadas: permite fluxo contínuo na seção de cotações */
+          .extrato-blocos-cotacoes {
+            height: auto !important;
+            overflow: visible !important;
+            page-break-inside: auto !important;
+            break-inside: auto !important;
+            page-break-before: auto !important;
+            page-break-after: auto !important;
+            break-before: auto !important;
+            break-after: auto !important;
+            margin-bottom: 6px !important;
+          }
+
+          /* Reduz espaçamento entre blocos sucessivos de cotação */
+          .extrato-blocos-cotacoes > * + * {
+            margin-top: 6px !important;
+          }
+
+          /* 3. Protege apenas os blocos individuais (tabelas de itens, totais, PIX, assinaturas) contra quebra interna */
           .bloco-cotacao-extrato,
           .extrato-total-geral-box,
           .extrato-pagamento-box,
@@ -157,12 +181,49 @@ export default function ExtratoCobrancaPrint({
             overflow: visible !important;
             page-break-inside: avoid !important;
             break-inside: avoid !important;
+            page-break-before: auto !important;
+            page-break-after: auto !important;
+            break-before: auto !important;
+            break-after: auto !important;
+          }
+
+          .bloco-cotacao-extrato table {
+            page-break-inside: auto !important;
+            break-inside: auto !important;
+          }
+
+          .bloco-cotacao-extrato tr {
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
+
+          /* 4. Ajuste compacto de paddings e margens para agrupamento e economia de folhas */
+          .extrato-cabecalho-superior {
+            padding-bottom: 4px !important;
+            margin-bottom: 6px !important;
+          }
+          .bloco-cotacao-extrato {
+            margin-bottom: 6px !important;
+            border-width: 1px !important;
+          }
+          .bloco-cotacao-extrato th,
+          .bloco-cotacao-extrato td {
+            padding: 2px 5px !important;
+            font-size: 8.5pt !important;
+            line-height: 1.25 !important;
+          }
+          .extrato-total-geral-box {
+            padding: 5px 8px !important;
+            margin-bottom: 6px !important;
+          }
+          .extrato-pagamento-box {
+            padding: 5px 8px !important;
+            margin-bottom: 6px !important;
           }
           .extrato-assinaturas {
+            padding-top: 6px !important;
+            margin-top: 6px !important;
             margin-bottom: 0 !important;
-            padding-bottom: 0 !important;
-            page-break-after: avoid !important;
-            break-after: avoid !important;
           }
         }
       `}</style>
@@ -238,7 +299,7 @@ export default function ExtratoCobrancaPrint({
       {/* ========================================================
           B) CORPO DO EXTRATO (BLOCOS DE COTAÇÕES SELECIONADAS)
           ======================================================== */}
-      <div className="extrato-blocos-cotacoes space-y-4 print:space-y-4 mb-4">
+      <div className="extrato-blocos-cotacoes space-y-4 print:space-y-2 mb-4 print:mb-2">
         {cotacoes.map((quote, qIndex) => {
           const items = (quote.itens && quote.itens.length > 0)
             ? quote.itens
@@ -258,11 +319,11 @@ export default function ExtratoCobrancaPrint({
           return (
             <div 
               key={quote.id || quote.numero || qIndex}
-              className="bloco-cotacao-extrato border-2 border-slate-400 rounded-lg overflow-hidden bg-white shadow-sm print:shadow-none print:border-slate-400 print:rounded"
+              className="bloco-cotacao-extrato border-2 border-slate-400 rounded-lg overflow-hidden bg-white shadow-sm print:shadow-none print:border print:border-slate-400 print:rounded print:mb-2"
               style={{ pageBreakInside: 'avoid', breakInside: 'avoid' }}
             >
               {/* Barra de título do bloco: "COTAÇÃO: [N°] | DATA: [Data]" */}
-              <div className="bg-slate-800 text-white px-3.5 py-1.5 flex items-center justify-between text-xs font-bold uppercase tracking-wider print:bg-slate-800 print:text-white">
+              <div className="bg-slate-800 text-white px-3.5 py-1.5 flex items-center justify-between text-xs font-bold uppercase tracking-wider print:bg-slate-800 print:text-white print:px-2.5 print:py-1 print:text-[10.5px]">
                 <div className="flex items-center gap-2">
                   <span className="font-mono text-[12px] font-black text-white">
                     COTAÇÃO: {quote.numero}
@@ -280,16 +341,16 @@ export default function ExtratoCobrancaPrint({
               </div>
 
               {/* Tabela de itens com colunas: PRODUTO / MATERIAL, MEDIDAS, DESCRIÇÃO, INFORMAÇÕES, UNITÁRIO, QTD e SUBTOTAL */}
-              <table className="w-full border-collapse text-left text-xs">
+              <table className="w-full border-collapse text-left text-xs print:text-[10px]">
                 <thead>
-                  <tr className="bg-slate-100 text-slate-900 border-b border-slate-300 font-bold uppercase text-[9.5px]">
-                    <th className="border border-slate-300 px-2.5 py-1.5 text-left">PRODUTO / MATERIAL</th>
-                    <th className="border border-slate-300 px-2 py-1.5 text-left w-24">MEDIDAS</th>
-                    <th className="border border-slate-300 px-2.5 py-1.5 text-left">DESCRIÇÃO</th>
-                    <th className="border border-slate-300 px-2 py-1.5 text-left w-28">INFORMAÇÕES</th>
-                    <th className="border border-slate-300 px-2 py-1.5 text-right w-20">UNITÁRIO</th>
-                    <th className="border border-slate-300 px-2 py-1.5 text-center w-14">QTD</th>
-                    <th className="border border-slate-300 px-2.5 py-1.5 text-right w-24">SUBTOTAL</th>
+                  <tr className="bg-slate-100 text-slate-900 border-b border-slate-300 font-bold uppercase text-[9.5px] print:text-[8.5px]">
+                    <th className="border border-slate-300 px-2.5 py-1.5 print:px-1.5 print:py-0.5 text-left">PRODUTO / MATERIAL</th>
+                    <th className="border border-slate-300 px-2 py-1.5 print:px-1.5 print:py-0.5 text-left w-24">MEDIDAS</th>
+                    <th className="border border-slate-300 px-2.5 py-1.5 print:px-1.5 print:py-0.5 text-left">DESCRIÇÃO</th>
+                    <th className="border border-slate-300 px-2 py-1.5 print:px-1.5 print:py-0.5 text-left w-28">INFORMAÇÕES</th>
+                    <th className="border border-slate-300 px-2 py-1.5 print:px-1.5 print:py-0.5 text-right w-20">UNITÁRIO</th>
+                    <th className="border border-slate-300 px-2 py-1.5 print:px-1.5 print:py-0.5 text-center w-14">QTD</th>
+                    <th className="border border-slate-300 px-2.5 py-1.5 print:px-1.5 print:py-0.5 text-right w-24">SUBTOTAL</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -298,25 +359,25 @@ export default function ExtratoCobrancaPrint({
                       key={item.id || iIdx} 
                       className={`border-b border-slate-200 ${iIdx % 2 === 0 ? 'bg-white' : 'bg-slate-50/60'}`}
                     >
-                      <td className="border border-slate-300 px-2.5 py-1.5 font-bold text-slate-900 uppercase text-[10.5px]">
+                      <td className="border border-slate-300 px-2.5 py-1.5 print:px-1.5 print:py-0.5 font-bold text-slate-900 uppercase text-[10.5px] print:text-[9.5px]">
                         {item.produto}
                       </td>
-                      <td className="border border-slate-300 px-2 py-1.5 font-mono text-slate-800 text-[10px]">
+                      <td className="border border-slate-300 px-2 py-1.5 print:px-1 print:py-0.5 font-mono text-slate-800 text-[10px] print:text-[9px]">
                         {item.medida || '—'}
                       </td>
-                      <td className="border border-slate-300 px-2.5 py-1.5 text-slate-700 text-[10.5px]">
+                      <td className="border border-slate-300 px-2.5 py-1.5 print:px-1.5 print:py-0.5 text-slate-700 text-[10.5px] print:text-[9.5px]">
                         {item.descricao || 'Item industrial'}
                       </td>
-                      <td className="border border-slate-300 px-2 py-1.5 text-slate-600 text-[10px]">
+                      <td className="border border-slate-300 px-2 py-1.5 print:px-1.5 print:py-0.5 text-slate-600 text-[10px] print:text-[8.5px]">
                         {item.info || '—'}
                       </td>
-                      <td className="border border-slate-300 px-2 py-1.5 text-right font-mono text-slate-800 text-[10.5px] whitespace-nowrap">
+                      <td className="border border-slate-300 px-2 py-1.5 print:px-1.5 print:py-0.5 text-right font-mono text-slate-800 text-[10.5px] print:text-[9.5px] whitespace-nowrap">
                         {formatCurrency(item.unitario)}
                       </td>
-                      <td className="border border-slate-300 px-2 py-1.5 text-center font-mono font-bold text-slate-900 text-[10.5px]">
+                      <td className="border border-slate-300 px-2 py-1.5 print:px-1 print:py-0.5 text-center font-mono font-bold text-slate-900 text-[10.5px] print:text-[9.5px]">
                         {item.qtd}
                       </td>
-                      <td className="border border-slate-300 px-2.5 py-1.5 text-right font-mono font-bold text-slate-950 text-[10.5px] whitespace-nowrap">
+                      <td className="border border-slate-300 px-2.5 py-1.5 print:px-1.5 print:py-0.5 text-right font-mono font-bold text-slate-950 text-[10.5px] print:text-[9.5px] whitespace-nowrap">
                         {formatCurrency(item.subtotal)}
                       </td>
                     </tr>
@@ -325,7 +386,7 @@ export default function ExtratoCobrancaPrint({
               </table>
 
               {/* Barra de totais do bloco: "ITENS: [N°] TOTAL PEÇAS: [Qtd Peças] PC" e "TOTAL: R$ [Valor]" */}
-              <div className="bg-slate-100 border-t border-slate-300 px-3 py-1.5 flex items-center justify-between text-xs font-bold text-slate-800">
+              <div className="bg-slate-100 border-t border-slate-300 px-3 py-1.5 print:px-2.5 print:py-1 flex items-center justify-between text-xs print:text-[10px] font-bold text-slate-800">
                 <div className="flex items-center gap-3">
                   <span>ITENS: <span className="font-mono text-slate-900">{items.length}</span></span>
                   <span className="text-slate-400">|</span>
@@ -337,7 +398,7 @@ export default function ExtratoCobrancaPrint({
               </div>
 
               {/* Rodapé do bloco com as observações: "Validade da proposta: 10 dias | Prazo de entrega: A combinar após aprovação" e o "VALOR TOTAL: R$ [Valor]" */}
-              <div className="bg-slate-50 border-t border-slate-300 px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-700">
+              <div className="bg-slate-50 border-t border-slate-300 px-3 py-1.5 print:px-2.5 print:py-0.5 flex flex-wrap items-center justify-between gap-2 text-[10px] print:text-[9px] text-slate-700">
                 <div className="italic text-slate-600">
                   Validade da proposta: 10 dias | Prazo de entrega: A combinar após aprovação
                 </div>
@@ -351,7 +412,7 @@ export default function ExtratoCobrancaPrint({
       </div>
 
       {/* Destaque Consolidado do Total Geral a Cobrar */}
-      <div className="extrato-total-geral-box border-2 border-slate-900 rounded-lg p-3.5 mb-4 bg-slate-900 text-white flex items-center justify-between shadow-sm print:bg-slate-50 print:border-slate-900 print:text-slate-900 print:p-2.5 print:mb-3">
+      <div className="extrato-total-geral-box border-2 border-slate-900 rounded-lg p-3.5 mb-4 bg-slate-900 text-white flex items-center justify-between shadow-sm print:bg-slate-50 print:border-slate-900 print:text-slate-900 print:p-2 print:mb-2">
         <div>
           <span className="text-xs uppercase font-bold tracking-widest text-slate-300 print:text-slate-700 block">
             Valor Total Geral do Extrato ({cotacoes.length} {cotacoes.length === 1 ? 'Cotação' : 'Cotações'})
@@ -361,7 +422,7 @@ export default function ExtratoCobrancaPrint({
           </span>
         </div>
         <div className="text-right">
-          <span className="text-2xl sm:text-3xl font-black font-mono tracking-tight text-white print:text-slate-950">
+          <span className="text-2xl sm:text-3xl font-black font-mono tracking-tight text-white print:text-slate-950 print:text-xl">
             {formatCurrency(totalValor)}
           </span>
         </div>
@@ -369,27 +430,27 @@ export default function ExtratoCobrancaPrint({
 
       {/* Informações Bancárias & Chave PIX da Empresa Emitente */}
       {hasPaymentInfo && (
-        <div className="extrato-pagamento-box border border-slate-300 rounded-lg p-3 mb-4 bg-slate-50 print:bg-slate-50 print:border-slate-300 print:mb-3">
-          <div className="text-[11px] font-bold uppercase tracking-wider text-slate-900 border-b border-slate-300 pb-1 mb-2">
+        <div className="extrato-pagamento-box border border-slate-300 rounded-lg p-3 mb-4 bg-slate-50 print:bg-slate-50 print:border-slate-300 print:p-2 print:mb-2">
+          <div className="text-[11px] font-bold uppercase tracking-wider text-slate-900 border-b border-slate-300 pb-1 mb-2 print:pb-0.5 print:mb-1.5 print:text-[10px]">
             💳 Informações para Pagamento & Chave PIX
           </div>
 
-          <div className="flex flex-col sm:flex-row gap-3 text-xs">
+          <div className="flex flex-col sm:flex-row gap-3 text-xs print:gap-2">
             {hasPix && (
-              <div className="flex-1 bg-white border border-slate-200 rounded p-2.5">
-                <div className="text-[10px] font-bold uppercase text-slate-600 mb-0.5">Chave PIX Oficial</div>
+              <div className="flex-1 bg-white border border-slate-200 rounded p-2.5 print:p-1.5 print:border-slate-300">
+                <div className="text-[10px] font-bold uppercase text-slate-600 mb-0.5 print:text-[9px]">Chave PIX Oficial</div>
                 {chavePix && (
-                  <div className="text-sm font-mono font-black text-slate-900 select-all">
+                  <div className="text-sm font-mono font-black text-slate-900 select-all print:text-xs">
                     {chavePix}
                   </div>
                 )}
                 {tipoChavePix && (
-                  <div className="text-[9.5px] text-slate-600 mt-1">
+                  <div className="text-[9.5px] text-slate-600 mt-1 print:mt-0.5 print:text-[9px]">
                     Tipo da Chave: <strong>{tipoChavePix}</strong>
                   </div>
                 )}
                 {favorecidoPix && (
-                  <div className="text-[9.5px] text-slate-600 mt-0.5">
+                  <div className="text-[9.5px] text-slate-600 mt-0.5 print:text-[9px]">
                     Favorecido: <strong>{favorecidoPix}</strong>
                   </div>
                 )}
@@ -397,14 +458,14 @@ export default function ExtratoCobrancaPrint({
             )}
 
             {hasBank && (
-              <div className="flex-1 bg-white border border-slate-200 rounded p-2.5">
-                <div className="text-[10px] font-bold uppercase text-slate-600 mb-0.5">Dados Bancários / Transferência</div>
+              <div className="flex-1 bg-white border border-slate-200 rounded p-2.5 print:p-1.5 print:border-slate-300">
+                <div className="text-[10px] font-bold uppercase text-slate-600 mb-0.5 print:text-[9px]">Dados Bancários / Transferência</div>
                 {dadosBancariosCustom ? (
-                  <div className="text-xs text-slate-900 font-semibold leading-relaxed">
+                  <div className="text-xs text-slate-900 font-semibold leading-relaxed print:text-[10px]">
                     {dadosBancariosCustom}
                   </div>
                 ) : (
-                  <div className="text-xs text-slate-900 space-y-0.5 leading-relaxed">
+                  <div className="text-xs text-slate-900 space-y-0.5 leading-relaxed print:text-[9.5px]">
                     {bancoNome && <div>Banco: <strong>{bancoNome}</strong></div>}
                     <div className="flex flex-wrap gap-x-3">
                       {bancoAgencia && <span>Agência: <strong>{bancoAgencia}</strong></span>}
@@ -419,7 +480,7 @@ export default function ExtratoCobrancaPrint({
           </div>
 
           {instrucoesPagamento && (
-            <div className="mt-2 text-[10px] text-slate-700 bg-amber-50 border border-amber-200 rounded p-2">
+            <div className="mt-2 text-[10px] text-slate-700 bg-amber-50 border border-amber-200 rounded p-2 print:p-1.5 print:mt-1 print:text-[9px]">
               📌 <strong>Importante:</strong> {instrucoesPagamento}
             </div>
           )}
@@ -428,24 +489,24 @@ export default function ExtratoCobrancaPrint({
 
       {/* Observações Complementares */}
       {observacoesExtrato && (
-        <div className="border border-slate-300 rounded p-2.5 mb-4 print:mb-2 print:p-2 text-xs text-slate-700 bg-white">
-          <strong className="text-slate-900 block mb-0.5 text-[10.5px] uppercase">Observações Complementares:</strong>
+        <div className="border border-slate-300 rounded p-2.5 mb-4 print:mb-2 print:p-1.5 text-xs text-slate-700 bg-white print:text-[9.5px]">
+          <strong className="text-slate-900 block mb-0.5 text-[10.5px] uppercase print:text-[9.5px]">Observações Complementares:</strong>
           <p className="whitespace-pre-line">{observacoesExtrato}</p>
         </div>
       )}
 
       {/* Assinaturas / Termo de Conferência */}
-      <div className="extrato-assinaturas flex flex-row justify-between gap-8 pt-5 mt-4 print:pt-3 print:mt-2 print:mb-0 border-t border-slate-300 text-center text-xs">
+      <div className="extrato-assinaturas flex flex-row justify-between gap-8 pt-5 mt-4 print:pt-2.5 print:mt-2 print:mb-0 border-t border-slate-300 text-center text-xs">
         <div className="flex-1">
           <div className="border-b border-slate-400 w-4/5 mx-auto mb-1"></div>
-          <div className="font-bold text-slate-900">{companyData.tradeName || 'USICORTE METAIS'}</div>
-          <div className="text-[10px] text-slate-600">Departamento Financeiro / Vendas</div>
+          <div className="font-bold text-slate-900 print:text-[11px]">{companyData.tradeName || 'USICORTE METAIS'}</div>
+          <div className="text-[10px] text-slate-600 print:text-[9px]">Departamento Financeiro / Vendas</div>
         </div>
 
         <div className="flex-1">
           <div className="border-b border-slate-400 w-4/5 mx-auto mb-1"></div>
-          <div className="font-bold text-slate-900 uppercase">{nomeClienteDisplay}</div>
-          <div className="text-[10px] text-slate-600">Conferência & De Acordo</div>
+          <div className="font-bold text-slate-900 uppercase print:text-[11px]">{nomeClienteDisplay}</div>
+          <div className="text-[10px] text-slate-600 print:text-[9px]">Conferência & De Acordo</div>
         </div>
       </div>
     </div>

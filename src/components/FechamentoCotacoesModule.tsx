@@ -860,10 +860,23 @@ export default function FechamentoCotacoesModule({
             overflow: visible !important;
           }
 
-          /* Evita que blocos de cotação sejam cortados entre páginas ao imprimir */
-          .bloco-cotacao-extrato {
+          /* Permite fluxo contínuo na listagem de cotações, evitando quebras forçadas e folhas em branco intermediárias */
+          .extrato-blocos-cotacoes {
+            page-break-inside: auto !important;
+            break-inside: auto !important;
+            height: auto !important;
+            overflow: visible !important;
+          }
+
+          /* Evita que blocos individuais de cotação, total e pagamento sejam cortados entre páginas ao imprimir */
+          .bloco-cotacao-extrato,
+          .extrato-total-geral-box,
+          .extrato-pagamento-box,
+          .extrato-assinaturas {
             page-break-inside: avoid !important;
             break-inside: avoid !important;
+            height: auto !important;
+            overflow: visible !important;
           }
         }
       `}</style>
