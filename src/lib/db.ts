@@ -1804,25 +1804,25 @@ export async function updateCotacaoStatusDb(
   let updateQuery;
   if (targetId && isUuid(targetId)) {
     updateQuery = db.from('cotacoes').update(payload).eq('id', targetId);
-  } else if (targetId) {
-    updateQuery = db.from('cotacoes').update(payload).or(`id.eq.${targetId},numero.eq.${targetId}`);
   } else if (targetNumero) {
     updateQuery = db.from('cotacoes').update(payload).eq('numero', targetNumero);
+  } else if (targetId) {
+    updateQuery = db.from('cotacoes').update(payload).eq('numero', targetId);
   } else {
     return { data: null, error: new Error('Sem identificador para atualizar cotação') };
   }
 
   let { data, error } = await updateQuery;
 
-  // Se a coluna situacao não existir na tabela, tenta atualizar apenas status
-  if (error && (error.message?.toLowerCase().includes('situacao') || error.code === '42703')) {
-    const payloadNoSituacao = { status: statusStr, updated_at: new Date().toISOString() };
+  // Se as colunas situacao ou updated_at não existirem na tabela, tenta atualizar apenas status
+  if (error && (error.message?.toLowerCase().includes('situacao') || error.message?.toLowerCase().includes('updated_at') || error.code === '42703')) {
+    const payloadNoSituacao = { status: statusStr };
     if (targetId && isUuid(targetId)) {
       updateQuery = db.from('cotacoes').update(payloadNoSituacao).eq('id', targetId);
-    } else if (targetId) {
-      updateQuery = db.from('cotacoes').update(payloadNoSituacao).or(`id.eq.${targetId},numero.eq.${targetId}`);
     } else if (targetNumero) {
       updateQuery = db.from('cotacoes').update(payloadNoSituacao).eq('numero', targetNumero);
+    } else if (targetId) {
+      updateQuery = db.from('cotacoes').update(payloadNoSituacao).eq('numero', targetId);
     }
     const res = await updateQuery;
     data = res.data;
@@ -1832,23 +1832,25 @@ export async function updateCotacaoStatusDb(
   // Se houver restrição no banco de dados (ex: constraint de enum aceitando apenas rascunho/pendente/aprovado/rejeitado)
   if (error && (error.message?.includes('check') || error.message?.includes('invalid input') || error.code === '23514')) {
     const fallback = mapQuoteStatusToSupabase(statusStr);
-    const fallbackPayload: any = { status: fallback, situacao: situacaoStr, updated_at: new Date().toISOString() };
+    const fallbackPayload: any = { status: fallback, situacao: situacaoStr };
     if (targetId && isUuid(targetId)) {
       const retry = await db.from('cotacoes').update(fallbackPayload).eq('id', targetId);
-      error = retry.error;
-    } else if (targetId) {
-      const retry = await db.from('cotacoes').update(fallbackPayload).or(`id.eq.${targetId},numero.eq.${targetId}`);
       error = retry.error;
     } else if (targetNumero) {
       const retry = await db.from('cotacoes').update(fallbackPayload).eq('numero', targetNumero);
       error = retry.error;
+    } else if (targetId) {
+      const retry = await db.from('cotacoes').update(fallbackPayload).eq('numero', targetId);
+      error = retry.error;
     }
     if (error && (error.message?.toLowerCase().includes('situacao') || error.code === '42703')) {
-      const finalFallback = { status: fallback, updated_at: new Date().toISOString() };
+      const finalFallback = { status: fallback };
       if (targetId && isUuid(targetId)) {
         await db.from('cotacoes').update(finalFallback).eq('id', targetId);
       } else if (targetNumero) {
         await db.from('cotacoes').update(finalFallback).eq('numero', targetNumero);
+      } else if (targetId) {
+        await db.from('cotacoes').update(finalFallback).eq('numero', targetId);
       }
     }
   }

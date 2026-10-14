@@ -24,7 +24,11 @@ import {
   deleteCotacaoItemDb,
   deleteMultipleCotacoesDb,
   FetchCotacoesOptions,
-  db 
+  db,
+  supabase,
+  isUuid,
+  resolveCotacaoUuid,
+  invalidateCotacoesCache
 } from '../lib/db';
 import { executarMigracaoEmergenciaOrcamentos } from '../services/emergencyMigrationService';
 import { 
@@ -642,7 +646,7 @@ export default function ReportsModule({
 
   // Estados para alteração rápida da Situação na tabela de Consulta
   const [updatingQuoteKey, setUpdatingQuoteKey] = useState<string | null>(null);
-  const [statusToast, setStatusToast] = useState<{ message: string; type: 'success' | 'info' } | null>(null);
+  const [statusToast, setStatusToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [openStatusDropdownId, setOpenStatusDropdownId] = useState<number | 'filtro' | null>(null);
 
   // Estados para Gestão de Boletos e Alertas de Vencimento
@@ -750,55 +754,175 @@ export default function ReportsModule({
   // Manipulador para alteração rápida do status da "Situação" diretamente na tabela
   const handleStatusChange = async (item: ConsultaItem, newStatusValue: string) => {
     const targetNumero = (item.cotacao || '').trim();
-    const targetId = item.cotacaoId ? String(item.cotacaoId).trim() : '';
+    let targetId = item.cotacaoId ? String(item.cotacaoId).trim() : '';
     const newStatus = normalizeStatus(newStatusValue);
     const keyForSpinner = targetNumero || targetId || String(item.idVer);
 
-    // 1. Atualização OTIMISTA Instantânea na UI (Zero Latência)
-    // Se a cotação possuir múltiplos itens agrupados sob o mesmo número, atualiza a situação de todos os itens daquela cotação.
-    setDbQuotesItems(prevItems =>
-      prevItems.map(it => {
-        const isSameQuote =
-          (targetId && it.cotacaoId && String(it.cotacaoId).trim() === targetId) ||
-          (targetNumero && it.cotacao && String(it.cotacao).trim().toLowerCase() === targetNumero.toLowerCase()) ||
-          it.idVer === item.idVer;
-
-        if (isSameQuote) {
-          return { ...it, status: newStatus as StatusProposta };
-        }
-        return it;
-      })
-    );
-
-    // Atualiza também na lista agrupada de cotações distintas
-    setSavedDbQuotes(prev =>
-      prev.map(q => {
-        const isSameQuote =
-          (targetId && q.id && String(q.id).trim() === targetId) ||
-          (targetNumero && q.numero && String(q.numero).trim().toLowerCase() === targetNumero.toLowerCase());
-        return isSameQuote ? { ...q, status: newStatus } : q;
-      })
-    );
+    // Se o status já for o mesmo, não dispara requisição
+    if (normalizeStatus(item.status) === newStatus) {
+      return;
+    }
 
     setUpdatingQuoteKey(keyForSpinner);
 
     try {
-      // 2. Atualização Persistente no Supabase
-      const { error: dbErr } = await updateCotacaoStatusDb(
-        { id: targetId || undefined, numero: targetNumero || undefined },
-        newStatus
-      );
-
-      if (dbErr) {
-        console.warn('Aviso no Supabase ao atualizar status:', dbErr);
+      // 1. Resolve UUID da cotação no Supabase caso não possua diretamente
+      if (!targetId || !isUuid(targetId)) {
+        if (targetNumero) {
+          const resolvedUuid = await resolveCotacaoUuid(targetNumero);
+          if (resolvedUuid) {
+            targetId = resolvedUuid;
+          }
+        }
       }
 
-      // 3. Desvinculado do LocalStorage para prevenir QuotaExceededError
-      try {
-        localStorage.removeItem('s_orcamentos');
-      } catch (localErr) {}
+      // 2. DISPARAR UPDATE NO SUPABASE:
+      // Executa a requisição: await supabase.from('cotacoes').update({ status: novoStatus }).eq('id', cotacaoId)
+      let updateError: any = null;
+      let updateSuccess = false;
+      const situacaoStr = newStatus === 'faturado' ? 'FATURADO' : 'ATIVA';
 
-      // 4. Se a cotação ativa atual for a mesma, atualiza seu status
+      if (targetId && isUuid(targetId)) {
+        // Tenta atualizar status e situacao por id
+        const res = await supabase
+          .from('cotacoes')
+          .update({ 
+            status: newStatus,
+            situacao: situacaoStr,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', targetId)
+          .select('id, status');
+
+        if (!res.error && res.data && res.data.length > 0) {
+          updateSuccess = true;
+        } else if (res.error) {
+          // Fallback para update simples com apenas status conforme instrução
+          const fallbackRes = await supabase
+            .from('cotacoes')
+            .update({ status: newStatus })
+            .eq('id', targetId)
+            .select('id, status');
+
+          if (!fallbackRes.error && fallbackRes.data && fallbackRes.data.length > 0) {
+            updateSuccess = true;
+          } else {
+            updateError = fallbackRes.error || res.error;
+          }
+        } else if (targetNumero) {
+          // Se não encontrou por ID mas temos numero, tenta por numero
+          const numRes = await supabase
+            .from('cotacoes')
+            .update({ status: newStatus, situacao: situacaoStr })
+            .eq('numero', targetNumero)
+            .select('id, status');
+
+          if (!numRes.error && numRes.data && numRes.data.length > 0) {
+            updateSuccess = true;
+          } else {
+            updateError = numRes.error;
+          }
+        }
+      } else if (targetNumero) {
+        // Sem UUID direto, atualiza pelo número da cotação
+        const numRes = await supabase
+          .from('cotacoes')
+          .update({ 
+            status: newStatus,
+            situacao: situacaoStr,
+            updated_at: new Date().toISOString()
+          })
+          .eq('numero', targetNumero)
+          .select('id, status');
+
+        if (!numRes.error && numRes.data && numRes.data.length > 0) {
+          updateSuccess = true;
+        } else if (numRes.error) {
+          const fb = await supabase
+            .from('cotacoes')
+            .update({ status: newStatus })
+            .eq('numero', targetNumero)
+            .select('id, status');
+
+          if (!fb.error && fb.data && fb.data.length > 0) {
+            updateSuccess = true;
+          } else {
+            updateError = fb.error || numRes.error;
+          }
+        }
+      } else {
+        updateError = new Error('Identificador da cotação não localizado para atualização.');
+      }
+
+      // TRATAMENTO DE ERRO:
+      // Caso o Supabase retorne um erro (ex: falha de permissão RLS ou nome de coluna incorreto),
+      // exibe um aviso/toast para que o usuário saiba que a alteração não foi gravada, em vez de reverter silenciosamente.
+      if (updateError || !updateSuccess) {
+        console.error('Erro retornado pelo Supabase ao atualizar status da cotação:', updateError);
+        const errorDetail = updateError?.message || 'Nenhum registro correspondente foi atualizado no Supabase.';
+        setStatusToast({
+          message: `Erro ao gravar no Supabase: ${errorDetail}. A situação não foi alterada.`,
+          type: 'error'
+        });
+        setTimeout(() => setStatusToast(null), 5000);
+        return; // Interrompe sem alterar o estado local!
+      }
+
+      // 3. ATUALIZAR O ESTADO LOCAL SOMENTE APÓS CONFIRMAÇÃO DE SUCESSO DO SUPABASE:
+      // Se a cotação possuir múltiplos itens agrupados sob o mesmo número, atualiza a situação de todos os itens daquela cotação.
+      setDbQuotesItems(prevItems =>
+        prevItems.map(it => {
+          const isSameQuote =
+            (targetId && it.cotacaoId && String(it.cotacaoId).trim() === targetId) ||
+            (targetNumero && it.cotacao && String(it.cotacao).trim().toLowerCase() === targetNumero.toLowerCase()) ||
+            it.idVer === item.idVer;
+
+          if (isSameQuote) {
+            return { ...it, status: newStatus as StatusProposta };
+          }
+          return it;
+        })
+      );
+
+      // Atualiza também na lista agrupada de cotações distintas
+      setSavedDbQuotes(prev =>
+        prev.map(q => {
+          const isSameQuote =
+            (targetId && q.id && String(q.id).trim() === targetId) ||
+            (targetNumero && q.numero && String(q.numero).trim().toLowerCase() === targetNumero.toLowerCase());
+          return isSameQuote ? { ...q, status: newStatus } : q;
+        })
+      );
+
+      // Invalida cache de memória do Supabase para manter leituras sincronizadas
+      invalidateCotacoesCache();
+
+      // Sincroniza também no LocalStorage se existir 's_orcamentos' para prevenir divergências
+      try {
+        const localRaw = localStorage.getItem('s_orcamentos');
+        if (localRaw) {
+          const localQuotes: Quote[] = JSON.parse(localRaw);
+          if (Array.isArray(localQuotes)) {
+            const mappedLocalStatus =
+              newStatus === 'aprovado' ? 'Aprovado' :
+              newStatus === 'faturado' ? 'Faturado' :
+              newStatus === 'rejeitado' ? 'Rejeitado' :
+              newStatus === 'cancelado' ? 'Cancelado' : 'Pendente';
+
+            const updatedQuotes = localQuotes.map(q => {
+              const isMatch =
+                (targetId && q.id === targetId) ||
+                (targetNumero && q.quoteNumber === targetNumero);
+              return isMatch ? { ...q, status: mappedLocalStatus as any } : q;
+            });
+            localStorage.setItem('s_orcamentos', JSON.stringify(updatedQuotes));
+          }
+        }
+      } catch (e) {
+        // silencioso
+      }
+
+      // Se a cotação ativa atual for a mesma, atualiza seu status
       setActiveQuote(prev => {
         const isSame =
           (targetId && prev.id && String(prev.id).trim() === targetId) ||
@@ -817,7 +941,7 @@ export default function ReportsModule({
         return prev;
       });
 
-      // 5. Integração com o Módulo Financeiro: Quando uma cotação for alterada para "FATURADO"
+      // Integração com o Módulo Financeiro: Quando uma cotação for alterada para "FATURADO"
       if (newStatus === 'faturado') {
         const itensDestaCotacao = dbQuotesItems.filter(it => 
           (targetId && it.cotacaoId && String(it.cotacaoId).trim() === targetId) ||
@@ -833,27 +957,28 @@ export default function ReportsModule({
           targetId || item.cotacaoId
         ).then(() => {
           fetchBoletosDb().then(b => setBoletos(b));
-          setStatusToast({
-            message: `Cotação #${targetNumero || ''} faturada! Lançamento de ${formatCurrencyPtBr(valorTotalCotacao)} registrado automaticamente no Módulo Financeiro e indicador do Dia atualizado!`,
-            type: 'success'
-          });
         }).catch(err => {
           console.warn('Aviso ao registrar faturamento automático:', err);
         });
       }
 
+      // Notifica outros módulos da alteração de status
+      try {
+        window.dispatchEvent(new CustomEvent('cotacao_status_alterado', { detail: { cotacaoId: targetId, numero: targetNumero, status: newStatus } }));
+      } catch {}
+
       setStatusToast({
-        message: `Situação da cotação ${targetNumero || 'selecionada'} alterada para ${getStatusLabel(newStatus)}.`,
+        message: `Situação da cotação #${targetNumero || 'selecionada'} alterada para "${getStatusLabel(newStatus)}" e gravada no Supabase!`,
         type: 'success'
       });
-      setTimeout(() => setStatusToast(null), 3000);
-    } catch (err) {
-      console.error('Erro ao atualizar situação no Supabase:', err);
+      setTimeout(() => setStatusToast(null), 3500);
+    } catch (err: any) {
+      console.error('Exceção ao atualizar situação no Supabase:', err);
       setStatusToast({
-        message: 'Erro ao registrar alteração no banco de dados.',
-        type: 'info'
+        message: `Erro ao comunicar com o Supabase: ${err?.message || 'Falha de conexão'}. A situação não foi alterada.`,
+        type: 'error'
       });
-      setTimeout(() => setStatusToast(null), 3000);
+      setTimeout(() => setStatusToast(null), 5000);
     } finally {
       setUpdatingQuoteKey(null);
     }
@@ -4832,62 +4957,35 @@ export default function ReportsModule({
                           </div>
                         </td>
                         <td style={{ textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
-                          {/* Elemento Interativo de Alteração Rápida de Situação com fundo claro, texto azul e bolinha colorida */}
-                          <div className="status-dropdown-wrapper relative inline-block text-left">
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setOpenStatusDropdownId(prev => prev === item.idVer ? null : item.idVer);
+                          {/* Elemento Interativo de Alteração Rápida de Situação com seletor dropdown onChange/onValueChange */}
+                          <div className="status-dropdown-wrapper relative inline-flex items-center text-left">
+                            <span className={`pointer-events-none absolute left-2.5 w-2.5 h-2.5 rounded-full shrink-0 z-10 ${getStatusOption(item.status).dotClass}`} />
+                            <select
+                              value={normalizeStatus(item.status)}
+                              onChange={(e) => {
+                                const novoStatus = e.target.value;
+                                handleStatusChange(item, novoStatus);
                               }}
+                              {...{ onValueChange: (val: string) => handleStatusChange(item, val) } as any}
                               disabled={updatingQuoteKey === (item.cotacao || item.cotacaoId || String(item.idVer))}
-                              className="btn-no-print h-[28px] px-2.5 bg-white border border-slate-300 hover:border-blue-400 rounded-md shadow-xs inline-flex items-center gap-2 cursor-pointer transition-all disabled:opacity-60 disabled:cursor-wait"
+                              className="btn-no-print h-[28px] pl-7 pr-7 bg-white hover:bg-slate-50 border border-slate-300 hover:border-blue-400 text-blue-700 font-semibold text-xs rounded-md shadow-xs cursor-pointer appearance-none transition-all focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-60 disabled:cursor-wait"
                               title="Clique para alterar a situação desta cotação"
+                              aria-label="Situação da cotação"
                             >
-                              <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${getStatusOption(item.status).dotClass}`} />
-                              <span className="text-blue-600 font-semibold text-xs whitespace-nowrap">
-                                {getStatusOption(item.status).label}
-                              </span>
-                              {updatingQuoteKey === (item.cotacao || item.cotacaoId || String(item.idVer)) ? (
-                                <Loader2 className="w-3.5 h-3.5 text-blue-600 animate-spin shrink-0 ml-0.5" />
-                              ) : (
-                                <ChevronDown className={`w-3.5 h-3.5 text-blue-600 opacity-70 shrink-0 ml-0.5 transition-transform ${openStatusDropdownId === item.idVer ? 'rotate-180' : ''}`} />
-                              )}
-                            </button>
+                              {STATUS_OPTIONS.map((opt) => (
+                                <option key={opt.value} value={opt.value} className="text-slate-800 font-medium py-1">
+                                  {opt.label}
+                                </option>
+                              ))}
+                            </select>
 
-                            {/* Dropdown Menu com Opções Padronizadas */}
-                            {openStatusDropdownId === item.idVer && (
-                              <div 
-                                className={`absolute left-0 z-50 min-w-[155px] bg-white border border-slate-200 rounded-lg shadow-xl py-1 animate-in fade-in zoom-in-95 duration-100 ${
-                                  idx >= filteredConsultaItems.length - 3 ? 'bottom-full mb-1.5' : 'top-full mt-1.5'
-                                }`}
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                {STATUS_OPTIONS.map((opt) => {
-                                  const isSelected = normalizeStatus(item.status) === opt.value;
-                                  return (
-                                    <button
-                                      key={opt.value}
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        setOpenStatusDropdownId(null);
-                                        handleStatusChange(item, opt.value);
-                                      }}
-                                      className={`w-full flex items-center justify-between px-3 py-1.5 text-left text-xs transition-colors hover:bg-blue-50 cursor-pointer ${
-                                        isSelected ? 'bg-blue-50/80 font-bold' : 'font-medium'
-                                      }`}
-                                    >
-                                      <div className="flex items-center gap-2">
-                                        <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${opt.dotClass}`} />
-                                        <span className="text-blue-600">{opt.label}</span>
-                                      </div>
-                                      {isSelected && <Check className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />}
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            )}
+                            <div className="pointer-events-none absolute right-2 flex items-center">
+                              {updatingQuoteKey === (item.cotacao || item.cotacaoId || String(item.idVer)) ? (
+                                <Loader2 className="w-3.5 h-3.5 text-blue-600 animate-spin" />
+                              ) : (
+                                <ChevronDown className="w-3.5 h-3.5 text-blue-600 opacity-70" />
+                              )}
+                            </div>
 
                             {/* Exibição para Impressão */}
                             <span className="hidden print:inline-block text-[10px] font-bold text-slate-800">
@@ -5738,9 +5836,30 @@ export default function ReportsModule({
 
       {/* Toast flutuante de confirmação de alteração rápida de Situação */}
       {statusToast && (
-        <div className="fixed bottom-6 right-6 z-50 bg-slate-900/95 text-slate-100 border border-emerald-500/50 shadow-2xl rounded-xl px-4 py-2.5 flex items-center gap-2.5 text-xs font-semibold animate-in fade-in slide-in-from-bottom-2 duration-200">
-          <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+        <div 
+          role="alert"
+          className={`fixed bottom-6 right-6 z-50 shadow-2xl rounded-xl px-4 py-3 flex items-center gap-3 text-xs font-semibold animate-in fade-in slide-in-from-bottom-2 duration-200 border ${
+            statusToast.type === 'error'
+              ? 'bg-rose-950/95 text-rose-100 border-rose-500/70'
+              : statusToast.type === 'info'
+              ? 'bg-blue-950/95 text-blue-100 border-blue-500/70'
+              : 'bg-slate-900/95 text-slate-100 border-emerald-500/60'
+          }`}
+        >
+          {statusToast.type === 'error' ? (
+            <div className="w-2.5 h-2.5 rounded-full bg-rose-500 shrink-0 animate-ping" />
+          ) : (
+            <div className="w-2 h-2 rounded-full bg-emerald-400 shrink-0 animate-pulse" />
+          )}
           <span>{statusToast.message}</span>
+          <button 
+            type="button" 
+            onClick={() => setStatusToast(null)}
+            className="ml-2 text-slate-400 hover:text-white transition-colors cursor-pointer"
+            title="Fechar aviso"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
       )}
 
