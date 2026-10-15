@@ -915,20 +915,25 @@ export function mapQuoteStatusToSupabase(status: string): 'rascunho' | 'pendente
   if (st.includes('faturad')) return 'faturado';
   if (st.includes('aprovado')) return 'aprovado';
   if (st.includes('rejeitado') || st.includes('cancelado')) return 'rejeitado';
-  if (st.includes('pendente') || st.includes('enviado')) return 'pendente';
-  return 'rascunho';
+  if (st.includes('pendente')) return 'pendente';
+  if (st.includes('enviado')) return 'pendente';
+  if (st.includes('rascunho')) return 'rascunho';
+  return 'pendente';
 }
 
-export function mapSupabaseStatusToQuote(status?: string, situacao?: string): 'Rascunho' | 'Enviado' | 'Aprovado' | 'Faturado' | 'Cancelado' {
+export function mapSupabaseStatusToQuote(status?: string, situacao?: string): 'Rascunho' | 'Enviado' | 'Aprovado' | 'Faturado' | 'Cancelado' | 'Pendente' {
   const sit = (situacao || '').toLowerCase().trim();
   if (sit === 'faturado' || sit === 'faturada' || sit === 'baixado' || sit === 'baixada') return 'Faturado';
+  if (sit === 'rascunho') return 'Rascunho';
 
   const st = (status || '').toLowerCase().trim();
   if (st === 'faturado' || st === 'faturada' || st === 'baixado' || st === 'baixada') return 'Faturado';
   if (st === 'aprovado') return 'Aprovado';
   if (st === 'rejeitado' || st === 'cancelado') return 'Cancelado';
-  if (st === 'pendente' || st === 'enviado') return 'Enviado';
-  return 'Rascunho';
+  if (st === 'pendente') return 'Pendente';
+  if (st === 'enviado') return 'Enviado';
+  if (st === 'rascunho') return 'Rascunho';
+  return 'Pendente';
 }
 
 export async function saveCotacaoDb(
@@ -937,15 +942,17 @@ export async function saveCotacaoDb(
 ): Promise<{ data: any; error: any }> {
   try {
     const isFaturado = String(quote.status || '').toLowerCase().includes('faturad') || String((quote as any).situacao || '').toUpperCase() === 'FATURADO';
+    const isRascunho = String(quote.status || '').toLowerCase().includes('rascunho') || String((quote as any).situacao || '').toUpperCase() === 'RASCUNHO';
     const cotacaoPayload: any = {
       numero: quote.quoteNumber,
+      numero_cotacao: quote.quoteNumber,
       data: quote.date || new Date().toISOString().split('T')[0],
       cliente_nome: quote.clientName || 'Cliente Balcão',
       contato: quote.contactPerson || '',
       telefone: quote.clientPhone || '',
       email: quote.clientEmail || '',
       status: mapQuoteStatusToSupabase(quote.status),
-      situacao: isFaturado ? 'FATURADO' : ((quote as any).situacao || 'ATIVA'),
+      situacao: isFaturado ? 'FATURADO' : (isRascunho ? 'RASCUNHO' : ((quote as any).situacao || 'ATIVA')),
       observacoes: quote.observations || '',
       valor_total: quote.grandTotal || quote.subtotalTotal || 0,
       cliente_id: quote.clientId && isUuid(quote.clientId) ? quote.clientId : undefined,

@@ -8,6 +8,10 @@ import {
   db,
   SupabaseCotacao
 } from '../lib/db';
+import { 
+  reservarNovaCotacaoNoSupabase, 
+  cancelarOuDescartarRascunho 
+} from '../services/cotacaoReservaService';
 import { executarMigracaoEmergenciaOrcamentos } from '../services/emergencyMigrationService';
 import { 
   formatCurrency, 
@@ -254,9 +258,15 @@ export default function SalesModule({
   const [editingQuoteCreatedAt, setEditingQuoteCreatedAt] = useState<string | null>(() => quoteToEdit?.createdAt || null);
   const [quoteForCancelNfe, setQuoteForCancelNfe] = useState<Quote | null>(null);
   const [isSavingQuote, setIsSavingQuote] = useState<boolean>(false);
+  const [isReservingQuote, setIsReservingQuote] = useState<boolean>(false);
+  const isReservingRef = useRef<boolean>(false);
 
   const editingQuoteIdRef = useRef<string | null>(quoteToEdit?.id || null);
   const editingQuoteNumberRef = useRef<string | null>(quoteToEdit?.quoteNumber || quoteToEdit?.id || null);
+  const itemsRef = useRef<QuoteItem[]>([]);
+  const quoteStatusRef = useRef<Quote['status']>('Rascunho');
+  const numeroCotacaoRef = useRef<string>('');
+  const isSavedRef = useRef<boolean>(false);
 
   // Quote header state
   const generateNextQuoteNumber = (quotesList?: Quote[]) => {
@@ -303,8 +313,11 @@ export default function SalesModule({
     const cleanNum = num.trim().toLowerCase();
     if (!cleanNum) return { exists: false };
 
-    // Se estiver editando a mesma cotação original, não considera duplicata
+    // Se estiver editando a mesma cotação original ou o rascunho reservado no banco nesta sessão, não considera duplicata
     if (originalNum && cleanNum === originalNum.trim().toLowerCase()) {
+      return { exists: false };
+    }
+    if (editingQuoteId && cleanNum === (numeroCotacao || '').trim().toLowerCase()) {
       return { exists: false };
     }
 
@@ -314,6 +327,10 @@ export default function SalesModule({
            (q.id && String(q.id).trim().toLowerCase() === cleanNum)
     );
     if (found) {
+      // Se a cotação encontrada for o próprio rascunho em edição, não é duplicata
+      if (editingQuoteId && (found.id === editingQuoteId || found.quoteNumber === numeroCotacao)) {
+        return { exists: false };
+      }
       return {
         exists: true,
         existingQuote: found,
@@ -336,20 +353,35 @@ export default function SalesModule({
     };
   };
 
-  // 1. Leitura da Numeração da Aba Emitente:
-  // Ao abrir a tela de Vendas para criar um 'Novo Orçamento', busca as configurações diretamente da tabela 'emitente' no Supabase
-  // e verifica se o número gerado já existe na tabela 'cotacoes' para sugerir o próximo sequencial livre
+  // 1. RESERVA IMEDIATA AO ABRIR A TELA (RASCUNHO AUTOMÁTICO NO SUPABASE):
+  // Ao abrir para uma nova cotação, chama supabase.rpc('gerar_proximo_numero_cotacao')
+  // e insere imediatamente o registro inicial no Supabase com status: 'RASCUNHO'.
+  // Assim, se outro computador clicar em "Nova Cotação" logo em seguida, o sistema
+  // automaticamente pulará para o próximo número (+1), eliminando qualquer colisão.
   useEffect(() => {
-    if (!editingQuoteNumberRef.current && !editingQuoteIdRef.current && !editingOriginalQuoteNumber) {
-      resolveNextUniqueQuoteNumber(savedQuotes).then(res => {
-        if (res?.quoteNumber) {
-          setAutoSuggestedNumber(res.quoteNumber);
-          setAutoSuggestedSeq(res.sequential);
-          setNumeroCotacao(res.quoteNumber);
-        }
-      }).catch(err => {
-        console.warn('Aviso ao sincronizar numeração inicial do emitente:', err);
-      });
+    if (!editingQuoteNumberRef.current && !editingQuoteIdRef.current && !editingOriginalQuoteNumber && !isReservingRef.current) {
+      isReservingRef.current = true;
+      setIsReservingQuote(true);
+      reservarNovaCotacaoNoSupabase()
+        .then(res => {
+          if (res?.numero) {
+            setNumeroCotacao(res.numero);
+            setAutoSuggestedNumber(res.numero);
+            setEditingQuoteId(res.id);
+            setEditingOriginalQuoteNumber(res.numero);
+            editingQuoteIdRef.current = res.id;
+            editingQuoteNumberRef.current = res.numero;
+            setQuoteStatus('Rascunho');
+            console.log(`[SalesModule] Reserva atômica imediata criada: Nº ${res.numero} (ID: ${res.id})`);
+          }
+        })
+        .catch(err => {
+          console.warn('[SalesModule] Falha ao reservar cotação inicial no Supabase:', err);
+        })
+        .finally(() => {
+          setIsReservingQuote(false);
+          isReservingRef.current = false;
+        });
     }
   }, []);
 
@@ -431,7 +463,10 @@ export default function SalesModule({
   const [quoteDate, setQuoteDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
   const [validityDays, setValidityDays] = useState<number>(10);
   const [paymentTerms, setPaymentTerms] = useState<string>('À Vista / Pix (3% Desc.)');
-  const [quoteStatus, setQuoteStatus] = useState<Quote['status']>('Pendente');
+  const [quoteStatus, setQuoteStatus] = useState<Quote['status']>(() => {
+    if (quoteToEdit) return quoteToEdit.status || 'Pendente';
+    return 'Rascunho';
+  });
   const [observations, setObservations] = useState<string>('Preços com impostos inclusos. Material sujeito a conferência no ato do recebimento.');
 
   // Adjustments (Discount & Shipping)
@@ -440,6 +475,69 @@ export default function SalesModule({
 
   // Items list
   const [items, setItems] = useState<QuoteItem[]>([]);
+
+  // Sincroniza refs do rascunho ativo em tempo real para os handlers de encerramento
+  editingQuoteIdRef.current = editingQuoteId;
+  editingQuoteNumberRef.current = editingOriginalQuoteNumber || numeroCotacao;
+  itemsRef.current = items;
+  quoteStatusRef.current = quoteStatus;
+  numeroCotacaoRef.current = numeroCotacao;
+
+  // E SE A TELA FOR FECHADA SEM SALVAR:
+  // 1. Ao sair/desmontar a tela do módulo de Vendas (navegação para outro menu no sistema):
+  // Se o usuário fechar a tela sem adicionar nenhum item, apaga o rascunho vazio do banco
+  // para NÃO consumir o número de sequência desnecessariamente.
+  useEffect(() => {
+    return () => {
+      const idToClean = editingQuoteIdRef.current;
+      const currentItems = itemsRef.current;
+      const currentStatus = quoteStatusRef.current;
+      const isSaved = isSavedRef.current;
+
+      if (idToClean && !isSaved && currentItems.length === 0 && (currentStatus === 'Rascunho' || (currentStatus as string) === 'RASCUNHO')) {
+        console.log(`[SalesModule] Fechando tela sem itens. Excluindo rascunho vazio ${idToClean} para liberar o número.`);
+        cancelarOuDescartarRascunho(idToClean, numeroCotacaoRef.current).catch(err => {
+          console.warn('Erro ao limpar rascunho vazio ao fechar tela:', err);
+        });
+      }
+    };
+  }, []);
+
+  // 2. Ao fechar a aba/janela do navegador ou recarregar a página (F5):
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      const idToClean = editingQuoteIdRef.current;
+      const currentItems = itemsRef.current;
+      const currentStatus = quoteStatusRef.current;
+      const isSaved = isSavedRef.current;
+
+      if (idToClean && !isSaved && currentItems.length === 0 && (currentStatus === 'Rascunho' || (currentStatus as string) === 'RASCUNHO')) {
+        const rawUrl = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_URL ? String(import.meta.env.VITE_SUPABASE_URL).trim() : '') || 'https://kyzeiroxvgbkincisrdf.supabase.co';
+        const rawKey = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_ANON_KEY ? String(import.meta.env.VITE_SUPABASE_ANON_KEY).trim() : '') || 'sb_publishable_2vCA1d0mEry_9Qy-QREVxA_aaR9IE6z';
+        const cleanUrl = rawUrl.replace(/\/$/, '');
+
+        try {
+          const deleteEndpoint = `${cleanUrl}/rest/v1/cotacoes?id=eq.${idToClean}`;
+          fetch(deleteEndpoint, {
+            method: 'DELETE',
+            headers: {
+              'apikey': rawKey,
+              'Authorization': `Bearer ${rawKey}`,
+              'Content-Type': 'application/json'
+            },
+            keepalive: true
+          }).catch(() => {});
+        } catch {}
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('pagehide', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.removeEventListener('pagehide', handleBeforeUnload);
+    };
+  }, []);
 
   // Item form state
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
@@ -2078,8 +2176,13 @@ export default function SalesModule({
     }
 
     // RESOLVE O ID CORRETO PARA ATUALIZAÇÃO (UPSERT):
-    // Ao editar uma cotação existente, garante que o sistema envie o ID correto para atualização
+    // Ao editar ou finalizar uma cotação reservada, garante que o sistema atualize o registro existente pelo ID
     const targetId = editingQuoteId || cleanNum;
+
+    // Conforme instrução: Ao clicar em "Salvar / Finalizar", altera o status de 'RASCUNHO' para 'PENDENTE' (ou 'APROVADO')
+    const finalStatus: Quote['status'] = (quoteStatus === 'Rascunho' || (quoteStatus as string) === 'RASCUNHO')
+      ? 'Pendente'
+      : quoteStatus;
 
     const currentQuoteObject: Quote = {
       id: targetId,
@@ -2095,7 +2198,7 @@ export default function SalesModule({
       date: quoteDate,
       validityDays: validityDays,
       paymentTerms: paymentTerms,
-      status: quoteStatus,
+      status: finalStatus,
       items: items,
       discount: discountAmount,
       discountPercent: 0,
@@ -2130,6 +2233,9 @@ export default function SalesModule({
       editingQuoteIdRef.current = confirmedId;
       setEditingOriginalQuoteNumber(cleanNum);
       editingQuoteNumberRef.current = cleanNum;
+      setQuoteStatus(finalStatus);
+      quoteStatusRef.current = finalStatus;
+      isSavedRef.current = true;
 
       // 3. Atualiza lista em memória e cache
       const existsIndex = savedQuotes.findIndex(
@@ -2277,6 +2383,8 @@ export default function SalesModule({
       setEditingOriginalQuoteNumber(cleanNum);
       editingQuoteNumberRef.current = cleanNum;
       setQuoteStatus('Aprovado');
+      quoteStatusRef.current = 'Aprovado';
+      isSavedRef.current = true;
 
       // Executa baixa de estoque e contas a receber
       const baixaRes = baixarEstoquePorCotacao(currentQuoteObject);
@@ -2329,20 +2437,22 @@ export default function SalesModule({
     }
   };
 
-  // FLUXO AUTOMÁTICO PARA PRÓXIMA COTAÇÃO AO SALVAR/IMPRIMIR
-  // 1. Limpa todos os campos da tela (Cliente, Lista de Itens, Descontos, Observações, Desenhos)
-  // 2. Gera/Avança automaticamente para o novo Número de Cotação sequencial
+  // FLUXO AUTOMÁTICO PARA PRÓXIMA COTAÇÃO AO SALVAR/IMPRIMIR OU AO CLICAR EM NOVA COTAÇÃO
+  // 1. Caso o rascunho anterior estivesse vazio e em status Rascunho, descarta no Supabase
+  // 2. Reserva IMEDIATAMENTE uma nova cotação atômica no Supabase com status: 'RASCUNHO'
   // 3. Posiciona o foco (.focus()) automaticamente no primeiro campo de digitação
   const handleAdvanceToNextQuote = async (showNotification = true) => {
+    // Se o rascunho anterior estava totalmente vazio (sem itens e status Rascunho), descarta para não acumular
+    if (editingQuoteId && items.length === 0 && (quoteStatus === 'Rascunho' || (quoteStatus as string) === 'RASCUNHO')) {
+      cancelarOuDescartarRascunho(editingQuoteId, numeroCotacao).catch(() => {});
+    }
+
     setEditingQuoteId(null);
     setEditingOriginalQuoteNumber(null);
     setEditingQuoteCreatedAt(null);
     editingQuoteIdRef.current = null;
     editingQuoteNumberRef.current = null;
 
-    // Número provisório rápido local enquanto busca o número oficial no Supabase
-    const quickId = generateNextQuoteNumber(savedQuotes);
-    setNumeroCotacao(quickId);
     setSelectedClientId('');
     setClientName('');
     setClientDocument('');
@@ -2354,29 +2464,35 @@ export default function SalesModule({
     setQuoteDate(new Date().toISOString().split('T')[0]);
     setValidityDays(10);
     setPaymentTerms('À Vista / Pix (3% Desc.)');
-    setQuoteStatus('Pendente');
+    setQuoteStatus('Rascunho');
     setItems([]);
     setDiscountAmount(0);
     setShippingAmount(0);
     setObservations('Preços com impostos inclusos. Material sujeito a conferência no ato do recebimento.');
     resetItemForm();
 
-    // 1 & 2: Busca configurações na tabela 'emitente' e protege contra duplicidade na tabela 'cotacoes'
+    setIsReservingQuote(true);
     try {
-      const res = await resolveNextUniqueQuoteNumber(savedQuotes);
-      const targetNum = res.quoteNumber;
-      setAutoSuggestedNumber(targetNum);
-      setAutoSuggestedSeq(res.sequential);
-      setNumeroCotacao(targetNum);
-      if (showNotification) {
-        setSuccessMessage(`Próxima cotação (${targetNum}) pronta para digitação!`);
-        setTimeout(() => setSuccessMessage(null), 3000);
+      const res = await reservarNovaCotacaoNoSupabase();
+      if (res?.numero) {
+        setNumeroCotacao(res.numero);
+        setAutoSuggestedNumber(res.numero);
+        setEditingQuoteId(res.id);
+        setEditingOriginalQuoteNumber(res.numero);
+        editingQuoteIdRef.current = res.id;
+        editingQuoteNumberRef.current = res.numero;
+        setQuoteStatus('Rascunho');
+        quoteStatusRef.current = 'Rascunho';
+        isSavedRef.current = false;
+        if (showNotification) {
+          setSuccessMessage(`🔒 Reserva atômica: Cotação Nº ${res.numero} gravada como Rascunho no Supabase!`);
+          setTimeout(() => setSuccessMessage(null), 3500);
+        }
       }
     } catch (err) {
-      if (showNotification) {
-        setSuccessMessage(`Próxima cotação (${quickId}) pronta para digitação!`);
-        setTimeout(() => setSuccessMessage(null), 3000);
-      }
+      console.warn('Erro ao reservar próxima cotação no Supabase:', err);
+    } finally {
+      setIsReservingQuote(false);
     }
 
     // Posiciona o foco (.focus()) automaticamente no primeiro campo de digitação (Busca de Cliente ou Inserção de Produto)
@@ -2389,6 +2505,23 @@ export default function SalesModule({
         constantInputRef.current.focus();
       }
     }, 150);
+  };
+
+  const handleDiscardCurrentDraft = async () => {
+    if (!editingQuoteId) return;
+    if (confirm(`Deseja realmente cancelar e descartar o rascunho da cotação Nº ${numeroCotacao}?`)) {
+      setIsSavingQuote(true);
+      try {
+        await cancelarOuDescartarRascunho(editingQuoteId, numeroCotacao);
+        setSuccessMessage(`Rascunho da cotação Nº ${numeroCotacao} descartado com sucesso.`);
+        setTimeout(() => setSuccessMessage(null), 3500);
+        await handleAdvanceToNextQuote(false);
+      } catch (e) {
+        console.warn('Erro ao descartar rascunho:', e);
+      } finally {
+        setIsSavingQuote(false);
+      }
+    }
   };
 
   // Mantém a referência sincronizada para o listener onafterprint
@@ -2427,6 +2560,7 @@ export default function SalesModule({
     setShippingAmount(quote.shipping || 0);
     setObservations(quote.observations || 'Preços com impostos inclusos. Material sujeito a conferência no ato do recebimento.');
     resetItemForm();
+    isSavedRef.current = true;
 
     setSuccessMessage(`Orçamento ${targetNum} carregado para edição com número e ID preservados!`);
     setTimeout(() => setSuccessMessage(null), 3000);
@@ -2444,17 +2578,24 @@ export default function SalesModule({
     editingQuoteIdRef.current = null;
     editingQuoteNumberRef.current = null;
 
-    // 2. Resolve e gera um NOVO número sequencial único para o novo pedido
+    // 2. Resolve e RESERVA IMEDIATAMENTE um NOVO número e rascunho atômico no Supabase
+    setIsReservingQuote(true);
     let nextUniqueNumber = generateNextQuoteNumber(savedQuotes);
     try {
-      const res = await resolveNextUniqueQuoteNumber(savedQuotes);
-      if (res?.quoteNumber) {
-        nextUniqueNumber = res.quoteNumber;
-        setAutoSuggestedNumber(res.quoteNumber);
-        setAutoSuggestedSeq(res.sequential);
+      const res = await reservarNovaCotacaoNoSupabase();
+      if (res?.numero) {
+        nextUniqueNumber = res.numero;
+        setAutoSuggestedNumber(res.numero);
+        setEditingQuoteId(res.id);
+        setEditingOriginalQuoteNumber(res.numero);
+        editingQuoteIdRef.current = res.id;
+        editingQuoteNumberRef.current = res.numero;
+        setQuoteStatus('Rascunho');
       }
     } catch (err) {
       console.warn('Aviso ao gerar nova numeração sequencial para duplicação:', err);
+    } finally {
+      setIsReservingQuote(false);
     }
     setNumeroCotacao(nextUniqueNumber);
 
@@ -2706,6 +2847,19 @@ export default function SalesModule({
             return null;
           })()}
 
+          {editingQuoteId && (quoteStatus === 'Rascunho' || (quoteStatus as string) === 'RASCUNHO') && (
+            <button
+              type="button"
+              onClick={handleDiscardCurrentDraft}
+              disabled={isSavingQuote || isReservingQuote}
+              className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+              title="Descarta o rascunho atual reservado no Supabase e inicia uma nova cotação"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+              Descartar Rascunho
+            </button>
+          )}
+
           <button
             onClick={() => handleAdvanceToNextQuote(true)}
             className="px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
@@ -2772,9 +2926,17 @@ export default function SalesModule({
                       Cotação Nº {isCustomNumber && <span className="text-amber-600 font-normal lowercase">(manual)</span>}
                     </label>
                     <div className="flex items-center gap-1">
-                      {isCheckingDbDuplicate ? (
+                      {isReservingQuote ? (
+                        <span className="text-[9px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded-md flex items-center gap-1">
+                          <Loader2 className="w-2.5 h-2.5 animate-spin text-indigo-600" /> Reservando...
+                        </span>
+                      ) : isCheckingDbDuplicate ? (
                         <span className="text-[9px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded-md flex items-center gap-1">
                           <Loader2 className="w-2.5 h-2.5 animate-spin text-indigo-600" /> Verificando...
+                        </span>
+                      ) : editingQuoteId && (quoteStatus === 'Rascunho' || (quoteStatus as string) === 'RASCUNHO') ? (
+                        <span className="text-[9px] font-bold text-amber-800 bg-amber-100 border border-amber-300 px-1.5 py-0.5 rounded-md flex items-center gap-1" title="Número atômico reservado no Supabase para este computador">
+                          <Lock className="w-2.5 h-2.5 text-amber-700" /> Rascunho Reservado
                         </span>
                       ) : isDuplicate ? (
                         <span className="text-[9px] font-black text-rose-700 bg-rose-100 border border-rose-300 px-1.5 py-0.5 rounded-md flex items-center gap-0.5 animate-pulse" title={`Cotação já cadastrada para: ${duplicateStatus.clientName || 'Outro cliente'}`}>
