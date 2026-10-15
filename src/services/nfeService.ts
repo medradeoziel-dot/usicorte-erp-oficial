@@ -1910,31 +1910,37 @@ export async function transmitirNfeSefaz(
       xml_url: xmlUrl,
       xml_conteudo: xmlConteudo,
       mensagem_erro_nfe: null,
-      nfe_emitida_em: dataEmissao.toISOString()
+      nfe_emitida_em: dataEmissao.toISOString(),
+      situacao: 'FATURADO'
     });
 
     // Se for multi-cotação (agrupamento), atualiza simultaneamente todas as cotações de origem
-    if (quote.origemCotacaoIds && quote.origemCotacaoIds.length > 0) {
-      for (const origId of quote.origemCotacaoIds) {
-        if (origId && origId !== (quote.id || quote.quoteNumber)) {
-          try {
-            await updateCotacaoNfeStatusDb(origId, {
-              status_nfe: 'Emitida',
-              nfe_chave: chaveAcesso,
-              chave_acesso: chaveAcesso,
-              nfe_numero: numeroNfe,
-              serie_nfe: serie,
-              protocolo_autorizacao: protocolo,
-              protocolo_nfe: protocolo,
-              danfe_url: danfeUrl,
-              xml_url: xmlUrl,
-              xml_conteudo: xmlConteudo,
-              mensagem_erro_nfe: null,
-              nfe_emitida_em: dataEmissao.toISOString()
-            });
-          } catch (eOrig) {
-            console.warn(`Aviso ao atualizar cotação de origem ${origId} para Emitida:`, eOrig);
-          }
+    const todosOrigens = [
+      ...(quote.origemCotacaoIds || []),
+      ...(quote.origemCotacoes || [])
+    ];
+    const origensUnicas = Array.from(new Set(todosOrigens.filter(Boolean)));
+
+    for (const origId of origensUnicas) {
+      if (origId && origId !== (quote.id || quote.quoteNumber)) {
+        try {
+          await updateCotacaoNfeStatusDb(String(origId), {
+            status_nfe: 'Emitida',
+            nfe_chave: chaveAcesso,
+            chave_acesso: chaveAcesso,
+            nfe_numero: numeroNfe,
+            serie_nfe: serie,
+            protocolo_autorizacao: protocolo,
+            protocolo_nfe: protocolo,
+            danfe_url: danfeUrl,
+            xml_url: xmlUrl,
+            xml_conteudo: xmlConteudo,
+            mensagem_erro_nfe: null,
+            nfe_emitida_em: dataEmissao.toISOString(),
+            situacao: 'FATURADO'
+          });
+        } catch (eOrig) {
+          console.warn(`Aviso ao atualizar cotação de origem ${origId} para Emitida:`, eOrig);
         }
       }
     }

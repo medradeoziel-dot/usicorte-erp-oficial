@@ -1289,6 +1289,7 @@ export async function updateCotacaoNfeStatusDb(
     xml_cancelamento?: string;
     motivo_cancelamento?: string;
     nfe_cancelada_em?: string;
+    situacao?: string;
   }
 ): Promise<{ success: boolean; error: any }> {
   try {
@@ -1303,6 +1304,10 @@ export async function updateCotacaoNfeStatusDb(
       nfe_status: payload.status_nfe,
       updated_at: new Date().toISOString()
     };
+
+    if (payload.situacao) {
+      updateObj.situacao = payload.situacao;
+    }
 
     if (cleanChave) {
       updateObj.nfe_chave = cleanChave;
@@ -1354,6 +1359,11 @@ export async function updateCotacaoNfeStatusDb(
                 ...q,
                 status_nfe: payload.status_nfe,
                 nfe_status: payload.status_nfe,
+                nfe_chave: cleanChave || q.nfe_chave,
+                chave_acesso: cleanChave || q.chave_acesso,
+                nfe_numero: payload.nfe_numero || q.nfe_numero,
+                situacao: payload.situacao || (payload.status_nfe === 'Emitida' ? 'FATURADO' : q.situacao),
+                status: payload.status_nfe === 'Emitida' ? 'Faturado' : q.status,
                 motivo_cancelamento: payload.motivo_cancelamento || q.motivo_cancelamento,
                 protocolo_cancelamento: payload.protocolo_cancelamento || q.protocolo_cancelamento
               };
@@ -1367,15 +1377,39 @@ export async function updateCotacaoNfeStatusDb(
 
     const isIdUuid = isUuid(cotacaoIdOrNumber);
 
-    // 1. Tenta atualizar pelo ID/Número
-    let query = db.from('cotacoes').update(updateObj);
+    // 1. Tenta atualizar pelo ID ou Número de forma segura sem quebra de sintaxe UUID no Postgres
+    let error: any = null;
     if (isIdUuid) {
-      query = query.eq('id', cotacaoIdOrNumber);
+      const res = await db.from('cotacoes').update(updateObj).eq('id', cotacaoIdOrNumber);
+      error = res.error;
     } else {
-      query = query.or(`id.eq.${cotacaoIdOrNumber},numero.eq.${cotacaoIdOrNumber}`);
+      const resolvedUuid = await resolveCotacaoUuid(cotacaoIdOrNumber);
+      if (resolvedUuid) {
+        const res = await db.from('cotacoes').update(updateObj).eq('id', resolvedUuid);
+        error = res.error;
+      } else {
+        const res = await db.from('cotacoes').update(updateObj).eq('numero', cotacaoIdOrNumber);
+        error = res.error;
+      }
     }
 
-    let { error } = await query;
+    // Se falhar devido à coluna 'situacao' inexistente no schema, tenta novamente sem ela
+    if (error && (error.message?.toLowerCase().includes('situacao') || error.code === '42703' || error.code === 'PGRST204')) {
+      const { situacao: _, ...updateSemSituacao } = updateObj;
+      if (isIdUuid) {
+        const retry = await db.from('cotacoes').update(updateSemSituacao).eq('id', cotacaoIdOrNumber);
+        error = retry.error;
+      } else {
+        const resolvedUuid = await resolveCotacaoUuid(cotacaoIdOrNumber);
+        if (resolvedUuid) {
+          const retry = await db.from('cotacoes').update(updateSemSituacao).eq('id', resolvedUuid);
+          error = retry.error;
+        } else {
+          const retry = await db.from('cotacoes').update(updateSemSituacao).eq('numero', cotacaoIdOrNumber);
+          error = retry.error;
+        }
+      }
+    }
 
     // 2. Se não deu erro mas queremos garantir sincronia em duplicatas por chave de acesso
     if (cleanChave) {
@@ -1917,6 +1951,10 @@ export async function atualizarStatusPagamentoCotacaoDb(
     conta_destino?: string;
     observacoes_baixa?: string;
     lancamento_financeiro_id?: string;
+    nfe_chave?: string;
+    nfe_numero?: string;
+    chave_acesso?: string;
+    status_nfe?: string;
   }
 ) {
   let targetId = typeof cotacaoIdOrObj === 'string' ? cotacaoIdOrObj : cotacaoIdOrObj?.id;
@@ -1953,6 +1991,19 @@ export async function atualizarStatusPagamentoCotacaoDb(
     payloadCompleto.baixado_em = new Date().toISOString();
   } else {
     payloadCompleto.baixado_em = null;
+  }
+
+  const chaveLimpa = (dados?.nfe_chave || dados?.chave_acesso || '').replace(/\D/g, '');
+  if (chaveLimpa) {
+    payloadCompleto.nfe_chave = chaveLimpa;
+    payloadCompleto.chave_acesso = chaveLimpa;
+  }
+  if (dados?.nfe_numero !== undefined) {
+    payloadCompleto.nfe_numero = String(dados.nfe_numero).replace(/\D/g, '');
+  }
+  if (dados?.status_nfe) {
+    payloadCompleto.status_nfe = dados.status_nfe;
+    payloadCompleto.nfe_status = dados.status_nfe;
   }
 
   let updateQuery;
@@ -1995,7 +2046,12 @@ export async function atualizarStatusPagamentoCotacaoDb(
             paymentStatus: statusPagamento === 'PAGO' ? 'Pago' : 'Pendente',
             paymentDate: dataHoje || undefined,
             paymentMethod: dados?.forma_pagamento || o.paymentMethod,
-            status: statusPagamento === 'PAGO' ? 'Faturado' : (o.status === 'Faturado' ? 'Aprovado' : o.status)
+            status: statusPagamento === 'PAGO' ? 'Faturado' : (o.status === 'Faturado' ? 'Aprovado' : o.status),
+            situacao: situacao,
+            nfe_numero: dados?.nfe_numero !== undefined ? dados.nfe_numero : o.nfe_numero,
+            nfe_chave: chaveLimpa || o.nfe_chave,
+            chave_acesso: chaveLimpa || o.chave_acesso,
+            status_nfe: dados?.status_nfe || o.status_nfe
           };
         }
         return o;

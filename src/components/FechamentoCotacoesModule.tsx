@@ -5,6 +5,7 @@ import {
   SupabaseCotacao, 
   atualizarSituacaoCotacaoDb,
   atualizarStatusPagamentoCotacaoDb,
+  updateCotacaoNfeStatusDb,
   sincronizarPagamentoContaReceberDb,
   fetchItensByCotacaoId
 } from '../lib/db';
@@ -85,6 +86,7 @@ export default function FechamentoCotacoesModule({
   const [clientForNfeModal, setClientForNfeModal] = useState<Client | null>(null);
   const [quoteForDanfeModal, setQuoteForDanfeModal] = useState<Quote | null>(null);
   const [autoPrintDanfeModal, setAutoPrintDanfeModal] = useState<boolean>(false);
+  const quotesEmissaoNfeRef = useRef<ExtratoCotacaoItem[]>([]);
 
   // Formulário de Baixa de Pagamento
   const [dataPagamentoBaixa, setDataPagamentoBaixa] = useState<string>(() => new Date().toISOString().split('T')[0]);
@@ -838,6 +840,9 @@ export default function FechamentoCotacoesModule({
       alert('Selecione ao menos 1 cotação nos checkboxes da tabela para emitir a NF-e.');
       return;
     }
+
+    // Registra a lista de cotações alvo para a baixa automática pós-autorização SEFAZ
+    quotesEmissaoNfeRef.current = cotacoesParaEmitir;
 
     // 2. Validação contra cotações com NF-e cancelada na SEFAZ
     const cotacaoCancelada = cotacoesParaEmitir.find(q => isNfeCancelada(q.status_nfe));
@@ -2020,17 +2025,130 @@ export default function FechamentoCotacoesModule({
         <EmissaoNfeModal
           quote={quoteForNfeModal}
           client={clientForNfeModal}
-          onSuccess={(updated) => {
+          onSuccess={async (updated) => {
             setQuoteForNfeModal(null);
             setQuoteForDanfeModal(updated);
             setAutoPrintDanfeModal(true);
-            setFeedbackMensagem({
-              tipo: 'success',
-              texto: `NF-e emitida e autorizada com sucesso! (Nº ${updated.nfe_numero || ''})`
-            });
-            loadQuotesData();
+
+            // 1. Identifica todas as cotações que foram incluídas nesta NF-e
+            let cotacoesAlvo: ExtratoCotacaoItem[] = quotesEmissaoNfeRef.current;
+            if (!cotacoesAlvo || cotacoesAlvo.length === 0) {
+              const numeros = updated.origemCotacoes || [updated.quoteNumber];
+              const ids = updated.origemCotacaoIds || [updated.id];
+              cotacoesAlvo = allQuotes.filter(q => 
+                (q.numero && numeros.includes(q.numero)) || (q.id && ids.includes(q.id))
+              );
+            }
+
+            const numNfe = updated.nfe_numero || '';
+            const chaveNfe = updated.nfe_chave || updated.chave_acesso || '';
+            const dataHoje = updated.nfe_emitida_em ? updated.nfe_emitida_em.split('T')[0] : new Date().toISOString().split('T')[0];
+
+            if (cotacoesAlvo.length > 0) {
+              const cotacoesParaBaixar = cotacoesAlvo.map(q => ({
+                id: q.id,
+                numero: q.numero,
+                cliente: q.cliente,
+                valor: q.valor
+              }));
+
+              try {
+                // 1. BAIXA FINANCEIRA AUTOMÁTICA:
+                // Aciona automaticamente a mesma lógica do botão "Dar Baixa nas Selecionadas",
+                // atualiza o Status de Pagamento para "PAGO", registra a data e sincroniza a entrada de caixa no Financeiro
+                const resBaixa = await darBaixaMultiplasCotacoesDb(cotacoesParaBaixar, {
+                  dataPagamento: dataHoje,
+                  formaPagamento: 'PIX',
+                  contaDestino: 'Conta Banco do Brasil - Principal',
+                  observacoes: `Baixa automática via Emissão da NF-e Nº ${numNfe}${chaveNfe ? ` (Chave: ${chaveNfe})` : ''}`,
+                  nfeNumero: numNfe,
+                  nfeChave: chaveNfe,
+                  documentoRef: numNfe ? `NF-e ${numNfe}` : undefined
+                });
+
+                // 2. ATUALIZAÇÃO DO STATUS DA COTAÇÃO & VINCULAÇÃO FISCAL NO SUPABASE:
+                // Altera a Situação das cotações selecionadas para "FATURADO"
+                // e vincula a chave de acesso / número da NF-e gerada ao histórico dessas cotações
+                for (const c of cotacoesAlvo) {
+                  try {
+                    await updateCotacaoNfeStatusDb(c.id || c.numero, {
+                      status_nfe: 'Emitida',
+                      nfe_numero: numNfe,
+                      nfe_chave: chaveNfe,
+                      chave_acesso: chaveNfe,
+                      danfe_url: updated.danfe_url,
+                      xml_url: updated.xml_url,
+                      situacao: 'FATURADO'
+                    });
+                  } catch (eDb) {
+                    console.warn(`Aviso ao vincular NF-e na cotação ${c.numero}:`, eDb);
+                  }
+                }
+
+                // 3. ATUALIZAÇÃO EM TEMPO REAL NO ESTADO LOCAL (sem necessidade de F5):
+                setAllQuotes(prev => prev.map(item => {
+                  const match = cotacoesAlvo.some(ca => 
+                    (ca.id && item.id && ca.id === item.id) || 
+                    (ca.numero && item.numero && ca.numero.trim().toLowerCase() === item.numero.trim().toLowerCase())
+                  );
+                  if (match) {
+                    return {
+                      ...item,
+                      statusCotacao: 'faturado',
+                      status_nfe: 'Emitida',
+                      nfe_numero: numNfe,
+                      nfe_chave: chaveNfe,
+                      chave_acesso: chaveNfe,
+                      danfe_url: updated.danfe_url,
+                      xml_url: updated.xml_url,
+                      pagamento: {
+                        status: 'Pago',
+                        dataPagamento: dataHoje,
+                        formaPagamento: 'PIX',
+                        observacoes: `Baixa automática via Emissão da NF-e Nº ${numNfe}`,
+                        valorPago: item.valor
+                      }
+                    };
+                  }
+                  return item;
+                }));
+
+                // Desmarca da seleção as cotações baixadas
+                setSelectedKeys(prev => {
+                  const next = new Set(prev);
+                  cotacoesAlvo.forEach(ca => {
+                    next.delete(ca.numero);
+                    if (ca.id) next.delete(ca.id);
+                  });
+                  return next;
+                });
+
+                setFeedbackMensagem({
+                  tipo: 'success',
+                  texto: `⚡ NF-e Nº ${numNfe} autorizada com sucesso pela SEFAZ! Baixa automática realizada no Financeiro e ${cotacoesAlvo.length} cotação(ões) alterada(s) para FATURADO.`,
+                  lancamento: resBaixa?.lancamento || undefined
+                });
+              } catch (baixaErr: any) {
+                console.error('Erro na baixa automática pós-NF-e:', baixaErr);
+                setFeedbackMensagem({
+                  tipo: 'success',
+                  texto: `NF-e emitida e autorizada com sucesso! (Nº ${numNfe})`
+                });
+              }
+            } else {
+              setFeedbackMensagem({
+                tipo: 'success',
+                texto: `NF-e emitida e autorizada com sucesso! (Nº ${numNfe})`
+              });
+            }
+
+            quotesEmissaoNfeRef.current = [];
+            await loadQuotesData();
           }}
-          onClose={() => setQuoteForNfeModal(null)}
+          onClose={() => {
+            quotesEmissaoNfeRef.current = [];
+            setQuoteForNfeModal(null);
+          }}
         />
       )}
 

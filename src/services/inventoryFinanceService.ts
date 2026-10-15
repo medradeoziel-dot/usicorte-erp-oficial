@@ -13,6 +13,7 @@ import {
   SupabaseCotacao, 
   atualizarSituacaoCotacaoDb,
   atualizarStatusPagamentoCotacaoDb,
+  updateCotacaoNfeStatusDb,
   sincronizarPagamentoContaReceberDb,
   isNotFoundError,
   safeFetchTable,
@@ -1220,6 +1221,9 @@ export interface DadosBaixaFechamento {
   formaPagamento: FormaPagamentoFinanceiro;
   observacoes?: string;
   contaDestino?: string;
+  documentoRef?: string;
+  nfeNumero?: string;
+  nfeChave?: string;
 }
 
 export async function darBaixaMultiplasCotacoesDb(
@@ -1249,16 +1253,18 @@ export async function darBaixaMultiplasCotacoesDb(
 
   valorTotal = Number(valorTotal.toFixed(2));
 
-  const docRef = listaNumeros.length <= 4 
+  const docRef = dados.documentoRef || (dados.nfeNumero ? `NF-e ${dados.nfeNumero}` : (listaNumeros.length <= 4 
     ? listaNumeros.join(', ') 
-    : `${listaNumeros.slice(0, 3).join(', ')} e +${listaNumeros.length - 3} cotações`;
+    : `${listaNumeros.slice(0, 3).join(', ')} e +${listaNumeros.length - 3} cotações`));
 
   const lancamentoId = `fin-fech-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
   const novoLancamento: LancamentoFinanceiro = {
     id: lancamentoId,
     tipo: 'receita',
     categoria: 'venda_cotacao',
-    descricao: `Fechamento de Cotações - ${nomeCliente} (${docRef})`,
+    descricao: dados.nfeNumero 
+      ? `Faturamento NF-e Nº ${dados.nfeNumero} - ${nomeCliente} (${listaNumeros.join(', ')})`
+      : `Fechamento de Cotações - ${nomeCliente} (${docRef})`,
     clienteFornecedor: nomeCliente,
     documentoRef: docRef,
     valor: valorTotal,
@@ -1267,7 +1273,9 @@ export async function darBaixaMultiplasCotacoesDb(
     dataPagamento: dataHoje,
     formaPagamento: dados.formaPagamento,
     status: 'pago',
-    observacoes: `Baixa em lote de ${cotacoes.length} cotação(ões). Conta de Destino: ${dados.contaDestino || 'Caixa Central'}. Obs: ${dados.observacoes || 'Fechamento de faturamento consolidado'}`,
+    observacoes: dados.observacoes || (dados.nfeNumero
+      ? `Baixa automática via Emissão da NF-e Nº ${dados.nfeNumero} (Chave: ${dados.nfeChave || ''}). Conta de Destino: ${dados.contaDestino || 'Conta Banco do Brasil - Principal'}.`
+      : `Baixa em lote de ${cotacoes.length} cotação(ões). Conta de Destino: ${dados.contaDestino || 'Caixa Central'}. Obs: Fechamento de faturamento consolidado`),
     criadoEm: new Date().toISOString()
   };
 
@@ -1296,7 +1304,7 @@ export async function darBaixaMultiplasCotacoesDb(
     }
 
     // 1. Atualização direta na Tabela 'cotacoes':
-    // Ao clicar em 'Dar Baixa nas Selecionadas', faça o UPDATE direto na tabela 'cotacoes' alterando:
+    // Ao clicar em 'Dar Baixa nas Selecionadas' ou por Emissão de NF-e, faz o UPDATE direto na tabela 'cotacoes' alterando:
     // status_pagamento = 'PAGO', situacao = 'FATURADO', data_pagamento = [Data Atual]
     try {
       await atualizarStatusPagamentoCotacaoDb(
@@ -1308,12 +1316,31 @@ export async function darBaixaMultiplasCotacoesDb(
           forma_pagamento: dados.formaPagamento,
           valor_pago: Number(c.valor) || 0,
           conta_destino: dados.contaDestino || 'Conta Banco do Brasil - Principal',
-          observacoes_baixa: dados.observacoes || '',
-          lancamento_financeiro_id: novoLancamento.id
+          observacoes_baixa: dados.observacoes || (dados.nfeNumero ? `Baixa automática via NF-e Nº ${dados.nfeNumero}` : ''),
+          lancamento_financeiro_id: novoLancamento.id,
+          nfe_numero: dados.nfeNumero,
+          nfe_chave: dados.nfeChave,
+          chave_acesso: dados.nfeChave,
+          status_nfe: dados.nfeNumero ? 'Emitida' : undefined
         }
       );
     } catch (err) {
       console.warn('Aviso ao atualizar tabela cotacoes para PAGO/FATURADO no Supabase:', err);
+    }
+
+    // Se fornecido nfeNumero/nfeChave, garante vinculação fiscal via updateCotacaoNfeStatusDb
+    if (dados.nfeNumero || dados.nfeChave) {
+      try {
+        await updateCotacaoNfeStatusDb(c.id || c.numero, {
+          status_nfe: 'Emitida',
+          nfe_numero: dados.nfeNumero,
+          nfe_chave: dados.nfeChave,
+          chave_acesso: dados.nfeChave,
+          situacao: 'FATURADO'
+        });
+      } catch (errNfe) {
+        console.warn('Aviso ao atualizar dados da NF-e na cotação:', errNfe);
+      }
     }
 
     // 2. Evitar Duplicidades em 'contas_a_receber':
@@ -1345,7 +1372,9 @@ export async function darBaixaMultiplasCotacoesDb(
     lancamento: novoLancamento,
     qtdBaixadas: cotacoes.length,
     valorTotal,
-    mensagem: `Baixa de ${cotacoes.length} cotação(ões) no valor total de R$ ${valorTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} sincronizada no Supabase com sucesso!`
+    mensagem: dados.nfeNumero 
+      ? `NF-e Nº ${dados.nfeNumero} emitida com sucesso! Baixa de ${cotacoes.length} cotação(ões) no valor total de R$ ${valorTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} sincronizada no Supabase.`
+      : `Baixa de ${cotacoes.length} cotação(ões) no valor total de R$ ${valorTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} sincronizada no Supabase com sucesso!`
   };
 }
 
