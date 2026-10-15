@@ -2055,8 +2055,15 @@ export function gerarDanfeHtml(
   const emitenteTel1 = emitente.telefone_1 || emitente.telefone || emitente.phone || '(14) 99880-9362';
   const emitenteTel2 = emitente.telefone_2 || emitente.celular || emitente.mobile || '';
   const emitenteTelefones = [emitenteTel1, emitenteTel2].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i).join(' / ');
-  const emitenteRazao = emitente.razaoSocial || emitente.razao_social || emitente.corporateName || 'L. M. BANZATTO METAIS';
-  const emitenteFantasia = emitente.nomeFantasia || emitente.nome_fantasia || emitente.tradeName || 'USICORTE METAIS';
+  const emitenteRazao = (emitente.razaoSocial && emitente.razaoSocial.toUpperCase() !== 'UNDEFINED' && emitente.razaoSocial.toLowerCase() !== 'undefined' ? emitente.razaoSocial : '') ||
+    (emitente.razao_social && emitente.razao_social.toUpperCase() !== 'UNDEFINED' && emitente.razao_social.toLowerCase() !== 'undefined' ? emitente.razao_social : '') ||
+    (emitente.corporateName && emitente.corporateName.toUpperCase() !== 'UNDEFINED' && emitente.corporateName.toLowerCase() !== 'undefined' ? emitente.corporateName : '') ||
+    (emitente.tradeName && emitente.tradeName.toUpperCase() !== 'UNDEFINED' && emitente.tradeName.toLowerCase() !== 'undefined' ? emitente.tradeName : '') ||
+    'L. M. BANZATTO METAIS';
+  const emitenteFantasia = (emitente.nomeFantasia && emitente.nomeFantasia.toUpperCase() !== 'UNDEFINED' && emitente.nomeFantasia.toLowerCase() !== 'undefined' ? emitente.nomeFantasia : '') ||
+    (emitente.nome_fantasia && emitente.nome_fantasia.toUpperCase() !== 'UNDEFINED' && emitente.nome_fantasia.toLowerCase() !== 'undefined' ? emitente.nome_fantasia : '') ||
+    (emitente.tradeName && emitente.tradeName.toUpperCase() !== 'UNDEFINED' && emitente.tradeName.toLowerCase() !== 'undefined' ? emitente.tradeName : '') ||
+    'USICORTE METAIS';
 
   const resolvedXml = xmlConteudo || (!isPrevia ? gerarXmlNfe(emitente, destinatario, itens, numeroNfe, serie, chaveAcesso, valorTotal, dataEmissao, protocolo) : '');
 
@@ -2097,7 +2104,7 @@ export function gerarDanfeHtml(
     @page { size: A4 portrait; margin: 3mm 4mm 3mm 4mm; }
     * { box-sizing: border-box; }
     body { font-family: Arial, Helvetica, sans-serif; font-size: 8.5px; color: #000; margin: 0; padding: 10px; background: #fff; line-height: 1.15; }
-    .sheet { max-width: 210mm; margin: 0 auto; position: relative; }
+    .sheet { max-width: 210mm; min-height: 285mm; margin: 0 auto; position: relative; display: flex; flex-direction: column; justify-content: space-between; box-sizing: border-box; }
     .box { border: 1px solid #000; margin-bottom: 3px; }
     .title { font-size: 6.5px; font-weight: bold; text-transform: uppercase; color: #333; margin-bottom: 1px; }
     .val { font-size: 8.5px; font-weight: bold; }
@@ -2185,7 +2192,7 @@ export function gerarDanfeHtml(
         <tr>
           <td style="width: 82%; padding: 4px; border-right: 1px solid #000; vertical-align: top;">
             <div style="font-size: 7.5px; font-weight: 600; text-transform: uppercase;">
-              RECEBEMOS DE <strong>${emitente.razaoSocial}</strong> OS PRODUTOS E/OU SERVIÇOS CONSTANTES DA NOTA FISCAL ELETRÔNICA INDICADA AO LADO.
+              RECEBEMOS DE <strong>${emitenteRazao}</strong> OS PRODUTOS E/OU SERVIÇOS CONSTANTES DA NOTA FISCAL ELETRÔNICA INDICADA AO LADO.
             </div>
             <table style="margin-top: 6px; border-top: 1px solid #000;">
               <tr>
@@ -2521,34 +2528,36 @@ export function gerarDanfeHtml(
       </tbody>
     </table>
 
-    <!-- DADOS ADICIONAIS -->
-    <div style="font-weight: 900; font-size: 7.5px; text-transform: uppercase; margin: 2px 0 1px 0;">DADOS ADICIONAIS</div>
-    <div class="box">
-      <table>
-        <tr>
-          <td style="width: 70%; padding: 4px; border-right: 1px solid #000; vertical-align: top;">
-            <div class="title">INFORMAÇÕES COMPLEMENTARES</div>
-            <div style="font-size: 7.5px; line-height: 1.3;">
-              <strong>DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL. ${creditoInfo.textoCredito}</strong><br>
-              Valor aprox. tributos: R$ ${ibptFed.toFixed(2).replace('.', ',')} Federal (8,50%), R$ ${ibptEst.toFixed(2).replace('.', ',')} Estadual (4,95%) e R$ 0,00 Municipal. Fonte: IBPT.<br>
-              ${numeroCotacaoRef && (numeroCotacaoRef.includes('Ref. Cotações') || numeroCotacaoRef.includes(','))
-                ? (numeroCotacaoRef.startsWith('Ref. Cotações:') ? `<strong>${numeroCotacaoRef}.</strong>` : `<strong>Ref. Cotações: ${numeroCotacaoRef}.</strong>`)
-                : `Pedido de Venda / Cotação UsiCorte Ref: Nº ${numeroCotacaoRef || 'COT-1'}.`}<br>
-              ${isPrevia ? '<strong style="color: #b91c1c;">⚠️ ATENÇÃO: MODO DE CONFERÊNCIA. ESTE DOCUMENTO É UMA PRÉVIA E NÃO POSSUI VALIDADE JURÍDICA OU FISCAL.</strong>' : ''}
-            </div>
-          </td>
-          <td style="width: 30%; padding: 4px; vertical-align: top; background: #fafafa;">
-            <div class="title">RESERVADO AO FISCO</div>
-            <div style="height: 28px; border: 1px dashed #ccc; text-align: center; color: #aaa; font-size: 7px; padding-top: 8px;">
-              [ÁREA DO FISCO]
-            </div>
-          </td>
-        </tr>
-      </table>
-    </div>
+    <!-- DADOS ADICIONAIS (FIXADO NO RODAPÉ DO DANFE) -->
+    <div class="danfe-bloco-rodape" style="margin-top: auto; page-break-inside: avoid; break-inside: avoid; page-break-after: avoid; break-after: avoid; width: 100%;">
+      <div style="font-weight: 900; font-size: 7.5px; text-transform: uppercase; margin: 2px 0 1px 0;">DADOS ADICIONAIS</div>
+      <div class="box" style="min-height: 32mm; page-break-inside: avoid; break-inside: avoid;">
+        <table>
+          <tr>
+            <td style="width: 70%; padding: 4px; border-right: 1px solid #000; vertical-align: top;">
+              <div class="title">INFORMAÇÕES COMPLEMENTARES</div>
+              <div style="font-size: 7.5px; line-height: 1.3;">
+                <strong>DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL. ${creditoInfo.textoCredito}</strong><br>
+                Valor aprox. tributos: R$ ${ibptFed.toFixed(2).replace('.', ',')} Federal (8,50%), R$ ${ibptEst.toFixed(2).replace('.', ',')} Estadual (4,95%) e R$ 0,00 Municipal. Fonte: IBPT.<br>
+                ${numeroCotacaoRef && (numeroCotacaoRef.includes('Ref. Cotações') || numeroCotacaoRef.includes(','))
+                  ? (numeroCotacaoRef.startsWith('Ref. Cotações:') ? `<strong>${numeroCotacaoRef}.</strong>` : `<strong>Ref. Cotações: ${numeroCotacaoRef}.</strong>`)
+                  : `Pedido de Venda / Cotação UsiCorte Ref: Nº ${numeroCotacaoRef || 'COT-1'}.`}<br>
+                ${isPrevia ? '<strong style="color: #b91c1c;">⚠️ ATENÇÃO: MODO DE CONFERÊNCIA. ESTE DOCUMENTO É UMA PRÉVIA E NÃO POSSUI VALIDADE JURÍDICA OU FISCAL.</strong>' : ''}
+              </div>
+            </td>
+            <td style="width: 30%; padding: 4px; vertical-align: top; background: #fafafa;">
+              <div class="title">RESERVADO AO FISCO</div>
+              <div style="height: 28px; border: 1px dashed #ccc; text-align: center; color: #aaa; font-size: 7px; padding-top: 8px;">
+                [ÁREA DO FISCO]
+              </div>
+            </td>
+          </tr>
+        </table>
+      </div>
 
-    <div style="text-align: center; font-size: 6.5px; color: #666; margin-top: 4px; border-top: 1px solid #eee; padding-top: 2px;">
-      UsiCorte Metais ERP • DANFE Modelo 55 - Versão 4.00 • ${numeroCotacaoRef && (numeroCotacaoRef.includes('Ref. Cotações') || numeroCotacaoRef.includes(',')) ? (numeroCotacaoRef.startsWith('Ref. Cotações:') ? `${numeroCotacaoRef} • ` : `Ref. Cotações: ${numeroCotacaoRef} • `) : ''}Emissão em ${dataEmissao.toLocaleDateString('pt-BR')} ${dataEmissao.toLocaleTimeString('pt-BR')}
+      <div style="text-align: center; font-size: 6.5px; color: #666; margin-top: 4px; border-top: 1px solid #eee; padding-top: 2px;">
+        UsiCorte Metais ERP • DANFE Modelo 55 - Versão 4.00 • ${numeroCotacaoRef && (numeroCotacaoRef.includes('Ref. Cotações') || numeroCotacaoRef.includes(',')) ? (numeroCotacaoRef.startsWith('Ref. Cotações:') ? `${numeroCotacaoRef} • ` : `Ref. Cotações: ${numeroCotacaoRef} • `) : ''}Emissão em ${dataEmissao.toLocaleDateString('pt-BR')} ${dataEmissao.toLocaleTimeString('pt-BR')}
+      </div>
     </div>
   </div>
 

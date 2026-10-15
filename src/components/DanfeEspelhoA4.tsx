@@ -191,9 +191,51 @@ export default function DanfeEspelhoA4({
     );
   }, [logradouro, numero, rawComplemento, bairro]);
 
+  const razaoSocialEmitente = useMemo(() => {
+    const list = [
+      currentCompany?.corporateName,
+      currentCompany?.razao_social,
+      currentCompany?.tradeName,
+      currentCompany?.nome_fantasia,
+      company?.corporateName,
+      company?.razao_social,
+      company?.tradeName,
+      company?.nome_fantasia
+    ];
+    for (const item of list) {
+      if (item && typeof item === 'string') {
+        const trimmed = item.trim();
+        if (trimmed && trimmed.toUpperCase() !== 'UNDEFINED' && trimmed.toLowerCase() !== 'undefined' && trimmed.toUpperCase() !== 'NULL') {
+          return trimmed.toUpperCase();
+        }
+      }
+    }
+    return 'L. M. BANZATTO METAIS';
+  }, [currentCompany, company]);
+
+  const nomeFantasiaEmitente = useMemo(() => {
+    const list = [
+      currentCompany?.tradeName,
+      currentCompany?.nome_fantasia,
+      currentCompany?.corporateName,
+      currentCompany?.razao_social,
+      company?.tradeName,
+      company?.nome_fantasia
+    ];
+    for (const item of list) {
+      if (item && typeof item === 'string') {
+        const trimmed = item.trim();
+        if (trimmed && trimmed.toUpperCase() !== 'UNDEFINED' && trimmed.toLowerCase() !== 'undefined' && trimmed.toUpperCase() !== 'NULL') {
+          return trimmed.toUpperCase();
+        }
+      }
+    }
+    return 'USICORTE METAIS';
+  }, [currentCompany, company]);
+
   const emitente = useMemo(() => ({
-    razaoSocial: currentCompany.corporateName || currentCompany.razao_social || 'L. M. BANZATTO METAIS',
-    nomeFantasia: currentCompany.tradeName || currentCompany.nome_fantasia || 'USICORTE METAIS',
+    razaoSocial: razaoSocialEmitente,
+    nomeFantasia: nomeFantasiaEmitente,
     cnpj: currentCompany.cnpj || '25.038.430/0001-23',
     ie: currentCompany.ie || currentCompany.inscricao_estadual || '209632312114',
     endereco: enderecoEmitenteFormatado,
@@ -212,7 +254,7 @@ export default function DanfeEspelhoA4({
     email_contato: emailContatoEmitente,
     ultimo_numero_nfe: currentCompany.ultimo_numero_nfe,
     serie_nfe: currentCompany.serie_nfe
-  }), [currentCompany, enderecoEmitenteFormatado, logradouro, numero, rawComplemento, bairro, cidadeEmitente, ufEmitente, cepEmitente, telefonesFormatadosEmitente, tel1, tel2, emailContatoEmitente]);
+  }), [currentCompany, razaoSocialEmitente, nomeFantasiaEmitente, enderecoEmitenteFormatado, logradouro, numero, rawComplemento, bairro, cidadeEmitente, ufEmitente, cepEmitente, telefonesFormatadosEmitente, tel1, tel2, emailContatoEmitente]);
 
   // 1. Linha única de endereço formatada sem sobreposição: Rua, Número, Bairro, CEP, Telefone e E-mail
   const enderecoEmitenteLinhaUnica = useMemo(() => {
@@ -426,8 +468,10 @@ export default function DanfeEspelhoA4({
   };
 
   return (
-    <div className="danfe-inner-overlay w-full flex flex-col items-center py-2 print:py-0 print:block print:w-full print:m-0 print:p-0">
-      {/* Estilos CSS Scoped para isolamento e formatação oficial A4 Portrait da DANFE */}
+    <div className="danfe-container danfe-print-view danfe-inner-overlay w-full flex flex-col items-center py-2 print:py-0 print:block print:w-full print:m-0 print:p-0">
+      {/* Estilos CSS Scoped para isolamento total da DANFE:
+          TODAS as regras são restritas a .danfe-container, .danfe-print-view e body.print-danfe.
+          Nenhuma regra global é aplicada a body, div, table ou outros relatórios do ERP. */}
       <style>{`
         @media print {
           @page {
@@ -435,15 +479,10 @@ export default function DanfeEspelhoA4({
             margin: 3mm 4mm 3mm 4mm;
           }
 
-          *, *:before, *:after {
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
-          }
-
-          html, body {
+          body.print-danfe {
             width: 100% !important;
             height: auto !important;
-            min-height: 0 !important;
+            min-height: 100% !important;
             max-height: none !important;
             margin: 0 !important;
             padding: 0 !important;
@@ -451,7 +490,7 @@ export default function DanfeEspelhoA4({
             overflow: visible !important;
           }
 
-          /* Oculta completamente a raiz do app na impressão da DANFE */
+          /* Oculta completamente a raiz do app APENAS na impressão da DANFE */
           body.print-danfe #root {
             display: none !important;
             visibility: hidden !important;
@@ -461,10 +500,35 @@ export default function DanfeEspelhoA4({
             overflow: hidden !important;
           }
 
-          .danfe-modal-portal,
-          .danfe-modal-overlay,
-          .danfe-modal-dialog,
-          .danfe-modal-scroll {
+          /* Isolamento estrito com wrapper exclusivo .danfe-container e .danfe-print-view */
+          .danfe-container,
+          .danfe-print-view,
+          .danfe-container *,
+          .danfe-print-view * {
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            box-sizing: border-box !important;
+          }
+
+          .danfe-container table,
+          .danfe-print-view table,
+          body.print-danfe .danfe-container table {
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+            border-collapse: collapse !important;
+          }
+
+          .danfe-container tr,
+          .danfe-print-view tr,
+          body.print-danfe .danfe-container tr {
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
+
+          body.print-danfe .danfe-modal-portal,
+          body.print-danfe .danfe-modal-overlay,
+          body.print-danfe .danfe-modal-dialog,
+          body.print-danfe .danfe-modal-scroll {
             display: block !important;
             position: static !important;
             inset: auto !important;
@@ -484,8 +548,12 @@ export default function DanfeEspelhoA4({
             width: 100% !important;
           }
 
-          .no-print,
-          .btn-no-print {
+          .danfe-container .no-print,
+          .danfe-container .btn-no-print,
+          .danfe-print-view .no-print,
+          .danfe-print-view .btn-no-print,
+          body.print-danfe .no-print,
+          body.print-danfe .btn-no-print {
             display: none !important;
             visibility: hidden !important;
             height: 0 !important;
@@ -493,7 +561,9 @@ export default function DanfeEspelhoA4({
             padding: 0 !important;
           }
 
-          #container-impressao-danfe {
+          .danfe-container #container-impressao-danfe,
+          .danfe-print-view #container-impressao-danfe,
+          body.print-danfe #container-impressao-danfe {
             display: block !important;
             position: static !important;
             top: 0 !important;
@@ -505,8 +575,6 @@ export default function DanfeEspelhoA4({
             margin-top: 0 !important;
             margin-bottom: 0 !important;
             padding: 0 !important;
-            padding-top: 0 !important;
-            padding-bottom: 0 !important;
             background: transparent !important;
             overflow: visible !important;
             height: auto !important;
@@ -514,7 +582,9 @@ export default function DanfeEspelhoA4({
             transform: none !important;
           }
 
-          .danfe-inner-overlay {
+          .danfe-container.danfe-inner-overlay,
+          .danfe-print-view.danfe-inner-overlay,
+          body.print-danfe .danfe-inner-overlay {
             display: block !important;
             position: static !important;
             width: 100% !important;
@@ -523,14 +593,18 @@ export default function DanfeEspelhoA4({
             margin-top: 0 !important;
             margin-bottom: 0 !important;
             padding: 0 !important;
-            padding-top: 0 !important;
-            padding-bottom: 0 !important;
             overflow: visible !important;
           }
 
-          .danfe-print-container,
-          #folha-danfe-a4,
-          .danfe-folha-a4 {
+          .danfe-container .danfe-print-container,
+          .danfe-container #folha-danfe-a4,
+          .danfe-container .danfe-folha-a4,
+          .danfe-print-view .danfe-print-container,
+          .danfe-print-view #folha-danfe-a4,
+          .danfe-print-view .danfe-folha-a4,
+          body.print-danfe .danfe-print-container,
+          body.print-danfe #folha-danfe-a4,
+          body.print-danfe .danfe-folha-a4 {
             display: flex !important;
             flex-direction: column !important;
             justify-content: space-between !important;
@@ -539,9 +613,9 @@ export default function DanfeEspelhoA4({
             left: auto !important;
             width: 100% !important;
             max-width: 202mm !important;
-            min-height: 0 !important;
-            max-height: none !important;
-            height: auto !important;
+            min-height: 285mm !important;
+            height: 285mm !important;
+            max-height: 288mm !important;
             margin: 0 auto !important;
             margin-top: 0 !important;
             margin-bottom: 0 !important;
@@ -563,7 +637,9 @@ export default function DanfeEspelhoA4({
             break-before: avoid !important;
           }
 
-          .danfe-canhoto-topo {
+          .danfe-container .danfe-canhoto-topo,
+          .danfe-print-view .danfe-canhoto-topo,
+          body.print-danfe .danfe-canhoto-topo {
             margin-top: 0 !important;
             padding-top: 0 !important;
             height: 15mm !important;
@@ -576,27 +652,35 @@ export default function DanfeEspelhoA4({
             break-inside: avoid !important;
           }
 
-          .danfe-bloco-emitente {
+          .danfe-container .danfe-bloco-emitente,
+          .danfe-print-view .danfe-bloco-emitente,
+          body.print-danfe .danfe-bloco-emitente {
             width: 83mm !important;
             min-width: 83mm !important;
             max-width: 83mm !important;
             box-sizing: border-box !important;
           }
 
-          .danfe-bloco-danfe {
+          .danfe-container .danfe-bloco-danfe,
+          .danfe-print-view .danfe-bloco-danfe,
+          body.print-danfe .danfe-bloco-danfe {
             width: 35mm !important;
             min-width: 35mm !important;
             max-width: 35mm !important;
             box-sizing: border-box !important;
           }
 
-          .danfe-bloco-chave {
+          .danfe-container .danfe-bloco-chave,
+          .danfe-print-view .danfe-bloco-chave,
+          body.print-danfe .danfe-bloco-chave {
             flex: 1 1 auto !important;
             min-width: 78mm !important;
             box-sizing: border-box !important;
           }
 
-          .danfe-secao-produtos {
+          .danfe-container .danfe-secao-produtos,
+          .danfe-print-view .danfe-secao-produtos,
+          body.print-danfe .danfe-secao-produtos {
             flex: 1 1 auto !important;
             min-height: 20mm !important;
             display: flex !important;
@@ -605,29 +689,26 @@ export default function DanfeEspelhoA4({
             width: 100% !important;
           }
 
-          .danfe-bloco-rodape {
+          /* Bloco Dados Adicionais FIXADO no rodapé apenas da DANFE */
+          .danfe-container .danfe-bloco-rodape,
+          .danfe-print-view .danfe-bloco-rodape,
+          body.print-danfe .danfe-bloco-rodape {
             margin-top: auto !important;
             flex-shrink: 0 !important;
             width: 100% !important;
             page-break-inside: avoid !important;
             break-inside: avoid !important;
+            page-break-after: avoid !important;
+            break-after: avoid !important;
           }
 
-          .danfe-bloco-rodape-quadro {
+          .danfe-container .danfe-bloco-rodape-quadro,
+          .danfe-print-view .danfe-bloco-rodape-quadro,
+          body.print-danfe .danfe-bloco-rodape-quadro {
             min-height: 32mm !important;
             box-sizing: border-box !important;
             overflow: visible !important;
             width: 100% !important;
-            page-break-inside: avoid !important;
-            break-inside: avoid !important;
-          }
-
-          table {
-            page-break-inside: avoid !important;
-            break-inside: avoid !important;
-          }
-
-          tr {
             page-break-inside: avoid !important;
             break-inside: avoid !important;
           }
@@ -796,7 +877,7 @@ export default function DanfeEspelhoA4({
           <div className="flex h-full">
             <div className="p-1 border-r border-black flex flex-col justify-between flex-1" style={{ borderRight: '1px solid #000' }}>
               <div className="text-[6.5pt] uppercase font-semibold leading-tight text-gray-800">
-                RECEBEMOS DE <strong className="text-black">{emitente.razaoSocial}</strong> OS PRODUTOS E/OU SERVIÇOS CONSTANTES DA NOTA FISCAL ELETRÔNICA INDICADA AO LADO. EMISSÃO: <strong>{dataEmissaoFormatada}</strong> • DESTINATÁRIO: <strong className="uppercase">{destinatario.nome}</strong> • VALOR TOTAL: <strong>{formatCurrency(valorTotalNota)}</strong>
+                RECEBEMOS DE <strong className="text-black">{emitente.razaoSocial && emitente.razaoSocial.toUpperCase() !== 'UNDEFINED' ? emitente.razaoSocial : 'L. M. BANZATTO METAIS'}</strong> OS PRODUTOS E/OU SERVIÇOS CONSTANTES DA NOTA FISCAL ELETRÔNICA INDICADA AO LADO. EMISSÃO: <strong>{dataEmissaoFormatada}</strong> • DESTINATÁRIO: <strong className="uppercase">{destinatario.nome}</strong> • VALOR TOTAL: <strong>{formatCurrency(valorTotalNota)}</strong>
               </div>
               <div className="flex gap-2 pt-0.5 border-t border-black text-[5.5pt]" style={{ borderTop: '1px solid #000' }}>
                 <div className="border-r border-black pr-2 shrink-0" style={{ width: '45mm', borderRight: '1px solid #000' }}>
@@ -1266,13 +1347,16 @@ export default function DanfeEspelhoA4({
         {/* =========================================================================
             8. BLOCO DE DADOS ADICIONAIS NO RODAPÉ (Altura flexível mínima de 32mm)
             ========================================================================= */}
-        <div className="danfe-bloco-rodape mt-auto shrink-0 pt-0.5 w-full">
+        <div 
+          className="danfe-bloco-rodape mt-auto shrink-0 pt-0.5 w-full"
+          style={{ pageBreakInside: 'avoid', breakInside: 'avoid', pageBreakAfter: 'avoid', breakAfter: 'avoid', marginTop: 'auto' }}
+        >
           <div className="text-[7.5px] font-black uppercase tracking-wider text-gray-800 mb-0.5">
             DADOS ADICIONAIS
           </div>
           <div 
             className="danfe-bloco-rodape-quadro border border-black grid grid-cols-12 divide-x divide-black text-[7px]" 
-            style={{ minHeight: '32mm', border: '1px solid #000' }}
+            style={{ minHeight: '32mm', border: '1px solid #000', pageBreakInside: 'avoid', breakInside: 'avoid' }}
           >
             <div className="col-span-8 p-1.5 flex flex-col justify-between leading-normal overflow-hidden" style={{ borderRight: '1px solid #000' }}>
               <div>

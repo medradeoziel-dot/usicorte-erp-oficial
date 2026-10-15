@@ -332,6 +332,12 @@
     padding-top: 0 !important;
   }
 
+  .danfe-container .danfe-print-container,
+  .danfe-container #folha-danfe-a4,
+  .danfe-container .danfe-folha-a4,
+  .danfe-print-view .danfe-print-container,
+  .danfe-print-view #folha-danfe-a4,
+  .danfe-print-view .danfe-folha-a4,
   body.print-danfe .danfe-print-container,
   body.print-danfe #folha-danfe-a4,
   body.print-danfe .danfe-folha-a4 {
@@ -343,9 +349,9 @@
     left: auto !important;
     width: 100% !important;
     max-width: 202mm !important;
-    min-height: 0 !important;
-    max-height: none !important;
-    height: auto !important;
+    min-height: 285mm !important;
+    height: 285mm !important;
+    max-height: 288mm !important;
     margin: 0 auto !important;
     margin-top: 0 !important;
     margin-bottom: 0 !important;
@@ -369,8 +375,24 @@
     break-before: avoid !important;
   }
 
+  .danfe-container table,
+  .danfe-print-view table,
+  body.print-danfe .danfe-container table {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  .danfe-container tr,
+  .danfe-print-view tr,
+  body.print-danfe .danfe-container tr {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
   /* Canhoto superior alinhado imediatamente ao topo */
-  .danfe-canhoto-topo {
+  .danfe-container .danfe-canhoto-topo,
+  .danfe-print-view .danfe-canhoto-topo,
+  body.print-danfe .danfe-canhoto-topo {
     margin-top: 0 !important;
     padding-top: 0 !important;
     height: 15mm !important;
@@ -384,7 +406,9 @@
   }
 
   /* Bloco do Emitente com 83mm fixos */
-  .danfe-bloco-emitente {
+  .danfe-container .danfe-bloco-emitente,
+  .danfe-print-view .danfe-bloco-emitente,
+  body.print-danfe .danfe-bloco-emitente {
     width: 83mm !important;
     min-width: 83mm !important;
     max-width: 83mm !important;
@@ -392,7 +416,9 @@
   }
 
   /* Quadro central DANFE com 35mm fixos */
-  .danfe-bloco-danfe {
+  .danfe-container .danfe-bloco-danfe,
+  .danfe-print-view .danfe-bloco-danfe,
+  body.print-danfe .danfe-bloco-danfe {
     width: 35mm !important;
     min-width: 35mm !important;
     max-width: 35mm !important;
@@ -400,14 +426,18 @@
   }
 
   /* Quadro da Chave de Acesso + Código de barras flexível */
-  .danfe-bloco-chave {
+  .danfe-container .danfe-bloco-chave,
+  .danfe-print-view .danfe-bloco-chave,
+  body.print-danfe .danfe-bloco-chave {
     flex: 1 1 auto !important;
     min-width: 78mm !important;
     box-sizing: border-box !important;
   }
 
   /* Tabela de produtos preenche o restante central */
-  .danfe-secao-produtos {
+  .danfe-container .danfe-secao-produtos,
+  .danfe-print-view .danfe-secao-produtos,
+  body.print-danfe .danfe-secao-produtos {
     flex: 1 1 auto !important;
     min-height: 20mm !important;
     display: flex !important;
@@ -417,15 +447,21 @@
   }
 
   /* Bloco Dados Adicionais fixado no rodapé */
-  .danfe-bloco-rodape {
+  .danfe-container .danfe-bloco-rodape,
+  .danfe-print-view .danfe-bloco-rodape,
+  body.print-danfe .danfe-bloco-rodape {
     margin-top: auto !important;
     flex-shrink: 0 !important;
     width: 100% !important;
     page-break-inside: avoid !important;
     break-inside: avoid !important;
+    page-break-after: avoid !important;
+    break-after: avoid !important;
   }
 
-  .danfe-bloco-rodape-quadro {
+  .danfe-container .danfe-bloco-rodape-quadro,
+  .danfe-print-view .danfe-bloco-rodape-quadro,
+  body.print-danfe .danfe-bloco-rodape-quadro {
     min-height: 32mm !important;
     box-sizing: border-box !important;
     overflow: visible !important;
