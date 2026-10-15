@@ -303,10 +303,13 @@ export default function SalesModule({
 
   const [numeroCotacao, setNumeroCotacao] = useState<string>(() => {
     if (quoteToEdit) {
-      return quoteToEdit.quoteNumber || quoteToEdit.id || generateNextQuoteNumber();
+      return quoteToEdit.quoteNumber || quoteToEdit.id || '';
     }
-    return generateNextQuoteNumber();
+    return '';
   });
+
+  // Alias semântico para o ID da cotação ativa no Supabase
+  const cotacaoId = editingQuoteId;
 
   // Validação em tempo real se o número de cotação já existe no sistema (memória + Supabase)
   const checkQuoteNumberExists = (num: string, originalNum?: string | null): { exists: boolean; existingQuote?: Quote; clientName?: string } => {
@@ -353,18 +356,18 @@ export default function SalesModule({
     };
   };
 
-  // 1. RESERVA IMEDIATA AO ABRIR A TELA (RASCUNHO AUTOMÁTICO NO SUPABASE):
-  // Ao abrir para uma nova cotação, chama supabase.rpc('gerar_proximo_numero_cotacao')
-  // e insere imediatamente o registro inicial no Supabase com status: 'RASCUNHO'.
-  // Assim, se outro computador clicar em "Nova Cotação" logo em seguida, o sistema
-  // automaticamente pulará para o próximo número (+1), eliminando qualquer colisão.
+  // 1. GERAR E RESERVAR NO BANCO NA ABERTURA (useEffect):
+  // Assim que a tela/modal de "Nova Cotação" for ABERTO:
+  // a) Chama supabase.rpc('gerar_proximo_numero_cotacao') para obter o número oficial atualizado
+  // b) Faz IMEDIATAMENTE um INSERT na tabela cotacoes com esse número gerado e status RASCUNHO
+  // c) Guarda o id da cotação recém-criada no estado local da aplicação (cotacaoId / editingQuoteId)
   useEffect(() => {
-    if (!editingQuoteNumberRef.current && !editingQuoteIdRef.current && !editingOriginalQuoteNumber && !isReservingRef.current) {
+    if (!quoteToEdit && !quoteToDuplicate && !editingQuoteId && !isReservingRef.current) {
       isReservingRef.current = true;
       setIsReservingQuote(true);
       reservarNovaCotacaoNoSupabase()
         .then(res => {
-          if (res?.numero) {
+          if (res?.numero && res?.id) {
             setNumeroCotacao(res.numero);
             setAutoSuggestedNumber(res.numero);
             setEditingQuoteId(res.id);
@@ -372,11 +375,13 @@ export default function SalesModule({
             editingQuoteIdRef.current = res.id;
             editingQuoteNumberRef.current = res.numero;
             setQuoteStatus('Rascunho');
-            console.log(`[SalesModule] Reserva atômica imediata criada: Nº ${res.numero} (ID: ${res.id})`);
+            quoteStatusRef.current = 'Rascunho';
+            isSavedRef.current = false;
+            console.log(`[SalesModule] Nova Cotação aberta: Nº ${res.numero} (ID: ${res.id}) reservada como RASCUNHO no Supabase`);
           }
         })
         .catch(err => {
-          console.warn('[SalesModule] Falha ao reservar cotação inicial no Supabase:', err);
+          console.warn('[SalesModule] Falha ao reservar cotação na abertura:', err);
         })
         .finally(() => {
           setIsReservingQuote(false);
@@ -1001,20 +1006,122 @@ export default function SalesModule({
     }
   }, [selectedMaterial]);
 
-  // When selectedClientId changes, auto fill client data
+  // 2. EDICÃO E SALVAMENTO VIA UPDATE NO SUPABASE:
+  // Conforme o usuário adiciona itens, cliente ou observações, as alterações são salvas/atualizadas via UPDATE
+  // na cotação já existente usando o cotacaoId (editingQuoteId).
+  const syncDraftUpdateToDb = (updatedFields?: Partial<Quote>, updatedItems?: QuoteItem[]) => {
+    const targetId = editingQuoteIdRef.current;
+    const cleanNum = (numeroCotacaoRef.current || numeroCotacao || '').trim();
+    if (!targetId || !cleanNum) return;
+
+    const currentItems = updatedItems !== undefined ? updatedItems : itemsRef.current;
+    const subtotal = Number(currentItems.reduce((sum, it) => sum + (it.subtotal || 0), 0).toFixed(2));
+    const totalWeight = Number(currentItems.reduce((sum, it) => sum + (Number(it.totalWeightKg) || 0), 0).toFixed(3));
+    const grand = Number(Math.max(0, subtotal - discountAmount + shippingAmount).toFixed(2));
+
+    const quoteToSync: Quote = {
+      id: targetId,
+      quoteNumber: cleanNum,
+      clientId: selectedClientId || undefined,
+      clientName: clientName.trim() || 'Cliente Balcão (UsiCorte)',
+      clientDocument: clientDocument.trim(),
+      contactPerson: contactPerson.trim(),
+      clientPhone: clientPhone.trim(),
+      clientEmail: clientEmail.trim(),
+      clientCity: clientCity.trim(),
+      clientState: clientState.trim(),
+      date: quoteDate,
+      validityDays: validityDays,
+      paymentTerms: paymentTerms,
+      status: quoteStatusRef.current || 'Rascunho',
+      items: currentItems,
+      discount: discountAmount,
+      discountPercent: 0,
+      shipping: shippingAmount,
+      subtotalTotal: subtotal,
+      grandTotal: grand,
+      totalWeightKg: totalWeight,
+      observations: observations,
+      createdAt: editingQuoteCreatedAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      ...updatedFields
+    };
+
+    saveCotacaoDb(quoteToSync, editingOriginalQuoteNumber || undefined).catch(err => {
+      console.warn('[SalesModule] Erro ao sincronizar alteração do rascunho no Supabase:', err);
+    });
+  };
+
+  // Sincronização automática em background (com debounce) para alterações nos campos de cabeçalho
+  useEffect(() => {
+    if (!editingQuoteId || isSavingQuote || isReservingQuote) return;
+
+    const timer = setTimeout(() => {
+      syncDraftUpdateToDb();
+    }, 1200);
+
+    return () => clearTimeout(timer);
+  }, [
+    clientName,
+    selectedClientId,
+    clientDocument,
+    contactPerson,
+    clientPhone,
+    clientEmail,
+    clientCity,
+    clientState,
+    observations,
+    discountAmount,
+    shippingAmount,
+    paymentTerms,
+    validityDays,
+    quoteDate
+  ]);
+
+  // When selectedClientId changes, auto fill client data e atualiza cotação existente via UPDATE
   const handleClientSelect = (clientId: string) => {
     setSelectedClientId(clientId);
-    if (!clientId) return;
+    if (!clientId) {
+      setClientName('Cliente Balcão (UsiCorte)');
+      setClientDocument('');
+      setContactPerson('');
+      setClientPhone('');
+      setClientEmail('');
+      setClientCity('');
+      setClientState('');
+      syncDraftUpdateToDb({
+        clientId: undefined,
+        clientName: 'Cliente Balcão (UsiCorte)',
+        clientDocument: '',
+        contactPerson: '',
+        clientPhone: '',
+        clientEmail: '',
+        clientCity: '',
+        clientState: ''
+      });
+      return;
+    }
 
     const found = clients.find(c => c.id === clientId);
     if (found) {
-      setClientName(found.fantasyName || found.name);
+      const cName = found.fantasyName || found.name;
+      setClientName(cName);
       setClientDocument(found.document);
       setContactPerson(found.contactPerson || '');
       setClientPhone(found.phone);
       setClientEmail(found.email);
       setClientCity(found.city);
       setClientState(found.state);
+      syncDraftUpdateToDb({
+        clientId: clientId,
+        clientName: cName,
+        clientDocument: found.document,
+        contactPerson: found.contactPerson || '',
+        clientPhone: found.phone,
+        clientEmail: found.email,
+        clientCity: found.city,
+        clientState: found.state
+      });
     }
   };
 
@@ -2128,16 +2235,20 @@ export default function SalesModule({
       id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
       description: `${item.description} (Cópia)`
     };
-    setItems([...items, duplicated]);
+    const nextItems = [...items, duplicated];
+    setItems(nextItems);
     setSuccessMessage('Item duplicado com sucesso!');
     setTimeout(() => setSuccessMessage(null), 2500);
+    syncDraftUpdateToDb({}, nextItems);
   };
 
   const handleDeleteItem = (id: string) => {
-    setItems(items.filter(i => i.id !== id));
+    const nextItems = items.filter(i => i.id !== id);
+    setItems(nextItems);
     if (editingItemId === id) {
       resetItemForm();
     }
+    syncDraftUpdateToDb({}, nextItems);
   };
 
   // Calculations for quote totals and total weight com travas toFixed(2) e toFixed(3)
@@ -2960,7 +3071,8 @@ export default function SalesModule({
                       type="text"
                       value={numeroCotacao}
                       onChange={(e) => setNumeroCotacao(e.target.value)}
-                      placeholder="Ex: COT-2026-000140 ou 5000"
+                      placeholder={isReservingQuote ? "Reservando cotação no banco..." : "Ex: COT-2026-000140 ou 5000"}
+                      disabled={isReservingQuote}
                       title="Número da cotação editável livremente. Você pode apagar e digitar qualquer número específico ou aleatório."
                       className={`w-full bg-transparent text-xs font-mono font-black outline-none transition-colors ${
                         isDuplicate 

@@ -2139,10 +2139,10 @@ export async function deleteCotacaoDb(idOrNumero: string): Promise<{ error: any 
     }
 
     // 2. EXCLUSÃO LÓGICA (SOFT DELETE)
-    // Atualiza status para 'cancelado', situacao para 'CANCELADO' e deletado_em com timestamp atual
+    // Atualiza status para 'rejeitado' (compatível com cotacoes_status_check), situacao para 'CANCELADO' e deletado_em com timestamp atual
     const softDeletePayload: Record<string, any> = {
       deletado_em: agoraIso,
-      status: 'cancelado',
+      status: 'rejeitado',
       situacao: 'CANCELADO',
       updated_at: agoraIso
     };
@@ -2156,7 +2156,7 @@ export async function deleteCotacaoDb(idOrNumero: string): Promise<{ error: any 
     // Fallback caso a coluna deletado_em não exista no schema do Supabase
     if (errUpdate && (errUpdate.code === '42703' || errUpdate.message?.toLowerCase().includes('deletado_em') || errUpdate.code === 'PGRST204')) {
       const fallbackPayload = {
-        status: 'cancelado',
+        status: 'rejeitado',
         situacao: 'CANCELADO',
         updated_at: agoraIso
       };

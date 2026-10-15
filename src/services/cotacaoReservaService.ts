@@ -76,12 +76,11 @@ export async function reservarNovaCotacaoNoSupabase(
     const hoje = new Date().toISOString().split('T')[0];
 
     // Payload de reserva inicial imediata no banco
-    const payloadCompleto: Record<string, any> = {
+    const payloadBase: Record<string, any> = {
       numero: proximoNumero,
-      numero_cotacao: proximoNumero,
       data: hoje,
       cliente_nome: 'Rascunho em Edição',
-      status: 'RASCUNHO',
+      status: 'rascunho',
       situacao: 'RASCUNHO',
       valor_total: 0,
       observacoes: 'Reserva automática imediata contra concorrência simultânea.',
@@ -89,52 +88,36 @@ export async function reservarNovaCotacaoNoSupabase(
     };
 
     try {
-      // 1. Tenta INSERT com payload completo (numero + numero_cotacao)
+      // 1. Tenta INSERT direto na tabela 'cotacoes'
       let res = await db
         .from('cotacoes')
-        .insert([payloadCompleto])
+        .insert([payloadBase])
         .select('id, numero, status, created_at')
         .single();
 
-      // 2. Se falhar porque a coluna numero_cotacao não existe no schema do Supabase:
-      if (res.error && (res.error.code === '42703' || res.error.message?.includes('numero_cotacao'))) {
-        const payloadSemNumeroCotacao = { ...payloadCompleto };
-        delete payloadSemNumeroCotacao.numero_cotacao;
-        res = await db
-          .from('cotacoes')
-          .insert([payloadSemNumeroCotacao])
-          .select('id, numero, status, created_at')
-          .single();
-      }
-
-      // 3. Se falhar por constraint de status lowercase ('rascunho' ao invés de 'RASCUNHO'):
+      // 2. Se falhar por constraint de status uppercase, tenta com 'RASCUNHO'
       if (res.error && (res.error.message?.toLowerCase().includes('status') || res.error.message?.toLowerCase().includes('check'))) {
-        const payloadStatusLower: Record<string, any> = {
-          ...payloadCompleto,
-          status: 'rascunho',
-          situacao: 'RASCUNHO'
-        };
-        delete payloadStatusLower.numero_cotacao;
+        const payloadUpper = { ...payloadBase, status: 'RASCUNHO' };
         res = await db
           .from('cotacoes')
-          .insert([payloadStatusLower])
+          .insert([payloadUpper])
           .select('id, numero, status, created_at')
           .single();
       }
 
-      // 4. Se foi inserido com sucesso, retorna os dados da reserva garantida
+      // 3. Se foi inserido com sucesso, retorna os dados da reserva garantida
       if (!res.error && res.data?.id) {
         console.log(`[Reserva Cotação] SUCESSO: Cotação ${proximoNumero} reservada no Supabase! ID=${res.data.id}, status=${res.data.status}`);
         return {
           id: String(res.data.id),
           numero: String(res.data.numero || proximoNumero),
           data: hoje,
-          status: (res.data.status === 'rascunho' ? 'rascunho' : 'RASCUNHO'),
+          status: 'rascunho',
           success: true
         };
       }
 
-      // 5. Se erro de chave duplicada (outro computador reservou exatamente no mesmo instante):
+      // 4. Se erro de chave duplicada (outro computador reservou exatamente no mesmo instante):
       if (res.error && (res.error.code === '23505' || res.error.message?.includes('duplicate key') || res.error.message?.includes('unique'))) {
         console.warn(`[Reserva Cotação] Conflito concorrente detectado no número ${proximoNumero} (tentativa ${tentativa}/${maxTentativas}). Buscando próximo número...`);
         continue;
