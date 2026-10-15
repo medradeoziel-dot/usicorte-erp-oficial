@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Client, Quote, FormaPagamentoFinanceiro, LancamentoFinanceiro } from '../types';
+import { Client, Quote, QuoteItem, FormaPagamentoFinanceiro, LancamentoFinanceiro } from '../types';
 import { 
   fetchCotacoesDb, 
   SupabaseCotacao, 
   atualizarSituacaoCotacaoDb,
   atualizarStatusPagamentoCotacaoDb,
-  sincronizarPagamentoContaReceberDb
+  sincronizarPagamentoContaReceberDb,
+  fetchItensByCotacaoId
 } from '../lib/db';
 import { formatCurrency, formatSafeDate, formatarMedidasLimpa } from '../utils/calculator';
 import { 
@@ -15,8 +16,12 @@ import {
   RegistroPagamentoCotacao
 } from '../services/inventoryFinanceService';
 import ExtratoCobrancaPrint, { ExtratoCotacaoItem, ExtratoCotacaoItemDetalhado } from './ExtratoCobrancaPrint';
+import EmissaoNfeModal from './EmissaoNfeModal';
+import DanfeEspelhoA4Modal from './DanfeEspelhoA4Modal';
+import { isNfeAutorizada, isNfeCancelada } from '../services/nfeService';
 import {
   FileText,
+  FileCheck,
   Search,
   Calendar,
   CheckSquare,
@@ -76,6 +81,10 @@ export default function FechamentoCotacoesModule({
   const [isExtratoModalOpen, setIsExtratoModalOpen] = useState<boolean>(false);
   const [isBaixaModalOpen, setIsBaixaModalOpen] = useState<boolean>(false);
   const [selectedQuoteDetail, setSelectedQuoteDetail] = useState<ExtratoCotacaoItem | null>(null);
+  const [quoteForNfeModal, setQuoteForNfeModal] = useState<Quote | null>(null);
+  const [clientForNfeModal, setClientForNfeModal] = useState<Client | null>(null);
+  const [quoteForDanfeModal, setQuoteForDanfeModal] = useState<Quote | null>(null);
+  const [autoPrintDanfeModal, setAutoPrintDanfeModal] = useState<boolean>(false);
 
   // Formulário de Baixa de Pagamento
   const [dataPagamentoBaixa, setDataPagamentoBaixa] = useState<string>(() => new Date().toISOString().split('T')[0]);
@@ -164,7 +173,14 @@ export default function FechamentoCotacoesModule({
                 info: it.observacao || it.info || '',
                 unitario: unit,
                 qtd: qte,
-                subtotal: sub
+                subtotal: sub,
+                ncm: it.ncm || '72085200',
+                cfop: it.cfop || it.cfop_interno || '5102',
+                cfop_interno: it.cfop_interno || '5102',
+                cfop_externo: it.cfop_externo || '6102',
+                unidade_medida: it.unidade_medida || 'PC',
+                csosn: '101 - Com permissão de crédito',
+                totalWeightKg: Number((it as any).peso_total || (it as any).totalWeightKg || 0)
               };
             });
           } else if (matchingLocal?.items && matchingLocal.items.length > 0) {
@@ -181,7 +197,14 @@ export default function FechamentoCotacoesModule({
                 info: it.notes || it.observacao || it.info || '',
                 unitario: unit,
                 qtd: qte,
-                subtotal: sub
+                subtotal: sub,
+                ncm: it.ncm || '72085200',
+                cfop: it.cfop || it.cfop_interno || '5102',
+                cfop_interno: it.cfop_interno || '5102',
+                cfop_externo: it.cfop_externo || '6102',
+                unidade_medida: it.unidade_medida || it.unidadeMedida || 'PC',
+                csosn: '101 - Com permissão de crédito',
+                totalWeightKg: Number(it.totalWeightKg || it.pesoTotal || 0)
               };
             });
           } else {
@@ -193,12 +216,16 @@ export default function FechamentoCotacoesModule({
               info: '',
               unitario: Number(q.valor_total) || 0,
               qtd: 1,
-              subtotal: Number(q.valor_total) || 0
+              subtotal: Number(q.valor_total) || 0,
+              ncm: '72085200',
+              cfop: '5102',
+              unidade_medida: 'PC',
+              csosn: '101 - Com permissão de crédito'
             }];
           }
 
           let itensResumo = '';
-          let pesoTotal = 0;
+          let pesoTotal = mappedItens.reduce((sum, it) => sum + (Number((it as any).totalWeightKg) || 0), 0);
           let qtdItens = mappedItens.length;
           itensResumo = mappedItens.map(i => `${i.produto} (${i.qtd}x ${i.medida})`).join(' | ');
 
@@ -232,21 +259,43 @@ export default function FechamentoCotacoesModule({
             };
           }
 
+          // Localiza cliente no cadastro para obter CNPJ/CPF completo e endereço
+          const foundClient = clients.find(c => 
+            (c.id && q.cliente_id && String(c.id) === String(q.cliente_id)) ||
+            (c.name && q.cliente_nome && c.name.trim().toLowerCase() === q.cliente_nome.trim().toLowerCase()) ||
+            (c.fantasyName && q.cliente_nome && c.fantasyName.trim().toLowerCase() === q.cliente_nome.trim().toLowerCase())
+          );
+
+          const clientDocVal = (q as any).documento || (q as any).cliente_documento || matchingLocal?.clientDocument || foundClient?.document || '';
+          const clientTelVal = q.telefone || matchingLocal?.clientPhone || foundClient?.phone || '';
+          const clientContatoVal = q.contato || matchingLocal?.contactPerson || foundClient?.contactPerson || '';
+          const clientEndVal = matchingLocal?.clientStreet ? `${matchingLocal.clientStreet}, ${matchingLocal.clientCity || ''}` : foundClient?.street ? `${foundClient.street}, ${foundClient.city || ''}` : '';
+          const clientCidVal = matchingLocal?.clientCity || foundClient?.city || '';
+
           resultList.push({
             id: q.id,
             numero: q.numero || q.id || 'COT-TEMP',
             data: q.data || (q.created_at ? q.created_at.split('T')[0] : new Date().toISOString().split('T')[0]),
             cliente: q.cliente_nome || 'Cliente Balcão',
-            clienteDoc: '',
-            clienteTelefone: q.telefone || '',
-            clienteContato: q.contato || '',
+            clienteDoc: clientDocVal,
+            clienteTelefone: clientTelVal,
+            clienteContato: clientContatoVal,
+            clienteEndereco: clientEndVal,
+            clienteCidade: clientCidVal,
             valor: Number(q.valor_total) || 0,
             pesoKg: pesoTotal,
             qtdItens: qtdItens || 1,
             itensResumo: itensResumo.slice(0, 180),
             statusCotacao: isPagoNaTabela ? 'faturado' : (q.status || 'aprovado'),
+            status_nfe: (q as any).status_nfe || (matchingLocal as any)?.status_nfe || 'Pendente',
+            nfe_numero: (q as any).nfe_numero || (matchingLocal as any)?.nfe_numero,
+            nfe_chave: (q as any).nfe_chave || (q as any).chave_acesso || (matchingLocal as any)?.nfe_chave,
+            chave_acesso: (q as any).chave_acesso || (q as any).nfe_chave || (matchingLocal as any)?.chave_acesso,
+            danfe_url: (q as any).danfe_url || (matchingLocal as any)?.danfe_url,
+            xml_url: (q as any).xml_url || (matchingLocal as any)?.xml_url,
             pagamento: pag,
-            itens: mappedItens
+            itens: mappedItens,
+            rawQuote: q
           });
         });
       }
@@ -280,7 +329,14 @@ export default function FechamentoCotacoesModule({
                   info: it.notes || it.observacao || it.info || '',
                   unitario: unit,
                   qtd: qte,
-                  subtotal: sub
+                  subtotal: sub,
+                  ncm: it.ncm || '72085200',
+                  cfop: it.cfop || it.cfop_interno || '5102',
+                  cfop_interno: it.cfop_interno || '5102',
+                  cfop_externo: it.cfop_externo || '6102',
+                  unidade_medida: it.unidade_medida || it.unidadeMedida || 'PC',
+                  csosn: '101 - Com permissão de crédito',
+                  totalWeightKg: Number(it.totalWeightKg || it.pesoTotal || 0)
                 };
               });
             } else {
@@ -292,7 +348,11 @@ export default function FechamentoCotacoesModule({
                 info: '',
                 unitario: Number(lq.grandTotal || lq.subtotalTotal || 0),
                 qtd: 1,
-                subtotal: Number(lq.grandTotal || lq.subtotalTotal || 0)
+                subtotal: Number(lq.grandTotal || lq.subtotalTotal || 0),
+                ncm: '72085200',
+                cfop: '5102',
+                unidade_medida: 'PC',
+                csosn: '101 - Com permissão de crédito'
               }];
             }
 
@@ -305,23 +365,36 @@ export default function FechamentoCotacoesModule({
               observacoes: lq.paymentNotes
             };
 
+            const foundClientLocal = clients.find(c => 
+              (c.id && lq.clientId && String(c.id) === String(lq.clientId)) ||
+              (c.document && lq.clientDocument && c.document.replace(/\D/g, '') === lq.clientDocument.replace(/\D/g, '')) ||
+              (c.name && lq.clientName && c.name.trim().toLowerCase() === lq.clientName.trim().toLowerCase())
+            );
+
             resultList.push({
               id: lq.id,
               numero: lq.quoteNumber || lq.id || 'COT-LOCAL',
               data: lq.date || lq.createdAt?.split('T')[0] || new Date().toISOString().split('T')[0],
               cliente: lq.clientName || 'Cliente Balcão',
-              clienteDoc: lq.clientDocument || '',
-              clienteTelefone: lq.clientPhone || '',
-              clienteEndereco: lq.clientCity ? `${lq.clientCity}/${lq.clientState || 'SP'}` : '',
-              clienteCidade: lq.clientCity || '',
-              clienteContato: lq.contactPerson || '',
+              clienteDoc: lq.clientDocument || foundClientLocal?.document || '',
+              clienteTelefone: lq.clientPhone || foundClientLocal?.phone || '',
+              clienteEndereco: lq.clientCity ? `${lq.clientCity}/${lq.clientState || 'SP'}` : foundClientLocal?.street ? `${foundClientLocal.street}, ${foundClientLocal.city || ''}` : '',
+              clienteCidade: lq.clientCity || foundClientLocal?.city || '',
+              clienteContato: lq.contactPerson || foundClientLocal?.contactPerson || '',
               valor: Number(lq.grandTotal || lq.subtotalTotal || 0),
               pesoKg: Number(lq.totalWeightKg || 0),
               qtdItens: localMappedItens.length || 1,
               itensResumo: itensResumo.slice(0, 180),
               statusCotacao: lq.status || 'Rascunho',
+              status_nfe: (lq as any).status_nfe || 'Pendente',
+              nfe_numero: (lq as any).nfe_numero,
+              nfe_chave: (lq as any).nfe_chave || (lq as any).chave_acesso,
+              chave_acesso: (lq as any).chave_acesso || (lq as any).nfe_chave,
+              danfe_url: (lq as any).danfe_url,
+              xml_url: (lq as any).xml_url,
               pagamento: pag,
-              itens: localMappedItens
+              itens: localMappedItens,
+              rawQuote: lq
             });
           });
         }
@@ -758,6 +831,222 @@ export default function FechamentoCotacoesModule({
     await loadQuotesData();
   };
 
+  // Ação: Abrir Fluxo / Modal de Emissão de NF-e para Cotações Selecionadas ou Individual
+  const handleEmitirNfe = async (cotacoesParaEmitir: ExtratoCotacaoItem[]) => {
+    // 1. Verificação: ao menos 1 cotação selecionada
+    if (!cotacoesParaEmitir || cotacoesParaEmitir.length === 0) {
+      alert('Selecione ao menos 1 cotação nos checkboxes da tabela para emitir a NF-e.');
+      return;
+    }
+
+    // 2. Validação contra cotações com NF-e cancelada na SEFAZ
+    const cotacaoCancelada = cotacoesParaEmitir.find(q => isNfeCancelada(q.status_nfe));
+    if (cotacaoCancelada) {
+      alert(`A cotação Nº ${cotacaoCancelada.numero} possui NF-e CANCELADA na SEFAZ (Status 101) e não pode ser faturada novamente.`);
+      return;
+    }
+
+    // Alerta caso cotações de clientes distintos sejam marcadas simultaneamente
+    const clientesDistintos = new Set(
+      cotacoesParaEmitir.map(q => (q.clienteDoc || q.cliente || '').trim().toLowerCase())
+    );
+    if (clientesDistintos.size > 1) {
+      const confirmDiff = confirm(
+        'Atenção: As cotações selecionadas possuem identificações de clientes diferentes. A NF-e consolidada será gerada com o cliente principal da primeira cotação selecionada. Deseja prosseguir?'
+      );
+      if (!confirmDiff) return;
+    }
+
+    // 2. a) O Cliente selecionado (Razão Social / CNPJ)
+    const primaryQuote = cotacoesParaEmitir[0];
+    const targetDocClean = (primaryQuote.clienteDoc || '').replace(/\D/g, '');
+    const targetNameClean = (primaryQuote.cliente || '').trim().toLowerCase();
+
+    let clientObj = clients.find(c => {
+      if (targetDocClean && c.document && c.document.replace(/\D/g, '') === targetDocClean) return true;
+      const cName = (c.fantasyName || c.name || c.nome_fantasia || c.nome || '').trim().toLowerCase();
+      return cName && (cName === targetNameClean || cName.includes(targetNameClean) || targetNameClean.includes(cName));
+    });
+
+    if (!clientObj) {
+      clientObj = {
+        id: primaryQuote.id || `cli-${Date.now()}`,
+        type: ((primaryQuote.clienteDoc || '').replace(/\D/g, '').length > 11 ? 'CNPJ' : 'CPF') as 'CNPJ' | 'CPF',
+        document: primaryQuote.clienteDoc || '',
+        name: primaryQuote.cliente || 'Cliente Selecionado',
+        fantasyName: primaryQuote.cliente || 'Cliente Selecionado',
+        situation: 'ATIVA',
+        cep: '13000-000',
+        street: primaryQuote.clienteEndereco || 'Rua Principal',
+        neighborhood: 'Centro',
+        city: primaryQuote.clienteCidade || 'Campinas',
+        state: 'SP',
+        phone: primaryQuote.clienteTelefone || '',
+        email: '',
+        enabled: true,
+        registrationDate: new Date().toISOString().split('T')[0],
+        contactPerson: primaryQuote.clienteContato || ''
+      };
+    }
+
+    // 2. b) A lista unificada de todos os itens das cotações marcadas
+    // 2. d) Aplicação do CSOSN 101 nos itens
+    let seqItem = 1;
+    const itensUnificados: QuoteItem[] = [];
+
+    for (const q of cotacoesParaEmitir) {
+      const refCot = q.numero || q.id || 'COT';
+      let itensDestaCotacao: ExtratoCotacaoItemDetalhado[] = q.itens || [];
+
+      // Se a cotação tiver apenas item genérico ou itens vazios, busca os itens integrais no Supabase
+      if (q.id && (!itensDestaCotacao.length || (itensDestaCotacao.length === 1 && itensDestaCotacao[0].produto === 'SERVIÇOS DE CORTE DIVERSOS'))) {
+        try {
+          const dbItems = await fetchItensByCotacaoId(q.id);
+          if (dbItems && dbItems.length > 0) {
+            itensDestaCotacao = dbItems.map((it: any, idx: number) => ({
+              id: it.id || idx + 1,
+              produto: (it.produto || it.material || 'MATERIAL').toUpperCase(),
+              medida: it.medida || '—',
+              descricao: it.descricao || 'Item industrial',
+              info: it.observacao || it.info || '',
+              unitario: Number(it.valor_unitario) || 0,
+              qtd: Number(it.quantidade) || 1,
+              subtotal: Number(it.valor_total) || ((Number(it.valor_unitario) || 0) * (Number(it.quantidade) || 1)),
+              ncm: it.ncm || '72085200',
+              cfop: it.cfop || it.cfop_interno || '5102',
+              cfop_interno: it.cfop_interno || '5102',
+              cfop_externo: it.cfop_externo || '6102',
+              unidade_medida: it.unidade_medida || 'PC',
+              csosn: '101 - Com permissão de crédito',
+              totalWeightKg: Number((it as any).peso_total || (it as any).totalWeightKg || 0)
+            }));
+          }
+        } catch (e) {
+          console.warn('Aviso ao carregar itens detalhados do Supabase:', e);
+        }
+      }
+
+      if (itensDestaCotacao && itensDestaCotacao.length > 0) {
+        itensDestaCotacao.forEach(it => {
+          const unit = Number(it.unitario) || 0;
+          const qte = Number(it.qtd) || 1;
+          const sub = Number(it.subtotal) || (unit * qte);
+          const peso = Number(it.totalWeightKg) || 0;
+
+          itensUnificados.push({
+            id: `NFE-${seqItem++}-${it.id || ''}`,
+            date: q.data || new Date().toISOString().slice(0, 10),
+            companyName: clientObj?.name || clientObj?.fantasyName || q.cliente,
+            constant: '1.0',
+            diameter: it.medida || '',
+            description: it.descricao || it.produto || `Item #${seqItem}`,
+            descricao: it.descricao || it.produto || `Item #${seqItem}`,
+            material: it.produto || 'Aço Carbono',
+            constanteNome: it.produto || 'Material',
+            measure: it.medida || 'Conforme desenho',
+            widthLength: it.medida || '',
+            quantity: qte,
+            qtd: qte,
+            unitPrice: unit,
+            valorUnitario: unit,
+            subtotal: sub,
+            notes: it.info ? `${it.info} (Ref. ${refCot})` : `Ref. ${refCot}`,
+            observacao: it.info ? `${it.info} (Ref. ${refCot})` : `Ref. ${refCot}`,
+            ncm: it.ncm || '72085200',
+            cfop: it.cfop || it.cfop_interno || '5102',
+            cfop_interno: it.cfop_interno || '5102',
+            cfop_externo: it.cfop_externo || '6102',
+            // d) Aplicação do CSOSN 101 nos itens
+            csosn: '101 - Com permissão de crédito',
+            unidade_medida: it.unidade_medida || 'PC',
+            totalWeightKg: peso,
+            pesoTotal: peso,
+            unitWeightKg: qte > 0 ? peso / qte : 0,
+            cotacaoOrigem: refCot
+          });
+        });
+      } else {
+        // Fallback: item consolidado com o valor da cotação
+        itensUnificados.push({
+          id: `NFE-${seqItem++}`,
+          date: q.data || new Date().toISOString().slice(0, 10),
+          companyName: clientObj?.name || clientObj?.fantasyName || q.cliente,
+          constant: '1.0',
+          diameter: '—',
+          description: q.itensResumo || `Serviços industriais de corte e conformação (Ref. ${refCot})`,
+          descricao: q.itensResumo || `Serviços industriais de corte e conformação (Ref. ${refCot})`,
+          material: 'Aço Carbono',
+          constanteNome: 'Aço',
+          measure: 'Conforme desenho',
+          widthLength: '',
+          quantity: 1,
+          qtd: 1,
+          unitPrice: q.valor,
+          valorUnitario: q.valor,
+          subtotal: q.valor,
+          notes: `Ref. ${refCot}`,
+          observacao: `Ref. ${refCot}`,
+          ncm: '72085200',
+          cfop: '5102',
+          cfop_interno: '5102',
+          cfop_externo: '6102',
+          // d) Aplicação do CSOSN 101 nos itens
+          csosn: '101 - Com permissão de crédito',
+          unidade_medida: 'PC',
+          totalWeightKg: q.pesoKg || 0,
+          pesoTotal: q.pesoKg || 0,
+          unitWeightKg: q.pesoKg || 0,
+          cotacaoOrigem: refCot
+        });
+      }
+    }
+
+    // 2. c) O valor total consolidado das cotações
+    const valorTotalConsolidado = itensUnificados.reduce((sum, it) => sum + (it.subtotal || 0), 0);
+    const pesoTotalConsolidado = itensUnificados.reduce((sum, it) => sum + (it.totalWeightKg || 0), 0);
+
+    const listaNumeros = cotacoesParaEmitir.map(q => q.numero).filter(Boolean);
+    const listaIds = cotacoesParaEmitir.map(q => q.id || q.numero).filter(Boolean);
+    const textoRef = `Ref. Cotações: ${listaNumeros.join(', ')}`;
+
+    const unifiedQuote: Quote = {
+      id: cotacoesParaEmitir.length === 1 && cotacoesParaEmitir[0].id ? cotacoesParaEmitir[0].id : `MULTI-FECHAMENTO-${Date.now()}`,
+      quoteNumber: cotacoesParaEmitir.length === 1 ? cotacoesParaEmitir[0].numero : listaNumeros.join(', '),
+      date: cotacoesParaEmitir[0].data || new Date().toISOString().split('T')[0],
+      createdAt: cotacoesParaEmitir[0].data || new Date().toISOString(),
+      clientId: clientObj.id,
+      clientName: clientObj.name || clientObj.fantasyName || primaryQuote.cliente,
+      clientDocument: clientObj.document || primaryQuote.clienteDoc || '',
+      clientPhone: clientObj.phone || primaryQuote.clienteTelefone || '',
+      clientStreet: clientObj.street || primaryQuote.clienteEndereco || '',
+      clientCity: clientObj.city || primaryQuote.clienteCidade || '',
+      contactPerson: clientObj.contactPerson || primaryQuote.clienteContato || '',
+      items: itensUnificados,
+      subtotalTotal: valorTotalConsolidado,
+      grandTotal: valorTotalConsolidado,
+      totalWeightKg: pesoTotalConsolidado,
+      discount: 0,
+      shipping: 0,
+      observations: cotacoesParaEmitir.length > 1 
+        ? `${textoRef}. Fechamento e faturamento de cotações.` 
+        : (primaryQuote.rawQuote?.observations || `Ref. Cotação ${primaryQuote.numero}`),
+      validityDays: 10,
+      paymentTerms: 'À Vista',
+      updatedAt: new Date().toISOString(),
+      status: 'Aprovado',
+      status_nfe: cotacoesParaEmitir.length === 1 ? (cotacoesParaEmitir[0].status_nfe || 'Pendente') : 'Pendente',
+      nfe_numero: cotacoesParaEmitir.length === 1 ? cotacoesParaEmitir[0].nfe_numero : undefined,
+      nfe_chave: cotacoesParaEmitir.length === 1 ? (cotacoesParaEmitir[0].nfe_chave || cotacoesParaEmitir[0].chave_acesso) : undefined,
+      danfe_url: cotacoesParaEmitir.length === 1 ? cotacoesParaEmitir[0].danfe_url : undefined,
+      xml_url: cotacoesParaEmitir.length === 1 ? cotacoesParaEmitir[0].xml_url : undefined,
+      origemCotacoes: listaNumeros,
+      origemCotacaoIds: listaIds
+    };
+
+    setClientForNfeModal(clientObj);
+    setQuoteForNfeModal(unifiedQuote);
+  };
+
   return (
     <div className="fechamento-root-container fechamento-cotacoes-module print-fechamento flex-1 flex flex-col h-full bg-slate-950 text-slate-100 overflow-hidden">
       {/* REGRAS ISOLADAS DE IMPRESSÃO EXCLUSIVAS DO COMPONENTE DE FECHAMENTO */}
@@ -1139,6 +1428,20 @@ export default function FechamentoCotacoesModule({
             </button>
           )}
 
+          {/* Botão Emitir NF-e das Selecionadas */}
+          <button
+            onClick={() => handleEmitirNfe(selectedQuotes)}
+            className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
+              selectedQuotes.length > 0
+                ? 'bg-blue-700 hover:bg-blue-600 text-white shadow-lg shadow-blue-700/40 ring-2 ring-blue-400/60 animate-in fade-in zoom-in-95'
+                : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 hover:text-white'
+            }`}
+            title="Emitir Nota Fiscal Eletrônica (NF-e) unificada das cotações selecionadas"
+          >
+            <FileText className="w-4 h-4 text-blue-200" />
+            <span>📄 Emitir NF-e das Selecionadas {selectedQuotes.length > 0 ? `(${selectedQuotes.length})` : ''}</span>
+          </button>
+
           {selectedQuotes.length > 0 && (
             <button
               onClick={handleAbrirBaixa}
@@ -1233,7 +1536,7 @@ export default function FechamentoCotacoesModule({
                   <th className="p-3 text-right w-28">Valor (R$)</th>
                   <th className="p-3 text-center w-24">Status Cotação</th>
                   <th className="p-3 text-center w-32">Status Pagamento</th>
-                  <th className="p-3 text-center w-24">Ações</th>
+                  <th className="p-3 text-center w-28">Ações</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60">
@@ -1336,6 +1639,27 @@ export default function FechamentoCotacoesModule({
                             title="Ver Detalhes"
                           >
                             <Eye className="w-3.5 h-3.5" />
+                          </button>
+
+                          {/* Botão Rápido Emitir NF-e Individual */}
+                          <button
+                            onClick={() => handleEmitirNfe([q])}
+                            className={`p-1.5 rounded-lg transition-colors text-[10px] ${
+                              isNfeAutorizada(q.status_nfe)
+                                ? 'bg-indigo-950/40 hover:bg-indigo-900/60 text-indigo-300 border border-indigo-500/30'
+                                : 'bg-blue-950/50 hover:bg-blue-900/70 text-blue-300 border border-blue-500/30'
+                            }`}
+                            title={
+                              isNfeAutorizada(q.status_nfe)
+                                ? `NF-e Nº ${q.nfe_numero || ''} Autorizada - Ver / Reemitir DANFE`
+                                : `Emitir NF-e da cotação ${q.numero}`
+                            }
+                          >
+                            {isNfeAutorizada(q.status_nfe) ? (
+                              <FileCheck className="w-3.5 h-3.5 text-indigo-400" />
+                            ) : (
+                              <FileText className="w-3.5 h-3.5 text-blue-400" />
+                            )}
                           </button>
 
                           {isPago ? (
@@ -1689,6 +2013,46 @@ export default function FechamentoCotacoesModule({
             </div>
           </div>
         </div>
+      )}
+
+      {/* 8. MODAL DE EMISSÃO / TRANSMISSÃO FISCAL DA NF-E (SEFAZ) */}
+      {quoteForNfeModal && (
+        <EmissaoNfeModal
+          quote={quoteForNfeModal}
+          client={clientForNfeModal}
+          onSuccess={(updated) => {
+            setQuoteForNfeModal(null);
+            setQuoteForDanfeModal(updated);
+            setAutoPrintDanfeModal(true);
+            setFeedbackMensagem({
+              tipo: 'success',
+              texto: `NF-e emitida e autorizada com sucesso! (Nº ${updated.nfe_numero || ''})`
+            });
+            loadQuotesData();
+          }}
+          onClose={() => setQuoteForNfeModal(null)}
+        />
+      )}
+
+      {/* 9. MODAL DE VISUALIZAÇÃO E IMPRESSÃO DA DANFE A4 OFICIAL */}
+      {quoteForDanfeModal && (
+        <DanfeEspelhoA4Modal
+          isOpen={Boolean(quoteForDanfeModal)}
+          onClose={() => {
+            setQuoteForDanfeModal(null);
+            setAutoPrintDanfeModal(false);
+          }}
+          quote={quoteForDanfeModal}
+          client={clientForNfeModal}
+          isPrevia={!isNfeAutorizada(quoteForDanfeModal.status_nfe)}
+          autoPrint={autoPrintDanfeModal}
+          onTransmit={() => {
+            const q = quoteForDanfeModal;
+            setQuoteForDanfeModal(null);
+            setAutoPrintDanfeModal(false);
+            if (q) setQuoteForNfeModal(q);
+          }}
+        />
       )}
     </div>
   );

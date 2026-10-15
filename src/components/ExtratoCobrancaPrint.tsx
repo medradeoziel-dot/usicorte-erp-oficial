@@ -14,6 +14,14 @@ export interface ExtratoCotacaoItemDetalhado {
   unitario: number;
   qtd: number;
   subtotal: number;
+  ncm?: string;
+  cfop?: string;
+  cfop_interno?: string;
+  cfop_externo?: string;
+  csosn?: string;
+  unidade_medida?: string;
+  totalWeightKg?: number;
+  cotacaoOrigem?: string;
 }
 
 export interface ExtratoCotacaoItem {
@@ -33,6 +41,13 @@ export interface ExtratoCotacaoItem {
   statusCotacao?: string;
   pagamento?: RegistroPagamentoCotacao;
   itens?: ExtratoCotacaoItemDetalhado[];
+  status_nfe?: string;
+  nfe_numero?: string;
+  nfe_chave?: string;
+  chave_acesso?: string;
+  danfe_url?: string;
+  xml_url?: string;
+  rawQuote?: any;
 }
 
 interface ExtratoCobrancaPrintProps {
