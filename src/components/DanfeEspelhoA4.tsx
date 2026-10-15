@@ -613,9 +613,9 @@ export default function DanfeEspelhoA4({
             left: auto !important;
             width: 100% !important;
             max-width: 202mm !important;
-            min-height: 285mm !important;
-            height: 285mm !important;
-            max-height: 288mm !important;
+            min-height: 282mm !important;
+            height: auto !important;
+            max-height: none !important;
             margin: 0 auto !important;
             margin-top: 0 !important;
             margin-bottom: 0 !important;
@@ -629,10 +629,10 @@ export default function DanfeEspelhoA4({
             border: 1px solid #000000 !important;
             overflow: visible !important;
             box-shadow: none !important;
-            page-break-after: avoid !important;
-            break-after: avoid !important;
-            page-break-inside: avoid !important;
-            break-inside: avoid !important;
+            page-break-after: auto !important;
+            break-after: auto !important;
+            page-break-inside: auto !important;
+            break-inside: auto !important;
             page-break-before: avoid !important;
             break-before: avoid !important;
           }
@@ -687,6 +687,14 @@ export default function DanfeEspelhoA4({
             flex-direction: column !important;
             overflow: visible !important;
             width: 100% !important;
+          }
+
+          .danfe-container .danfe-secao-produtos > div,
+          .danfe-print-view .danfe-secao-produtos > div,
+          body.print-danfe .danfe-secao-produtos > div {
+            flex: 1 1 auto !important;
+            display: flex !important;
+            flex-direction: column !important;
           }
 
           /* Bloco Dados Adicionais FIXADO no rodapé apenas da DANFE */
@@ -834,8 +842,8 @@ export default function DanfeEspelhoA4({
         style={{
           width: '100%',
           maxWidth: '202mm',
-          minHeight: '286mm',
-          maxHeight: '289mm',
+          minHeight: '282mm',
+          maxHeight: itensFiscais.length <= 10 ? '289mm' : undefined,
           height: 'auto',
           padding: '0 2mm 1mm 2mm',
           paddingTop: 0,
@@ -1320,7 +1328,7 @@ export default function DanfeEspelhoA4({
                   </tr>
                 ))}
                 {/* Linhas vazias organizadas para preenchimento harmônico do espelho quando há poucos itens */}
-                {Array.from({ length: Math.max(0, 6 - itensFiscais.length) }).map((_, emptyIdx) => (
+                {Array.from({ length: Math.max(0, itensFiscais.length <= 10 ? 10 - itensFiscais.length : 0) }).map((_, emptyIdx) => (
                   <tr key={`empty-${emptyIdx}`} className="h-[17px]">
                     <td className="p-0.5 border-r border-black text-center font-mono" style={{ borderRight: '1px solid #000' }}>&nbsp;</td>
                     <td className="p-0.5 border-r border-black" style={{ borderRight: '1px solid #000' }}>&nbsp;</td>

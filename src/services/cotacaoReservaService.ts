@@ -20,17 +20,35 @@ export async function obterProximoNumeroCotacaoAtomics(): Promise<string> {
     const { data, error } = await db.rpc('gerar_proximo_numero_cotacao');
     if (!error && data !== null && data !== undefined) {
       let numStr = '';
-      if (typeof data === 'string' || typeof data === 'number') {
-        numStr = String(data).trim();
-      } else if (typeof data === 'object') {
-        numStr = String(
-          (data as any).numero || 
-          (data as any).numero_cotacao || 
-          (data as any).proximo_numero || 
-          (data as any).proximoNumero || 
-          Object.values(data)[0] || 
-          ''
-        ).trim();
+      if (typeof data === 'number') {
+        const ano = new Date().getFullYear();
+        numStr = `COT-${ano}-${String(data).padStart(6, '0')}`;
+      } else if (typeof data === 'string') {
+        const trimmed = data.trim();
+        if (/^\d+$/.test(trimmed)) {
+          const ano = new Date().getFullYear();
+          numStr = `COT-${ano}-${trimmed.padStart(6, '0')}`;
+        } else {
+          numStr = trimmed;
+        }
+      } else if (typeof data === 'object' && data !== null) {
+        const raw = (data as any).numero || 
+                    (data as any).numero_cotacao || 
+                    (data as any).proximo_numero || 
+                    (data as any).proximoNumero || 
+                    Object.values(data)[0] || '';
+        if (typeof raw === 'number') {
+          const ano = new Date().getFullYear();
+          numStr = `COT-${ano}-${String(raw).padStart(6, '0')}`;
+        } else {
+          const trimmed = String(raw).trim();
+          if (/^\d+$/.test(trimmed)) {
+            const ano = new Date().getFullYear();
+            numStr = `COT-${ano}-${trimmed.padStart(6, '0')}`;
+          } else {
+            numStr = trimmed;
+          }
+        }
       }
       if (numStr) {
         console.log('[Reserva Cotação] Número gerado atomicamente via RPC gerar_proximo_numero_cotacao:', numStr);

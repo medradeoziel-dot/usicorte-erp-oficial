@@ -1720,6 +1720,18 @@ export default function FechamentoCotacoesModule({
 
               <div className="flex items-center gap-2">
                 <button
+                  onClick={() => {
+                    setIsExtratoModalOpen(false);
+                    handleEmitirNfe(selectedQuotes);
+                  }}
+                  className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-lg shadow-indigo-600/30 transition-all cursor-pointer ring-2 ring-indigo-400/50"
+                  title="Emitir NF-e consolidada em lote das cotações deste extrato"
+                >
+                  <FileText className="w-4 h-4 text-indigo-100" />
+                  <span>📄 Emitir NF-e ({selectedQuotes.length})</span>
+                </button>
+
+                <button
                   onClick={handleImprimirExtrato}
                   className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-lg shadow-blue-600/30 transition-all cursor-pointer"
                   title="Imprimir ou Salvar em PDF"
@@ -1761,6 +1773,17 @@ export default function FechamentoCotacoesModule({
             <div className="extrato-modal-footer p-3 border-t border-slate-800 bg-slate-950 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400 shrink-0 no-print btn-no-print">
               <span>Layout certificado para impressão em folha A4 e exportação em PDF.</span>
               <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    setIsExtratoModalOpen(false);
+                    handleEmitirNfe(selectedQuotes);
+                  }}
+                  className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-lg shadow-indigo-600/30 transition-all cursor-pointer ring-2 ring-indigo-400/50"
+                  title="Emitir NF-e das cotações deste extrato"
+                >
+                  <FileText className="w-4 h-4 text-indigo-100" />
+                  <span>📄 Emitir NF-e ({selectedQuotes.length})</span>
+                </button>
                 <button
                   onClick={() => setIsExtratoModalOpen(false)}
                   className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-semibold transition-colors cursor-pointer text-xs"
@@ -2008,10 +2031,22 @@ export default function FechamentoCotacoesModule({
               </div>
             </div>
 
-            <div className="p-3 border-t border-slate-800 bg-slate-950 flex justify-end">
+            <div className="p-3 border-t border-slate-800 bg-slate-950 flex items-center justify-between gap-2">
+              <button
+                onClick={() => {
+                  const q = selectedQuoteDetail;
+                  setSelectedQuoteDetail(null);
+                  handleEmitirNfe([q]);
+                }}
+                className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-md shadow-indigo-600/30 transition-all cursor-pointer"
+                title="Emitir NF-e para esta cotação"
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span>📄 Emitir NF-e</span>
+              </button>
               <button
                 onClick={() => setSelectedQuoteDetail(null)}
-                className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-semibold text-xs"
+                className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-semibold text-xs transition-colors cursor-pointer"
               >
                 Fechar
               </button>

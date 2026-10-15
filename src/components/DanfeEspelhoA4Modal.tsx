@@ -805,9 +805,9 @@ export default function DanfeEspelhoA4Modal({
               left: auto !important;
               width: 100% !important;
               max-width: 202mm !important;
-              min-height: 285mm !important;
-              height: 285mm !important;
-              max-height: 288mm !important;
+              min-height: 282mm !important;
+              height: auto !important;
+              max-height: none !important;
               margin: 0 auto !important;
               margin-top: 0 !important;
               margin-bottom: 0 !important;
@@ -821,10 +821,10 @@ export default function DanfeEspelhoA4Modal({
               border: 1px solid #000000 !important;
               overflow: visible !important;
               box-shadow: none !important;
-              page-break-after: avoid !important;
-              break-after: avoid !important;
-              page-break-inside: avoid !important;
-              break-inside: avoid !important;
+              page-break-after: auto !important;
+              break-after: auto !important;
+              page-break-inside: auto !important;
+              break-inside: auto !important;
               page-break-before: avoid !important;
               break-before: avoid !important;
             }
@@ -879,6 +879,14 @@ export default function DanfeEspelhoA4Modal({
               flex-direction: column !important;
               overflow: visible !important;
               width: 100% !important;
+            }
+
+            .danfe-container .danfe-secao-produtos > div,
+            .danfe-print-view .danfe-secao-produtos > div,
+            body.print-danfe .danfe-secao-produtos > div {
+              flex: 1 1 auto !important;
+              display: flex !important;
+              flex-direction: column !important;
             }
 
             /* Bloco Dados Adicionais FIXADO no rodapé apenas da DANFE */
