@@ -61,6 +61,8 @@ export interface DadosEmitenteNfe {
   email?: string;
   regimeTributario: string;
   aliquotaIcmsSimples?: number;
+  aliquotaIbs?: number;
+  aliquotaCbs?: number;
   email_contato?: string;
   telefone_1?: string;
   telefone_2?: string;
@@ -787,7 +789,7 @@ export async function transmitirCancelamentoNfeSefaz(
   const y = String(dataEvento.getFullYear()).slice(-2);
   const m = String(dataEvento.getMonth() + 1).padStart(2, '0');
   const d = String(dataEvento.getDate()).padStart(2, '0');
-  const protocoloCancelamento = `135${y}${m}${d}${String(Math.floor(100000000 + Math.random() * 900000000))}`;
+  let protocoloCancelamento = `135${y}${m}${d}${String(Math.floor(100000000 + Math.random() * 900000000))}`;
   const protocoloAutorizacao = quote.protocolo_autorizacao || quote.protocolo_nfe || `135${y}${m}${d}000000001`;
 
   // 4. Constrói o XML oficial do evento de cancelamento da NF-e (procEventoNFe Modelo 55 - tpEvento 110111)
@@ -807,6 +809,8 @@ export async function transmitirCancelamentoNfeSefaz(
   const soapEnvelopeCancelamento = gerarEnvelopeSoapEvento(xmlCancelamento, '1');
   const isDirectSoapCancel = endpointCancelamento.includes('.asmx') || endpointCancelamento.includes('fazenda.sp.gov.br');
 
+  let cancelamentoConfirmado = false;
+
   if (isDirectSoapCancel) {
     try {
       const sefazResponse = await fetch(endpointCancelamento, {
@@ -818,21 +822,45 @@ export async function transmitirCancelamentoNfeSefaz(
         body: soapEnvelopeCancelamento
       });
 
-      if (sefazResponse.ok) {
-        const responseXml = await sefazResponse.text();
-        const dadosRetorno = extrairDadosRetornoSefazXml(responseXml);
-        if (dadosRetorno.cStat && dadosRetorno.cStat !== '101' && dadosRetorno.cStat !== '135') {
-          return {
-            sucesso: false,
-            statusNfe: 'Erro',
-            cStat: dadosRetorno.cStat,
-            xMotivo: `Rejeição SEFAZ ${dadosRetorno.cStat}: ${dadosRetorno.xMotivo || 'Rejeição no cancelamento'}`,
-            mensagemErro: `Rejeição SEFAZ ${dadosRetorno.cStat}: ${dadosRetorno.xMotivo || 'Rejeição no cancelamento'}`
-          };
-        }
+      if (!sefazResponse.ok) {
+        const errorText = await sefazResponse.text();
+        const dadosErr = extrairDadosRetornoSefazXml(errorText);
+        const cStatErr = dadosErr.cStat || String(sefazResponse.status);
+        const xMotivoErr = dadosErr.xMotivo || sefazResponse.statusText || 'Falha de comunicação SOAP com a SEFAZ-SP';
+        return {
+          sucesso: false,
+          statusNfe: 'Erro',
+          cStat: cStatErr,
+          xMotivo: `Falha WebService Cancelamento SEFAZ-SP (${sefazResponse.status}): ${xMotivoErr}`,
+          mensagemErro: `Falha WebService Cancelamento SEFAZ-SP (${sefazResponse.status}): ${xMotivoErr}`
+        };
       }
+
+      const responseXml = await sefazResponse.text();
+      const dadosRetorno = extrairDadosRetornoSefazXml(responseXml);
+      if (dadosRetorno.cStat && dadosRetorno.cStat !== '101' && dadosRetorno.cStat !== '135') {
+        return {
+          sucesso: false,
+          statusNfe: 'Erro',
+          cStat: dadosRetorno.cStat,
+          xMotivo: `Rejeição SEFAZ ${dadosRetorno.cStat}: ${dadosRetorno.xMotivo || 'Rejeição no cancelamento'}`,
+          mensagemErro: `Rejeição SEFAZ ${dadosRetorno.cStat}: ${dadosRetorno.xMotivo || 'Rejeição no cancelamento'}`
+        };
+      }
+
+      if (dadosRetorno.nProt) {
+        protocoloCancelamento = dadosRetorno.nProt;
+      }
+      cancelamentoConfirmado = true;
     } catch (soapErr: any) {
-      console.info(`[SEFAZ-SP Produção] Evento de cancelamento direcionado para WebService oficial: ${endpointCancelamento} (tpAmb = 1). Envelope SOAP 1.2 gerado com sucesso.`);
+      console.warn(`[SEFAZ-SP Produção] Comunicação SOAP direta de cancelamento falhou (${soapErr?.message || soapErr}).`);
+      return {
+        sucesso: false,
+        statusNfe: 'Erro',
+        cStat: 'CONEXAO_FALHOU',
+        xMotivo: `Falha na conexão com o WebService de Recepção de Eventos da SEFAZ-SP Produção (${endpointCancelamento}): ${soapErr?.message || 'Erro de rede ou certificado'}.`,
+        mensagemErro: `Falha na conexão com o WebService de Recepção de Eventos da SEFAZ-SP Produção (${endpointCancelamento}): ${soapErr?.message || 'Erro de rede ou certificado'}.`
+      };
     }
   } else if (endpointCancelamento) {
     try {
@@ -882,9 +910,31 @@ export async function transmitirCancelamentoNfeSefaz(
           mensagemErro: `Rejeição SEFAZ ${cStatRet}: ${xMotivoRet}`
         };
       }
+
+      if (sefazData?.protocolo || sefazData?.nProt) {
+        protocoloCancelamento = String(sefazData.protocolo || sefazData.nProt);
+      }
+      cancelamentoConfirmado = true;
     } catch (netErr: any) {
-      console.warn('Comunicação com proxy SEFAZ não respondeu, prosseguindo com homologação padrão do evento fiscal:', netErr);
+      console.warn('Comunicação com proxy SEFAZ cancelamento falhou:', netErr);
+      return {
+        sucesso: false,
+        statusNfe: 'Erro',
+        cStat: 'CONEXAO_FALHOU',
+        xMotivo: `Falha na conexão para cancelamento: ${netErr?.message || 'Servidor indisponível'}.`,
+        mensagemErro: `Falha na conexão para cancelamento: ${netErr?.message || 'Servidor indisponível'}.`
+      };
     }
+  }
+
+  if (!cancelamentoConfirmado) {
+    return {
+      sucesso: false,
+      statusNfe: 'Erro',
+      cStat: 'NAO_HOMOLOGADO',
+      xMotivo: 'Não foi possível confirmar a homologação do cancelamento da NF-e (Status 101) na SEFAZ-SP.',
+      mensagemErro: 'Não foi possível confirmar a homologação do cancelamento da NF-e (Status 101) na SEFAZ-SP.'
+    };
   }
 
   // 6. PERSISTÊNCIA DEFINITIVA NO SUPABASE (tabelas notas_fiscais e cotacoes):
@@ -1537,28 +1587,128 @@ export function gerarEnvelopeSoapEvento(
 </soap12:Envelope>`;
 }
 
-/**
- * Extrai dados estruturados de respostas XML retornadas pela SEFAZ
- */
-export function extrairDadosRetornoSefazXml(xmlString: string): {
+export interface DadosRetornoSefaz {
   cStat?: string;
   xMotivo?: string;
+  cStatNota?: string;
+  xMotivoNota?: string;
+  cStatLote?: string;
+  xMotivoLote?: string;
+  nRec?: string;
   nProt?: string;
   chNFe?: string;
   tpAmb?: string;
-} {
-  const cStatMatch = xmlString.match(/<cStat>(\d+)<\/cStat>/);
-  const xMotivoMatch = xmlString.match(/<xMotivo>([^<]+)<\/xMotivo>/);
-  const nProtMatch = xmlString.match(/<nProt>(\d+)<\/nProt>/);
-  const chNFeMatch = xmlString.match(/<chNFe>(\d+)<\/chNFe>/);
-  const tpAmbMatch = xmlString.match(/<tpAmb>(\d+)<\/tpAmb>/);
+  dhRecbto?: string;
+  digVal?: string;
+  isAutorizada: boolean;
+  isLotePendente: boolean;
+}
+
+/**
+ * Extrai dados estruturados de respostas XML retornadas pela SEFAZ (NF-e v4.00)
+ * Diferencia rigorosamente o status do lote (<retEnviNFe>) do status individual da nota (<protNFe><infProt>).
+ * Garante que:
+ * 1. O cStat retornado seja o status real da nota fiscal (cStat 100), e não apenas o status do lote (103/104/105).
+ * 2. Recibos (<nRec>) e lotes pendentes (103/105) sejam sinalizados como isLotePendente = true e JAMAIS como autorizados.
+ */
+export function extrairDadosRetornoSefazXml(xmlString: string): DadosRetornoSefaz {
+  if (!xmlString) {
+    return { isAutorizada: false, isLotePendente: false };
+  }
+
+  // 1. Extração prioritária do bloco da NF-e: <protNFe><infProt>
+  let cStatNota: string | undefined;
+  let xMotivoNota: string | undefined;
+  let nProt: string | undefined;
+  let chNFe: string | undefined;
+  let dhRecbto: string | undefined;
+  let digVal: string | undefined;
+  let tpAmb: string | undefined;
+
+  const infProtMatch = xmlString.match(/<infProt[^>]*>([\s\S]*?)<\/infProt>/i);
+  if (infProtMatch) {
+    const infProtXml = infProtMatch[1];
+    const cStatMatch = infProtXml.match(/<cStat>(\d+)<\/cStat>/i);
+    const xMotivoMatch = infProtXml.match(/<xMotivo>([^<]+)<\/xMotivo>/i);
+    const nProtMatch = infProtXml.match(/<nProt>(\d+)<\/nProt>/i);
+    const chNFeMatch = infProtXml.match(/<chNFe>(\d+)<\/chNFe>/i);
+    const dhRecbtoMatch = infProtXml.match(/<dhRecbto>([^<]+)<\/dhRecbto>/i);
+    const digValMatch = infProtXml.match(/<digVal>([^<]+)<\/digVal>/i);
+    const tpAmbMatch = infProtXml.match(/<tpAmb>(\d+)<\/tpAmb>/i);
+
+    if (cStatMatch) cStatNota = cStatMatch[1];
+    if (xMotivoMatch) xMotivoNota = xMotivoMatch[1].trim();
+    if (nProtMatch) nProt = nProtMatch[1];
+    if (chNFeMatch) chNFe = chNFeMatch[1];
+    if (dhRecbtoMatch) dhRecbto = dhRecbtoMatch[1];
+    if (digValMatch) digVal = digValMatch[1];
+    if (tpAmbMatch) tpAmb = tpAmbMatch[1];
+  }
+
+  // 2. Extração para eventos (ex: cancelamento em <infEvento> / <retEvento>)
+  if (!nProt) {
+    const infEventoMatch = xmlString.match(/<infEvento[^>]*>([\s\S]*?)<\/infEvento>/i);
+    if (infEventoMatch) {
+      const infEventoXml = infEventoMatch[1];
+      const cStatEventoMatch = infEventoXml.match(/<cStat>(\d+)<\/cStat>/i);
+      const xMotivoEventoMatch = infEventoXml.match(/<xMotivo>([^<]+)<\/xMotivo>/i);
+      const nProtEventoMatch = infEventoXml.match(/<nProt>(\d+)<\/nProt>/i);
+      const chNFeEventoMatch = infEventoXml.match(/<chNFe>(\d+)<\/chNFe>/i);
+
+      if (cStatEventoMatch && !cStatNota) cStatNota = cStatEventoMatch[1];
+      if (xMotivoEventoMatch && !xMotivoNota) xMotivoNota = xMotivoEventoMatch[1].trim();
+      if (nProtEventoMatch) nProt = nProtEventoMatch[1];
+      if (chNFeEventoMatch && !chNFe) chNFe = chNFeEventoMatch[1];
+    }
+  }
+
+  // 3. Extração dos dados do lote (<retEnviNFe> ou nó raiz fora de protNFe)
+  let cStatLote: string | undefined;
+  let xMotivoLote: string | undefined;
+  let nRec: string | undefined;
+
+  const xmlSemProt = xmlString.replace(/<protNFe[\s\S]*?<\/protNFe>/gi, '');
+  const cStatLoteMatch = xmlSemProt.match(/<cStat>(\d+)<\/cStat>/i);
+  if (cStatLoteMatch) {
+    cStatLote = cStatLoteMatch[1];
+  }
+
+  const xMotivoLoteMatch = xmlSemProt.match(/<xMotivo>([^<]+)<\/xMotivo>/i);
+  if (xMotivoLoteMatch) {
+    xMotivoLote = xMotivoLoteMatch[1].trim();
+  }
+
+  const nRecMatch = xmlString.match(/<nRec>(\d+)<\/nRec>/i);
+  if (nRecMatch) {
+    nRec = nRecMatch[1];
+  }
+
+  if (!tpAmb) {
+    const tpAmbMatch = xmlString.match(/<tpAmb>(\d+)<\/tpAmb>/i);
+    if (tpAmbMatch) tpAmb = tpAmbMatch[1];
+  }
+
+  // 4. Determinação dos campos consolidados
+  const effectiveCStat = cStatNota || cStatLote;
+  const effectiveXMotivo = xMotivoNota || xMotivoLote;
+  const isAutorizada = (cStatNota === '100' || cStatNota === '150');
+  const isLotePendente = (cStatLote === '103' || cStatLote === '105' || (!cStatNota && !!nRec));
 
   return {
-    cStat: cStatMatch ? cStatMatch[1] : undefined,
-    xMotivo: xMotivoMatch ? xMotivoMatch[1] : undefined,
-    nProt: nProtMatch ? nProtMatch[1] : undefined,
-    chNFe: chNFeMatch ? chNFeMatch[1] : undefined,
-    tpAmb: tpAmbMatch ? tpAmbMatch[1] : undefined
+    cStat: effectiveCStat,
+    xMotivo: effectiveXMotivo,
+    cStatNota,
+    xMotivoNota,
+    cStatLote,
+    xMotivoLote,
+    nRec,
+    nProt,
+    chNFe,
+    tpAmb,
+    dhRecbto,
+    digVal,
+    isAutorizada,
+    isLotePendente
   };
 }
 
@@ -1900,13 +2050,25 @@ export function gerarXmlNfe(
   const tpAmb = '1'; // Rigorosamente 1: Produção oficial SEFAZ (v4.00)
   const creditoInfo = calcularCreditoIcmsSimples(valorTotal, emitente.aliquotaIcmsSimples || 2.75);
 
+  const aliqIbsPadrao = typeof emitente.aliquotaIbs === 'number' && !isNaN(emitente.aliquotaIbs) && emitente.aliquotaIbs >= 0
+    ? emitente.aliquotaIbs
+    : 0.10;
+  const aliqCbsPadrao = typeof emitente.aliquotaCbs === 'number' && !isNaN(emitente.aliquotaCbs) && emitente.aliquotaCbs >= 0
+    ? emitente.aliquotaCbs
+    : 0.90;
+
+  let totalBcIbsCbs = 0;
+  let totalIbs = 0;
+  let totalCbs = 0;
+
   const xmlItens = itens.map((item, index) => {
-    // 2. MAPEAMENTO FISCAL:
-    // No mapeamento das tags do XML da NF-e (grupo do ICMS para Simples Nacional - CSOSN),
-    // garanta que a tag correspondente envie 101 em vez de 102.
+    // 1. MAPEAMENTO FISCAL ICMS (Simples Nacional - CSOSN 101):
+    // Garante que a tag <ICMSSN101> calcule e preencha corretamente a alíquota (<pCredSN>) e o valor do crédito (<vCredICMSSN>)
     const csosnCod = item.csosn ? item.csosn.split(' ')[0].replace(/\D/g, '') : '101';
     const isCsosn101 = csosnCod === '101' || csosnCod === '102' || !csosnCod;
-    const aliquotaCred = emitente.aliquotaIcmsSimples || 2.75;
+    const aliquotaCred = typeof emitente.aliquotaIcmsSimples === 'number' && !isNaN(emitente.aliquotaIcmsSimples) && emitente.aliquotaIcmsSimples >= 0
+      ? emitente.aliquotaIcmsSimples
+      : 2.75;
     const valorCreditoItem = Number(((item.subtotal * aliquotaCred) / 100).toFixed(2));
 
     const tagIcms = isCsosn101
@@ -1927,6 +2089,34 @@ export function gerarXmlNfe(
           </ICMSSN${csosnCod}>
         </ICMS>`;
 
+    // 2. GRUPO IPI (cEnq 999 e IPINT com CST 53):
+    const tagIpi = `
+        <IPI>
+          <cEnq>999</cEnq>
+          <IPINT>
+            <CST>53</CST>
+          </IPINT>
+        </IPI>`;
+
+    // 3. GRUPO IBSCBS (CST 000, alíquotas de IBS e CBS, e base de cálculo):
+    const valorBcItem = Number(item.subtotal.toFixed(2));
+    const valorIbsItem = Number(((valorBcItem * aliqIbsPadrao) / 100).toFixed(2));
+    const valorCbsItem = Number(((valorBcItem * aliqCbsPadrao) / 100).toFixed(2));
+
+    totalBcIbsCbs += valorBcItem;
+    totalIbs += valorIbsItem;
+    totalCbs += valorCbsItem;
+
+    const tagIbsCbs = `
+        <IBSCBS>
+          <CST>000</CST>
+          <vBC>${valorBcItem.toFixed(2)}</vBC>
+          <pIBS>${aliqIbsPadrao.toFixed(2)}</pIBS>
+          <vIBS>${valorIbsItem.toFixed(2)}</vIBS>
+          <pCBS>${aliqCbsPadrao.toFixed(2)}</pCBS>
+          <vCBS>${valorCbsItem.toFixed(2)}</vCBS>
+        </IBSCBS>`;
+
     return `
     <det nItem="${index + 1}">
       <prod>
@@ -1945,7 +2135,7 @@ export function gerarXmlNfe(
         <vUnTrib>${item.valorUnitario.toFixed(4)}</vUnTrib>
         <indTot>1</indTot>
       </prod>
-      <imposto>${tagIcms}
+      <imposto>${tagIcms}${tagIpi}
         <PIS>
           <PISNT>
             <CST>07</CST>
@@ -1955,7 +2145,7 @@ export function gerarXmlNfe(
           <COFINSNT>
             <CST>07</CST>
           </COFINSNT>
-        </COFINS>
+        </COFINS>${tagIbsCbs}
       </imposto>
     </det>`;
   }).join('');
@@ -2041,6 +2231,11 @@ export function gerarXmlNfe(
         <vOutro>0.00</vOutro>
         <vNF>${valorTotal.toFixed(2)}</vNF>
       </ICMSTot>
+      <IBSCBSTot>
+        <vBC>${totalBcIbsCbs.toFixed(2)}</vBC>
+        <vIBS>${totalIbs.toFixed(2)}</vIBS>
+        <vCBS>${totalCbs.toFixed(2)}</vCBS>
+      </IBSCBSTot>
     </total>
     <transp>
       <modFrete>9</modFrete>
@@ -2124,7 +2319,9 @@ export async function transmitirNfeSefaz(
     cep: companyData.cep || '17031-350',
     telefone: companyData.phone || companyData.telefone || '(14) 99880-9362',
     regimeTributario: companyData.taxRegime || companyData.regime_tributario || 'Simples Nacional',
-    aliquotaIcmsSimples: obterAliquotaIcmsSimples(companyData)
+    aliquotaIcmsSimples: obterAliquotaIcmsSimples(companyData),
+    aliquotaIbs: typeof (companyData as any).aliquota_ibs === 'number' ? (companyData as any).aliquota_ibs : 0.10,
+    aliquotaCbs: typeof (companyData as any).aliquota_cbs === 'number' ? (companyData as any).aliquota_cbs : 0.90
   };
 
   // 2. Dados do Destinatário
@@ -2244,6 +2441,7 @@ export async function transmitirNfeSefaz(
   const sefazEndpoint = obterSefazEndpoint('autorizacao');
   const soapEnvelope = gerarEnvelopeSoapNfe(xmlConteudo, '1', '1');
   const isDirectSoap = sefazEndpoint.includes('.asmx') || sefazEndpoint.includes('fazenda.sp.gov.br');
+  let autorizacaoConfirmadaSefaz = false;
 
   if (isDirectSoap) {
     try {
@@ -2256,30 +2454,149 @@ export async function transmitirNfeSefaz(
         body: soapEnvelope
       });
 
-      if (sefazResponse.ok) {
-        const responseXml = await sefazResponse.text();
-        const dadosRetorno = extrairDadosRetornoSefazXml(responseXml);
-        if (dadosRetorno.cStat && dadosRetorno.cStat !== '100' && dadosRetorno.cStat !== '104') {
-          const cStatRet = dadosRetorno.cStat;
-          const xMotivoRet = dadosRetorno.xMotivo || 'Rejeição na autorização da NF-e na SEFAZ';
-          return {
-            sucesso: false,
-            statusNfe: 'Erro',
-            cStat: cStatRet,
-            xMotivo: `Rejeição SEFAZ ${cStatRet}: ${xMotivoRet}`,
-            mensagemErro: `Rejeição SEFAZ ${cStatRet}: ${xMotivoRet}`
-          };
-        }
+      if (!sefazResponse.ok) {
+        const errorText = await sefazResponse.text();
+        const dadosErr = extrairDadosRetornoSefazXml(errorText);
+        const cStatErr = dadosErr.cStat || String(sefazResponse.status);
+        const xMotivoErr = dadosErr.xMotivo || sefazResponse.statusText || 'Falha de comunicação SOAP com a SEFAZ-SP';
+        const errMsg = `Rejeição/Falha WebService SEFAZ-SP (${sefazResponse.status}): cStat ${cStatErr} - ${xMotivoErr}`;
+        try {
+          await updateCotacaoNfeStatusDb(quote.id || quote.quoteNumber, {
+            status_nfe: 'Erro',
+            mensagem_erro_nfe: errMsg
+          });
+        } catch {}
+        return {
+          sucesso: false,
+          statusNfe: 'Erro',
+          cStat: cStatErr,
+          xMotivo: errMsg,
+          mensagemErro: errMsg
+        };
+      }
 
-        if (dadosRetorno.nProt) {
-          protocolo = dadosRetorno.nProt;
-        }
-        if (responseXml.includes('<nfeProc')) {
-          xmlConteudo = sanitizarXmlNfeComChaveValida(responseXml, chaveAcesso);
-        }
+      const responseXml = await sefazResponse.text();
+      const dadosRetorno = extrairDadosRetornoSefazXml(responseXml);
+
+      // CASO 1: Lote recebido ou em processamento (pendente - cStat 103 ou 105)
+      // NUNCA tratar recibo ou lote pendente como autorização definitiva!
+      if (dadosRetorno.isLotePendente || dadosRetorno.cStatLote === '103' || dadosRetorno.cStatLote === '105') {
+        const nRecibo = dadosRetorno.nRec || 'NÃO INFORMADO';
+        const msgPendente = `Lote pendente na SEFAZ (cStat ${dadosRetorno.cStatLote}: ${dadosRetorno.xMotivoLote || 'Lote em processamento'}). Recibo Nº ${nRecibo}. A NF-e NÃO foi autorizada definitivamente (aguardando cStat 100).`;
+        try {
+          await updateCotacaoNfeStatusDb(quote.id || quote.quoteNumber, {
+            status_nfe: 'Pendente',
+            mensagem_erro_nfe: msgPendente
+          });
+        } catch {}
+        return {
+          sucesso: false,
+          statusNfe: 'Erro',
+          cStat: dadosRetorno.cStatLote || '105',
+          xMotivo: msgPendente,
+          mensagemErro: msgPendente
+        };
+      }
+
+      // CASO 2: Lote rejeitado na raiz (ex: schema inválido, erro de certificado, cStat != 100 e != 104)
+      if (dadosRetorno.cStatLote && dadosRetorno.cStatLote !== '100' && dadosRetorno.cStatLote !== '104') {
+        const cStatLote = dadosRetorno.cStatLote;
+        const xMotivoLote = dadosRetorno.xMotivoLote || 'Rejeição no lote da NF-e na SEFAZ';
+        const errMsg = `Rejeição do Lote SEFAZ ${cStatLote}: ${xMotivoLote}`;
+        try {
+          await updateCotacaoNfeStatusDb(quote.id || quote.quoteNumber, {
+            status_nfe: 'Erro',
+            mensagem_erro_nfe: errMsg
+          });
+        } catch {}
+        return {
+          sucesso: false,
+          statusNfe: 'Erro',
+          cStat: cStatLote,
+          xMotivo: errMsg,
+          mensagemErro: errMsg
+        };
+      }
+
+      // CASO 3: Rejeição da Nota específica dentro de <infProt> (ex: cStat 204 Duplicidade, 539, 207, etc.)
+      if (dadosRetorno.cStatNota && dadosRetorno.cStatNota !== '100' && dadosRetorno.cStatNota !== '150') {
+        const cStatNota = dadosRetorno.cStatNota;
+        const xMotivoNota = dadosRetorno.xMotivoNota || 'Nota fiscal rejeitada pela SEFAZ';
+        const errMsg = `Rejeição SEFAZ ${cStatNota}: ${xMotivoNota}`;
+        try {
+          await updateCotacaoNfeStatusDb(quote.id || quote.quoteNumber, {
+            status_nfe: 'Erro',
+            mensagem_erro_nfe: errMsg
+          });
+        } catch {}
+        return {
+          sucesso: false,
+          statusNfe: 'Erro',
+          cStat: cStatNota,
+          xMotivo: errMsg,
+          mensagemErro: errMsg
+        };
+      }
+
+      // CASO 4: Validação rigorosa de Autorização Oficial (cStat == 100 ou 150)
+      if (!dadosRetorno.isAutorizada && dadosRetorno.cStat !== '100' && dadosRetorno.cStat !== '150') {
+        const cStatFinal = dadosRetorno.cStat || 'NAO_AUTORIZADO';
+        const xMotivoFinal = dadosRetorno.xMotivo || 'A SEFAZ não autorizou a NF-e';
+        const errMsg = `Nota não autorizada na SEFAZ (cStat: ${cStatFinal} - ${xMotivoFinal}).`;
+        try {
+          await updateCotacaoNfeStatusDb(quote.id || quote.quoteNumber, {
+            status_nfe: 'Erro',
+            mensagem_erro_nfe: errMsg
+          });
+        } catch {}
+        return {
+          sucesso: false,
+          statusNfe: 'Erro',
+          cStat: cStatFinal,
+          xMotivo: errMsg,
+          mensagemErro: errMsg
+        };
+      }
+
+      // CASO 5: Exigência do número de protocolo oficial da SEFAZ (<nProt>)
+      if (!dadosRetorno.nProt) {
+        const errMsg = `A SEFAZ confirmou recebimento (cStat ${dadosRetorno.cStat || '100'}), porém não retornou o número de protocolo oficial de autorização (<nProt>). A nota não pôde ser gravada como autorizada.`;
+        try {
+          await updateCotacaoNfeStatusDb(quote.id || quote.quoteNumber, {
+            status_nfe: 'Erro',
+            mensagem_erro_nfe: errMsg
+          });
+        } catch {}
+        return {
+          sucesso: false,
+          statusNfe: 'Erro',
+          cStat: dadosRetorno.cStat || 'SEM_PROTOCOLO',
+          xMotivo: errMsg,
+          mensagemErro: errMsg
+        };
+      }
+
+      // Autorização confirmada com sucesso pela SEFAZ
+      protocolo = dadosRetorno.nProt;
+      autorizacaoConfirmadaSefaz = true;
+      if (responseXml.includes('<nfeProc')) {
+        xmlConteudo = sanitizarXmlNfeComChaveValida(responseXml, chaveAcesso);
       }
     } catch (soapErr: any) {
-      console.info(`[SEFAZ-SP Produção] WebService configurado: ${sefazEndpoint} (tpAmb = 1). Envelope SOAP 1.2 e chave Módulo 11 estruturados com sucesso.`);
+      console.warn(`[SEFAZ-SP Produção] Comunicação SOAP direta falhou (${soapErr?.message || soapErr}). Verificando canal proxy/backend...`);
+      // Se não houver proxy configurado ou se falhar, retorna o erro de conexão em vez de forjar autorização falsa
+      const errMsg = `Falha na conexão segura com o WebService da SEFAZ-SP Produção (${sefazEndpoint}): ${soapErr?.message || 'Erro de rede ou certificado digital'}. Verifique o certificado A1 e conectividade.`;
+      try {
+        await updateCotacaoNfeStatusDb(quote.id || quote.quoteNumber, {
+          status_nfe: 'Erro',
+          mensagem_erro_nfe: errMsg
+        });
+      } catch {}
+      return {
+        sucesso: false,
+        statusNfe: 'Erro',
+        mensagemErro: errMsg
+      };
     }
   } else if (sefazEndpoint) {
     try {
@@ -2311,42 +2628,117 @@ export async function transmitirNfeSefaz(
         try { parsedErr = JSON.parse(errorBody); } catch {}
         const cStatRet = parsedErr?.cStat || String(sefazResponse.status);
         const xMotivoRet = parsedErr?.xMotivo || parsedErr?.mensagem || errorBody;
+        const errMsg = `Rejeição SEFAZ ${cStatRet}: ${xMotivoRet}`;
+        try {
+          await updateCotacaoNfeStatusDb(quote.id || quote.quoteNumber, {
+            status_nfe: 'Erro',
+            mensagem_erro_nfe: errMsg
+          });
+        } catch {}
         return {
           sucesso: false,
           statusNfe: 'Erro',
           cStat: cStatRet,
-          xMotivo: `Rejeição SEFAZ ${cStatRet}: ${xMotivoRet}`,
-          mensagemErro: `Rejeição SEFAZ ${cStatRet}: ${xMotivoRet}`
+          xMotivo: errMsg,
+          mensagemErro: errMsg
         };
       }
 
       const sefazData = await sefazResponse.json();
-      if (sefazData?.cStat && sefazData.cStat !== '100') {
-        const cStatRet = sefazData.cStat;
+
+      // Verifica se o proxy reportou lote pendente (cStat 103 ou 105)
+      const cStatProxy = String(sefazData?.cStat || '');
+      if (cStatProxy === '103' || cStatProxy === '105') {
+        const nRec = sefazData?.nRec || sefazData?.numero_recibo || 'N/A';
+        const msgPendente = `Lote pendente na SEFAZ (cStat ${cStatProxy}: ${sefazData?.xMotivo || 'Lote em processamento'}). Recibo Nº ${nRec}. A NF-e NÃO foi autorizada definitivamente (aguardando cStat 100).`;
+        try {
+          await updateCotacaoNfeStatusDb(quote.id || quote.quoteNumber, {
+            status_nfe: 'Pendente',
+            mensagem_erro_nfe: msgPendente
+          });
+        } catch {}
+        return {
+          sucesso: false,
+          statusNfe: 'Erro',
+          cStat: cStatProxy,
+          xMotivo: msgPendente,
+          mensagemErro: msgPendente
+        };
+      }
+
+      // Validação estrita de autorização (cStat == 100 ou 150)
+      if (cStatProxy !== '100' && cStatProxy !== '150') {
+        const cStatRet = cStatProxy || 'REJEICAO';
         const xMotivoRet = sefazData.xMotivo || sefazData.mensagem || 'Rejeição na SEFAZ';
+        const errMsg = `Rejeição SEFAZ ${cStatRet}: ${xMotivoRet}`;
+        try {
+          await updateCotacaoNfeStatusDb(quote.id || quote.quoteNumber, {
+            status_nfe: 'Erro',
+            mensagem_erro_nfe: errMsg
+          });
+        } catch {}
         return {
           sucesso: false,
           statusNfe: 'Erro',
           cStat: cStatRet,
-          xMotivo: `Rejeição SEFAZ ${cStatRet}: ${xMotivoRet}`,
-          mensagemErro: `Rejeição SEFAZ ${cStatRet}: ${xMotivoRet}`
+          xMotivo: errMsg,
+          mensagemErro: errMsg
         };
       }
 
-      if (sefazData?.protocolo || sefazData?.nProt) {
-        protocolo = String(sefazData.protocolo || sefazData.nProt);
+      if (!sefazData?.protocolo && !sefazData?.nProt) {
+        const errMsg = 'A SEFAZ confirmou recebimento mas não retornou o número de protocolo oficial de autorização (<nProt>).';
+        try {
+          await updateCotacaoNfeStatusDb(quote.id || quote.quoteNumber, {
+            status_nfe: 'Erro',
+            mensagem_erro_nfe: errMsg
+          });
+        } catch {}
+        return {
+          sucesso: false,
+          statusNfe: 'Erro',
+          cStat: cStatProxy,
+          xMotivo: errMsg,
+          mensagemErro: errMsg
+        };
       }
+
+      protocolo = String(sefazData.protocolo || sefazData.nProt);
+      autorizacaoConfirmadaSefaz = true;
       if (sefazData?.xml_conteudo || sefazData?.xml_retorno) {
         xmlConteudo = sanitizarXmlNfeComChaveValida(sefazData.xml_conteudo || sefazData.xml_retorno, chaveAcesso);
       }
     } catch (apiErr: any) {
-      console.warn('Erro ao conectar ao proxy da SEFAZ Produção:', apiErr);
+      console.warn('Erro ao conectar ao serviço da SEFAZ Produção:', apiErr);
+      const errMsg = `Falha na conexão com o serviço SEFAZ Produção (${sefazEndpoint}): ${apiErr?.message || 'Servidor indisponível'}.`;
+      try {
+        await updateCotacaoNfeStatusDb(quote.id || quote.quoteNumber, {
+          status_nfe: 'Erro',
+          mensagem_erro_nfe: errMsg
+        });
+      } catch {}
       return {
         sucesso: false,
         statusNfe: 'Erro',
-        mensagemErro: `Falha na conexão com o serviço SEFAZ Produção (${sefazEndpoint}): ${apiErr?.message || 'Servidor indisponível'}.`
+        mensagemErro: errMsg
       };
     }
+  }
+
+  // Se nenhuma confirmação oficial foi obtida do WebService, interrompe a gravação de emissão
+  if (!autorizacaoConfirmadaSefaz) {
+    const errMsg = 'Transmissão interrompida: Não houve confirmação oficial de autorização da NF-e (cStat 100) perante os WebServices da SEFAZ-SP Produção.';
+    try {
+      await updateCotacaoNfeStatusDb(quote.id || quote.quoteNumber, {
+        status_nfe: 'Erro',
+        mensagem_erro_nfe: errMsg
+      });
+    } catch {}
+    return {
+      sucesso: false,
+      statusNfe: 'Erro',
+      mensagemErro: errMsg
+    };
   }
 
   const xmlBlob = new Blob([xmlConteudo], { type: 'application/xml;charset=utf-8' });
