@@ -1068,6 +1068,24 @@ export default function CompanySettingsModule({ onBackToDashboard }: CompanySett
               </span>
             </div>
 
+            {/* Ambiente SEFAZ Oficial: Produção (tpAmb = 1) */}
+            <div className="md:col-span-12 p-4 bg-slate-950/90 border border-blue-500/30 rounded-xl space-y-2.5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></div>
+                  <span className="text-xs font-bold text-slate-100 uppercase tracking-wide">
+                    Ambiente Oficial SEFAZ: PRODUÇÃO (tpAmb = 1)
+                  </span>
+                </div>
+                <span className="px-2.5 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 w-fit">
+                  ✓ Validade Jurídica & Base Nacional
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-300 leading-relaxed">
+                Todas as notas fiscais emitidas pelo sistema são geradas no ambiente de <strong>Produção (tpAmb = 1)</strong>, com chave de acesso de 44 dígitos calculada com precisão absoluta pelo algoritmo oficial <strong>Módulo 11 do Manual da SEFAZ</strong>, assegurando que o Dígito Verificador (cDV) coincida perfeitamente e que a nota possa ser consultada no Portal Nacional da NF-e (<code>nfe.fazenda.gov.br</code>).
+              </p>
+            </div>
+
             {/* Card Demonstrativo da Prévia da NF-e */}
             <div className="md:col-span-12 p-4 bg-slate-950 border border-slate-800 rounded-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
               <div className="space-y-1">

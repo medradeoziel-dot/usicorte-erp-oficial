@@ -6,6 +6,7 @@ import {
   prepararItensFiscais, 
   formatarChaveAcesso, 
   gerarChaveAcessoNfe, 
+  recalcularChaveAcessoComDvCorreto,
   formatarNumeroDanfe,
   DuplicataDanfe,
   ClienteDanfeDestinatario,
@@ -56,7 +57,7 @@ interface DanfeEspelhoA4Props {
 
 // Gera padrão gráfico de código de barras Code-128 para a Chave de Acesso
 function BarcodeSimulado({ chave }: { chave: string }) {
-  const cleanChave = chave.replace(/\D/g, '') || '35260125038430000123550010000000011000000018';
+  const cleanChave = recalcularChaveAcessoComDvCorreto(chave) || '35260125038430000123550010000000011000000017';
   
   // Converte a chave em um padrão pseudo-realista de barras com espessuras variadas
   const bars: { width: number; isBlack: boolean }[] = [];
@@ -388,7 +389,9 @@ export default function DanfeEspelhoA4({
     : '';
   const numeroNfe = rawNfeNum ? rawNfeNum.padStart(6, '0') : String(emitenteUltimo + 1).padStart(6, '0');
   const serie = String(quote.serie_nfe || emitente.serie_nfe || '1');
-  const chaveAcessoRaw = quote.nfe_chave || gerarChaveAcessoNfe(emitente.uf, new Date(), emitente.cnpj, serie, numeroNfe);
+  const chaveAcessoRaw = quote.nfe_chave 
+    ? recalcularChaveAcessoComDvCorreto(quote.nfe_chave) 
+    : (quote.chave_acesso ? recalcularChaveAcessoComDvCorreto(quote.chave_acesso) : gerarChaveAcessoNfe(emitente.uf, new Date(), emitente.cnpj, serie, numeroNfe));
   const chaveFormatada = isPrevia ? 'CHAVE SERÁ GERADA APÓS TRANSMISSÃO SEFAZ' : formatarChaveAcesso(chaveAcessoRaw);
 
   const dataEmissaoObj = quote.nfe_emitida_em ? new Date(quote.nfe_emitida_em) : new Date(quote.date || Date.now());

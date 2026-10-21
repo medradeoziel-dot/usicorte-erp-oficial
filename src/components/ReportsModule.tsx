@@ -81,7 +81,7 @@ import EmissaoNfeModal from './EmissaoNfeModal';
 import CancelarNfeModal from './CancelarNfeModal';
 import DanfeEspelhoA4Modal from './DanfeEspelhoA4Modal';
 import OrdemCorte80mm, { imprimirCupom80mm } from './OrdemCorte80mm';
-import { obterOuBaixarXmlNfe, isNfeAutorizada, isNfeCancelada, downloadXmlCancelamento, fetchNotasFiscaisDb, resolveStatusNfeFinal } from '../services/nfeService';
+import { obterOuBaixarXmlNfe, recalcularChaveAcessoComDvCorreto, isNfeAutorizada, isNfeCancelada, downloadXmlCancelamento, fetchNotasFiscaisDb, resolveStatusNfeFinal } from '../services/nfeService';
 import { 
   ContaReceberParcela,
   fetchBoletosDb,
@@ -1680,8 +1680,9 @@ export default function ReportsModule({
       );
       const res = await obterOuBaixarXmlNfe(quote, matchedClient);
       if (res.success) {
+        const chaveValida = recalcularChaveAcessoComDvCorreto(res.chaveAcesso || '');
         setDeleteFeedback({
-          message: `XML da NF-e baixado com sucesso: NFe${(res.chaveAcesso || '').replace(/\D/g, '').padEnd(44, '0').slice(0, 44)}.xml`,
+          message: `XML da NF-e baixado com sucesso: NFe${chaveValida}.xml`,
           type: 'success'
         });
       } else {

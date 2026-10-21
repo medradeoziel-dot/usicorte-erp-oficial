@@ -6,6 +6,7 @@ import {
 } from '../utils/notaFiscalCalculator';
 import { formatCurrency, formatWeightKg, formatNumberBR, parseDimensionToMm } from '../utils/calculator';
 import { supabase } from '../lib/db';
+import { calcularDvModulo11, recalcularChaveAcessoComDvCorreto, formatarChaveAcesso } from '../services/nfeService';
 import { 
   FileText, 
   Calculator, 
@@ -155,7 +156,7 @@ const EXEMPLOS_DANFE_MULTI: DanfeChaveInfoMulti[] = [
     ]
   },
   {
-    chave: '35240833611500000119550010001048201987654321',
+    chave: '35240833611500000119550010001048201987654329',
     numeroNF: '104820',
     emitente: 'Gerdau Aços Longos S.A.',
     cnpj: '33.611.500/0001-19',
@@ -209,7 +210,7 @@ const EXEMPLOS_DANFE_MULTI: DanfeChaveInfoMulti[] = [
     ]
   },
   {
-    chave: '31240917469701000177550020002154301123456789',
+    chave: '31240917469701000177550020002154301123456786',
     numeroNF: '215430',
     emitente: 'ArcelorMittal Brasil S.A.',
     cnpj: '17.469.701/0001-77',
@@ -251,7 +252,7 @@ const EXEMPLOS_DANFE_MULTI: DanfeChaveInfoMulti[] = [
     ]
   },
   {
-    chave: '35240901732997000104550030003412001554433221',
+    chave: '35240901732997000104550030003412001554433220',
     numeroNF: '341200',
     emitente: 'Açotubo Indústria e Comércio Ltda',
     cnpj: '01.732.997/0001-04',
@@ -304,7 +305,7 @@ const EXEMPLOS_DANFE_MULTI: DanfeChaveInfoMulti[] = [
     ]
   },
   {
-    chave: '35240761074829000185550010000895401998877665',
+    chave: '35240761074829000185550010000895401998877667',
     numeroNF: '089540',
     emitente: 'Villares Metals S.A.',
     cnpj: '61.074.829/0001-85',
@@ -335,7 +336,7 @@ const EXEMPLOS_DANFE_MULTI: DanfeChaveInfoMulti[] = [
     ]
   },
   {
-    chave: '31240901234567000188550010000452301987654321',
+    chave: '31240901234567000188550010000452301987654320',
     numeroNF: '45230',
     emitente: 'Usiminas Siderúrgica S.A.',
     cnpj: '60.870.004/0001-40',
@@ -1763,6 +1764,44 @@ export default function EntradaNotaFiscalModal({
                 </div>
               </div>
 
+              {/* Indicador e correção de cDV Módulo 11 */}
+              {(() => {
+                const clean = chaveAcessoInput.replace(/\D/g, '');
+                if (clean.length < 43) return null;
+                const base43 = clean.slice(0, 43);
+                const trueDv = calcularDvModulo11(base43);
+                const digitado = clean.length >= 44 ? clean[43] : null;
+                const isMismatch = digitado !== null && digitado !== String(trueDv);
+
+                if (isMismatch) {
+                  return (
+                    <div className="w-full sm:col-span-12 flex items-center justify-between gap-2 text-[11px] text-amber-200 bg-amber-950/60 border border-amber-500/40 p-2 rounded-xl">
+                      <span>
+                        ⚠️ <strong>Dígito Verificador incorreto:</strong> digitado '{digitado}', mas o Módulo 11 da SEFAZ calcula '{trueDv}'.
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setChaveAcessoInput(recalcularChaveAcessoComDvCorreto(chaveAcessoInput))}
+                        className="px-2.5 py-1 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-bold text-[10px] shrink-0 cursor-pointer transition-colors shadow-xs"
+                      >
+                        Corrigir Chave para terminar em '{trueDv}'
+                      </button>
+                    </div>
+                  );
+                }
+
+                if (digitado !== null && digitado === String(trueDv)) {
+                  return (
+                    <div className="w-full sm:col-span-12 flex items-center gap-1.5 text-[11px] text-emerald-300 bg-emerald-950/40 border border-emerald-500/30 px-2.5 py-1 rounded-xl">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                      <span>Chave íntegra: cDV = <strong>{trueDv}</strong> rigorosamente conferido pelo Módulo 11 da SEFAZ (Produção).</span>
+                    </div>
+                  );
+                }
+
+                return null;
+              })()}
+
               {/* Input oculto para upload de arquivo XML */}
               <input
                 type="file"
@@ -2128,7 +2167,7 @@ export default function EntradaNotaFiscalModal({
                             </button>
                             <button
                               type="button"
-                              onClick={() => handleProcessarLeituraDanfe('31240901234567000188550010000452301987654321')}
+                              onClick={() => handleProcessarLeituraDanfe('31240901234567000188550010000452301987654320')}
                               className="px-3.5 py-1.5 bg-amber-600/30 hover:bg-amber-600/50 text-amber-300 border border-amber-500/40 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
                             >
                               Carregar NF-45230 (Chapas CGR)

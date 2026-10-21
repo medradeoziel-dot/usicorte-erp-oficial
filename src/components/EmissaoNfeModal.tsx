@@ -17,7 +17,9 @@ import {
   downloadXmlCancelamento,
   abrirDanfeEmNovaAba,
   obterAliquotaIcmsSimples,
-  calcularCreditoIcmsSimples
+  calcularCreditoIcmsSimples,
+  recalcularChaveAcessoComDvCorreto,
+  calcularDvModulo11
 } from '../services/nfeService';
 import CancelarNfeModal from './CancelarNfeModal';
 import DanfeEspelhoA4Modal from './DanfeEspelhoA4Modal';
@@ -43,7 +45,8 @@ import {
   Info,
   Eye,
   Mail,
-  Ban
+  Ban,
+  Copy
 } from 'lucide-react';
 
 interface EmissaoNfeModalProps {
@@ -72,6 +75,7 @@ export default function EmissaoNfeModal({
   const [showCancelarModal, setShowCancelarModal] = useState<boolean>(false);
   const [showDanfeOficialModal, setShowDanfeOficialModal] = useState<boolean>(false);
   const [autoPrintDanfe, setAutoPrintDanfe] = useState<boolean>(false);
+  const [copiedKey, setCopiedKey] = useState<boolean>(false);
 
   const [isLoadingItems, setIsLoadingItems] = useState<boolean>(false);
 
@@ -526,6 +530,10 @@ export default function EmissaoNfeModal({
                   <FileText className="w-3 h-3 text-emerald-400" />
                   NF-e Nº {proximoNumeroNfe} - Série {serieNfe}
                 </span>
+                <span className="px-2.5 py-0.5 rounded text-[10px] font-mono font-bold bg-blue-500/20 text-blue-300 border border-blue-500/40 flex items-center gap-1.5 shadow-xs" title="Ambiente de Emissão Oficial SEFAZ: Produção com Validade Jurídica (tpAmb = 1)">
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse"></span>
+                  Produção (tpAmb = 1)
+                </span>
               </div>
               {currentQuoteState.origemCotacoes && currentQuoteState.origemCotacoes.length > 1 ? (
                 <div className="flex items-center gap-1.5 mt-1 flex-wrap">
@@ -586,43 +594,101 @@ export default function EmissaoNfeModal({
             </div>
           )}
 
-          {/* Sucesso Banner */}
-          {transmissionResult && transmissionResult.sucesso && (
-            <div className="p-4 rounded-xl bg-emerald-950/70 border border-emerald-500/50 text-emerald-100 space-y-3 animate-in fade-in duration-300">
-              <div className="flex items-start gap-3">
-                <CheckCircle2 className="w-6 h-6 text-emerald-400 shrink-0 mt-0.5" />
-                <div className="flex-1 space-y-1">
-                  <h4 className="font-bold text-sm text-emerald-200">
-                    NF-e Autorizada com Sucesso pela SEFAZ!
-                  </h4>
-                  <p className="text-xs text-emerald-300/90">
-                    Nota Fiscal Eletrônica nº <strong className="text-white font-mono">{transmissionResult.nfeNumero}</strong> emitida e vinculada a esta cotação.
-                  </p>
-                  <div className="p-2.5 bg-slate-950/70 rounded-lg border border-emerald-500/30 font-mono text-[11px] text-slate-200 break-all select-all mt-2">
-                    <span className="text-slate-400 block text-[9px] uppercase font-sans font-bold">Chave de Acesso (44 dígitos):</span>
-                    {formatarChaveAcesso(transmissionResult.nfeChave || '')}
+          {/* Sucesso Banner - Exibe quando acabou de emitir ou quando a nota já estiver autorizada */}
+          {((transmissionResult && transmissionResult.sucesso) || (isAutorizada && !isCancelada)) && (() => {
+            const chaveExibir = recalcularChaveAcessoComDvCorreto(transmissionResult?.nfeChave || currentQuoteState.nfe_chave || currentQuoteState.chave_acesso || '');
+            const cDV = chaveExibir && chaveExibir.length >= 44 ? chaveExibir[43] : '';
+            const numeroExibir = transmissionResult?.nfeNumero || currentQuoteState.nfe_numero || proximoNumeroNfe;
+            const protocoloExibir = transmissionResult?.protocolo || currentQuoteState.protocolo_autorizacao || currentQuoteState.protocolo_nfe;
+
+            return (
+              <div className="p-4 rounded-xl bg-emerald-950/70 border border-emerald-500/50 text-emerald-100 space-y-3 animate-in fade-in duration-300">
+                <div className="flex items-start gap-3">
+                  <CheckCircle2 className="w-6 h-6 text-emerald-400 shrink-0 mt-0.5" />
+                  <div className="flex-1 space-y-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h4 className="font-bold text-sm text-emerald-200">
+                        NF-e Autorizada com Sucesso na SEFAZ!
+                      </h4>
+                      <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-blue-500/30 text-blue-200 border border-blue-400/50 flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-blue-400"></span>
+                        Ambiente: Produção (tpAmb = 1)
+                      </span>
+                    </div>
+                    <p className="text-xs text-emerald-300/90">
+                      Nota Fiscal Eletrônica nº <strong className="text-white font-mono">{numeroExibir}</strong> emitida perante a Receita Estadual.
+                      {protocoloExibir && (
+                        <span className="block mt-0.5 text-slate-300">
+                          Protocolo de Autorização: <span className="font-mono text-emerald-300 font-bold">{protocoloExibir}</span>
+                        </span>
+                      )}
+                    </p>
+
+                    {/* Caixa da Chave de Acesso Oficial com cDV detalhado */}
+                    <div className="p-3 bg-slate-950/80 rounded-lg border border-emerald-500/40 space-y-2 mt-2">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <span className="text-slate-400 text-[10px] uppercase font-sans font-bold flex items-center gap-1.5">
+                          <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                          Chave de Acesso Oficial da NF-e (44 dígitos):
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono font-bold text-[10px] border border-emerald-500/40">
+                            ✓ cDV = {cDV} (Módulo 11 SEFAZ)
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (chaveExibir) {
+                                navigator.clipboard.writeText(chaveExibir);
+                                setCopiedKey(true);
+                                setTimeout(() => setCopiedKey(false), 2000);
+                              }
+                            }}
+                            className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-semibold flex items-center gap-1 border border-slate-700 cursor-pointer transition-colors"
+                            title="Copiar 44 dígitos da chave de acesso"
+                          >
+                            {copiedKey ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                            <span>{copiedKey ? 'Copiada!' : 'Copiar Chave'}</span>
+                          </button>
+                        </div>
+                      </div>
+                      
+                      <div className="font-mono text-xs text-emerald-200 tracking-wider break-all select-all font-bold bg-slate-900/60 p-2 rounded border border-slate-800">
+                        {formatarChaveAcesso(chaveExibir)}
+                      </div>
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              <div className="flex items-center gap-2.5 pt-1">
-                <button
-                  onClick={handleOpenDanfe}
-                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
-                >
-                  <Printer className="w-3.5 h-3.5" />
-                  Visualizar / Imprimir DANFE
-                </button>
-                <button
-                  onClick={handleDownloadXml}
-                  className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold rounded-lg border border-slate-700 transition-colors flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  Baixar XML da NF-e
-                </button>
+                <div className="flex items-center gap-2.5 pt-1 flex-wrap">
+                  <button
+                    onClick={handleOpenDanfe}
+                    className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm text-xs"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    Visualizar / Imprimir DANFE
+                  </button>
+                  <button
+                    onClick={handleDownloadXml}
+                    className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold rounded-lg border border-slate-700 transition-colors flex items-center gap-1.5 cursor-pointer text-xs"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    Baixar XML Oficial da NF-e
+                  </button>
+                  <a
+                    href="https://www.nfe.fazenda.gov.br/portal/consultaRecaptcha.aspx?tipoConsulta=completa&tipoConteudo=XbSeqxE8pl8%3D"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3.5 py-2 bg-blue-900/40 hover:bg-blue-800/60 text-blue-200 font-semibold rounded-lg border border-blue-500/40 transition-colors flex items-center gap-1.5 text-xs"
+                    title="Acessar o Portal Nacional Oficial da NF-e da Receita Federal / SEFAZ"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5 text-blue-400" />
+                    <span>Consultar Portal Nacional SEFAZ</span>
+                  </a>
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* Erro Banner */}
           {errorMessage && (

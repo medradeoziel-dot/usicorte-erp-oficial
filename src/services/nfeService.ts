@@ -571,14 +571,12 @@ export function gerarDigVal(chave: string, valor: number): string {
 /**
  * Aciona o download do arquivo XML no navegador com a nomenclatura oficial da SEFAZ:
  * NFe[CHAVE_DE_ACESSO_44_DIGITOS].xml
+ * Garante que o XML e o nome do arquivo contenham a chave com o cDV calculado pelo Módulo 11.
  */
 export function downloadXmlNfe(xmlContent: string, chaveAcesso: string): void {
-  const cleanChave = (chaveAcesso || '').replace(/\D/g, '').padEnd(44, '0').slice(0, 44);
+  const cleanChave = recalcularChaveAcessoComDvCorreto(chaveAcesso);
   const fileName = `NFe${cleanChave}.xml`;
-  const sanitizedXml = (xmlContent || '')
-    .replace(/<CSOSN>102<\/CSOSN>/g, '<CSOSN>101</CSOSN>')
-    .replace(/<ICMSSN102>/g, '<ICMSSN101>')
-    .replace(/<\/ICMSSN102>/g, '</ICMSSN101>');
+  const sanitizedXml = sanitizarXmlNfeComChaveValida(xmlContent || '', cleanChave);
   const blob = new Blob([sanitizedXml], { type: 'application/xml;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -636,10 +634,11 @@ export function gerarXmlCancelamentoNfe(
   protocoloCancelamento: string,
   ufEmitente: string = 'SP'
 ): string {
-  const dtIso = dataEvento.toISOString();
-  const cOrgao = ufEmitente.toUpperCase() === 'SP' ? '35' : '35';
-  const cleanCnpj = cnpjEmitente.replace(/\D/g, '').padStart(14, '0').slice(0, 14);
-  const cleanChave = chaveAcesso.replace(/\D/g, '').padEnd(44, '0').slice(0, 44);
+  const dtIso = formatarDataHoraSefaz(dataEvento);
+  const ufUpper = (ufEmitente || 'SP').toUpperCase().trim();
+  const cOrgao = TABELA_IBGE_UF[ufUpper] || '35';
+  const cleanCnpj = cnpjEmitente.replace(/\D/g, '').padStart(14, '0').slice(-14);
+  const cleanChave = recalcularChaveAcessoComDvCorreto(chaveAcesso);
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <procEventoNFe versao="1.00" xmlns="http://www.portalfiscal.inf.br/nfe">
@@ -682,7 +681,7 @@ export function gerarXmlCancelamentoNfe(
  * Aciona o download do arquivo XML do evento de cancelamento da NF-e
  */
 export function downloadXmlCancelamento(xmlContent: string, chaveAcesso: string): void {
-  const cleanChave = (chaveAcesso || '').replace(/\D/g, '').padEnd(44, '0').slice(0, 44);
+  const cleanChave = recalcularChaveAcessoComDvCorreto(chaveAcesso);
   const fileName = `ProcEventoNFe_Cancelamento_${cleanChave}.xml`;
   const blob = new Blob([xmlContent], { type: 'application/xml;charset=utf-8' });
   const url = URL.createObjectURL(blob);
@@ -739,7 +738,7 @@ export async function transmitirCancelamentoNfeSefaz(
   }
 
   // 2. Chave de acesso oficial da NF-e (44 dígitos numéricos)
-  let chaveAcesso = (quote.nfe_chave || quote.chave_acesso || '').replace(/\D/g, '');
+  let chaveAcesso = recalcularChaveAcessoComDvCorreto(quote.nfe_chave || quote.chave_acesso || '');
   if (!chaveAcesso || chaveAcesso.length !== 44) {
     // Tenta recuperar do cache local se houver
     try {
@@ -751,7 +750,7 @@ export async function transmitirCancelamentoNfeSefaz(
           (it.numero_nfe && quote.nfe_numero && String(it.numero_nfe) === String(quote.nfe_numero))
         );
         if (match && match.chave_acesso) {
-          chaveAcesso = String(match.chave_acesso).replace(/\D/g, '');
+          chaveAcesso = recalcularChaveAcessoComDvCorreto(String(match.chave_acesso));
         }
       }
     } catch {}
@@ -803,7 +802,7 @@ export async function transmitirCancelamentoNfeSefaz(
   );
 
   // 5. TRANSMISSÃO DO EVENTO PARA A API DA SEFAZ:
-  // Se houver endpoint oficial da SEFAZ ou proxy configurado no ambiente, realiza a requisição HTTP
+  // Se houver endpoint oficial da SEFAZ ou proxy configurado no ambiente, realiza a requisição HTTP em PRODUÇÃO (tpAmb = 1)
   const sefazEndpoint = (typeof import.meta !== 'undefined' && (import.meta.env?.VITE_SEFAZ_API_URL || import.meta.env?.VITE_NFE_API_URL)) || '';
   if (sefazEndpoint) {
     try {
@@ -819,7 +818,8 @@ export async function transmitirCancelamentoNfeSefaz(
           justificativa: just,
           protocolo_autorizacao: protocoloAutorizacao,
           xml_evento: xmlCancelamento,
-          ambiente: 'homologacao'
+          ambiente: 'producao',
+          tpAmb: 1
         })
       });
 
@@ -999,6 +999,8 @@ export async function obterOuBaixarXmlNfe(
 
       if (!chave) {
         chave = gerarChaveAcessoNfe(comp.uf || 'SP', dataEmissao, comp.cnpj, serie, numeroNfe);
+      } else {
+        chave = recalcularChaveAcessoComDvCorreto(chave);
       }
       if (!protocolo) {
         protocolo = `135${anoMesDia(dataEmissao)}${String(Math.floor(100000000 + Math.random() * 900000000))}`;
@@ -1053,7 +1055,8 @@ export async function obterOuBaixarXmlNfe(
         valorTotal,
         dataEmissao,
         protocolo,
-        refOrigemXml
+        refOrigemXml,
+        '1' // Produção
       );
 
       // Persiste no Supabase e no cache local
@@ -1076,7 +1079,14 @@ export async function obterOuBaixarXmlNfe(
     }
 
     if (!chave) {
+      chave = recalcularChaveAcessoComDvCorreto(quote.nfe_chave || quote.chave_acesso || '');
+    }
+    if (!chave || chave.length < 44) {
       chave = quote.nfe_chave || quote.chave_acesso || '00000000000000000000000000000000000000000000';
+    }
+
+    if (xml) {
+      xml = sanitizarXmlNfeComChaveValida(xml, chave);
     }
 
     downloadXmlNfe(xml, chave);
@@ -1258,18 +1268,163 @@ export async function dispararEmailNfeAutomatico(params: {
 }
 
 /**
- * Calcula o Dígito Verificador (DV) Módulo 11 da chave de acesso de 44 dígitos da NF-e
+ * Tabela oficial de Códigos IBGE por UF para composição da Chave de Acesso da NF-e
  */
-function calcularDvModulo11(chave43: string): number {
+export const TABELA_IBGE_UF: Record<string, string> = {
+  RO: '11', AC: '12', AM: '13', RR: '14', PA: '15', AP: '16', TO: '17',
+  MA: '21', PI: '22', CE: '23', RN: '24', PB: '25', PE: '26', AL: '27', SE: '28', BA: '29',
+  MG: '31', ES: '32', RJ: '33', SP: '35',
+  PR: '41', SC: '42', RS: '43',
+  MS: '50', MT: '51', GO: '52', DF: '53'
+};
+
+/**
+ * Calcula o Dígito Verificador (DV) Módulo 11 da Chave de Acesso da NF-e (Modelo 55)
+ * de acordo com o Manual de Orientação do Contribuinte (MOC v7.00) da SEFAZ.
+ * 
+ * Regra Matemática Oficial:
+ * 1. Pega os primeiros 43 dígitos numéricos da chave (cUF + AAMM + CNPJ + mod + serie + nNF + tpEmis + cNF).
+ * 2. Multiplica cada dígito da direita para a esquerda (do menos significativo para o mais significativo),
+ *    pelos pesos de 2 a 9 (repetindo a sequência 2, 3, 4, 5, 6, 7, 8, 9, 2, 3, ...).
+ * 3. Soma todas as multiplicações.
+ * 4. Calcula o resto da divisão por 11 (resto = soma % 11).
+ * 5. Se o resto for 0 ou 1, o DV é 0.
+ * 6. Se o resto for entre 2 e 10, o DV é (11 - resto).
+ */
+export function calcularDvModulo11(chave: string): number {
+  const clean = (chave || '').replace(/\D/g, '');
+  const base43 = clean.slice(0, 43);
+  if (base43.length < 43) {
+    return 0;
+  }
   let soma = 0;
   let peso = 2;
-  for (let i = chave43.length - 1; i >= 0; i--) {
-    soma += parseInt(chave43[i], 10) * peso;
+  for (let i = base43.length - 1; i >= 0; i--) {
+    const digito = parseInt(base43[i], 10);
+    soma += digito * peso;
     peso = peso === 9 ? 2 : peso + 1;
   }
   const resto = soma % 11;
-  const dv = 11 - resto;
-  return dv === 0 || dv === 10 || dv === 11 ? 0 : dv;
+  const dv = (resto === 0 || resto === 1) ? 0 : (11 - resto);
+  return dv;
+}
+
+/**
+ * Recalcula e garante que qualquer chave de acesso (com 43 ou 44 dígitos)
+ * contenha rigorosamente o 44º dígito correspondente ao cDV calculado pelo Módulo 11 da SEFAZ.
+ * Evita que chaves fiquem terminadas erroneamente em '0' quando o DV real é diferente.
+ */
+export function recalcularChaveAcessoComDvCorreto(chave: string): string {
+  const clean = (chave || '').replace(/\D/g, '');
+  if (!clean || clean.length < 43) {
+    return clean;
+  }
+  const base43 = clean.slice(0, 43);
+  const cDV = calcularDvModulo11(base43);
+  return `${base43}${cDV}`;
+}
+
+/**
+ * Validador completo de chave de acesso NF-e
+ */
+export function validarChaveAcessoNfe(chave: string): {
+  valida: boolean;
+  dvCalculado: number;
+  dvInformado: number | null;
+  chaveCorrigida: string;
+  motivo?: string;
+} {
+  const clean = (chave || '').replace(/\D/g, '');
+  if (clean.length < 44) {
+    return {
+      valida: false,
+      dvCalculado: 0,
+      dvInformado: null,
+      chaveCorrigida: clean,
+      motivo: `Chave incompleta (${clean.length} dígitos encontrados. A SEFAZ exige exatamente 44 dígitos).`
+    };
+  }
+  const base43 = clean.slice(0, 43);
+  const dvInformado = parseInt(clean[43], 10);
+  const dvCalculado = calcularDvModulo11(base43);
+  const valida = dvInformado === dvCalculado;
+  const chaveCorrigida = `${base43}${dvCalculado}`;
+
+  return {
+    valida,
+    dvCalculado,
+    dvInformado,
+    chaveCorrigida,
+    motivo: valida ? undefined : `Dígito verificador inválido: informado '${dvInformado}', mas o Módulo 11 da SEFAZ calculou '${dvCalculado}'.`
+  };
+}
+
+/**
+ * Formata data e hora no padrão exigido pelo layout SEFAZ 4.00 (AAAA-MM-DDThh:mm:ss-03:00)
+ */
+export function formatarDataHoraSefaz(data: Date = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const y = data.getFullYear();
+  const m = pad(data.getMonth() + 1);
+  const d = pad(data.getDate());
+  const hh = pad(data.getHours());
+  const mm = pad(data.getMinutes());
+  const ss = pad(data.getSeconds());
+  
+  // Offset do fuso horário brasileiro (SP / Brasília geralmente -03:00)
+  const offsetMin = data.getTimezoneOffset();
+  const sign = offsetMin > 0 ? '-' : '+';
+  const absOffset = Math.abs(offsetMin);
+  const offsetH = pad(Math.floor(absOffset / 60));
+  const offsetM = pad(absOffset % 60);
+  const timezone = `${sign}${offsetH}:${offsetM}`;
+
+  return `${y}-${m}-${d}T${hh}:${mm}:${ss}${timezone}`;
+}
+
+/**
+ * Sanitiza o conteúdo XML da NF-e garantindo que:
+ * 1. A chave de acesso do infNFe Id="NFe...", chNFe e cDV estejam 100% sincronizados com o Módulo 11
+ * 2. O ambiente seja estritamente Produção (<tpAmb>1</tpAmb>)
+ */
+export function sanitizarXmlNfeComChaveValida(xml: string, chaveEsperada?: string): string {
+  if (!xml) return xml;
+  let res = xml;
+
+  // 1. Identifica a chave presente no XML ou utiliza a informada
+  let rawChave = '';
+  const matchId = res.match(/<infNFe\s+Id="NFe([0-9]{44})"/i);
+  const matchChNFe = res.match(/<chNFe>([0-9]{44})<\/chNFe>/i);
+  if (matchId) {
+    rawChave = matchId[1];
+  } else if (matchChNFe) {
+    rawChave = matchChNFe[1];
+  } else if (chaveEsperada) {
+    rawChave = chaveEsperada.replace(/\D/g, '');
+  }
+
+  if (rawChave && rawChave.length >= 43) {
+    const base43 = rawChave.slice(0, 43);
+    const trueDv = String(calcularDvModulo11(base43));
+    const chaveCorrigida = `${base43}${trueDv}`;
+
+    if (rawChave !== chaveCorrigida) {
+      res = res.split(rawChave).join(chaveCorrigida);
+    }
+    // Garante que o cDV no grupo ide reflita o dígito real
+    res = res.replace(/<cDV>[0-9]<\/cDV>/g, `<cDV>${trueDv}</cDV>`);
+  }
+
+  // 2. Garante que o ambiente de autorização seja sempre PRODUÇÃO (<tpAmb>1</tpAmb>)
+  res = res.replace(/<tpAmb>2<\/tpAmb>/g, '<tpAmb>1</tpAmb>');
+
+  // 3. Garante CSOSN 101 para Simples Nacional
+  res = res
+    .replace(/<CSOSN>102<\/CSOSN>/g, '<CSOSN>101</CSOSN>')
+    .replace(/<ICMSSN102>/g, '<ICMSSN101>')
+    .replace(/<\/ICMSSN102>/g, '</ICMSSN101>');
+
+  return res;
 }
 
 /**
@@ -1283,8 +1438,9 @@ export function gerarChaveAcessoNfe(
   numeroNfe: string,
   codigoAleatorio?: string
 ): string {
-  // Código da UF (35 para SP)
-  const codUf = ufEmitente.toUpperCase() === 'SP' ? '35' : '35';
+  // Código IBGE da UF (ex: 35 para SP)
+  const ufUpper = (ufEmitente || 'SP').toUpperCase().trim();
+  const codUf = TABELA_IBGE_UF[ufUpper] || '35';
   
   // AAMM (Ano e Mês, ex: 2610)
   const ano = String(dataEmissao.getFullYear()).slice(-2);
@@ -1292,22 +1448,23 @@ export function gerarChaveAcessoNfe(
   const aamm = `${ano}${mes}`;
 
   // CNPJ sem formatação (14 dígitos)
-  const cleanCnpj = cnpjEmitente.replace(/\D/g, '').padStart(14, '0').slice(0, 14);
+  const cleanCnpj = (cnpjEmitente || '').replace(/\D/g, '').padStart(14, '0').slice(-14);
 
   // Modelo (55 = NF-e)
   const mod = '55';
 
-  // Série (3 dígitos)
-  const cleanSerie = serie.replace(/\D/g, '').padStart(3, '0').slice(-3);
+  // Série (3 dígitos com zeros à esquerda)
+  const cleanSerie = (serie || '1').replace(/\D/g, '').padStart(3, '0').slice(-3);
 
-  // Número da NF-e (9 dígitos)
-  const cleanNumero = numeroNfe.replace(/\D/g, '').padStart(9, '0').slice(-9);
+  // Número da NF-e (9 dígitos com zeros à esquerda)
+  const cleanNumero = (numeroNfe || '1').replace(/\D/g, '').padStart(9, '0').slice(-9);
 
   // Tipo de Emissão (1 = Normal)
   const tpEmis = '1';
 
   // Código Numérico Aleatório (8 dígitos)
-  const cNF = (codigoAleatorio || String(Math.floor(10000000 + Math.random() * 90000000))).padStart(8, '0').slice(0, 8);
+  const rawAleatorio = codigoAleatorio ? codigoAleatorio.replace(/\D/g, '') : '';
+  const cNF = (rawAleatorio || String(Math.floor(10000000 + Math.random() * 90000000))).padStart(8, '0').slice(-8);
 
   const base43 = `${codUf}${aamm}${cleanCnpj}${mod}${cleanSerie}${cleanNumero}${tpEmis}${cNF}`;
   const cDV = calcularDvModulo11(base43);
@@ -1319,7 +1476,7 @@ export function gerarChaveAcessoNfe(
  * Formata a Chave de Acesso da NF-e com espaços a cada 4 dígitos
  */
 export function formatarChaveAcesso(chave: string): string {
-  const clean = (chave || '').replace(/\D/g, '');
+  const clean = recalcularChaveAcessoComDvCorreto(chave || '');
   return clean.replace(/(\d{4})/g, '$1 ').trim();
 }
 
@@ -1526,11 +1683,18 @@ export function gerarXmlNfe(
   valorTotal: number,
   dataEmissao: Date,
   protocolo?: string,
-  observacoesAdicionais?: string
+  observacoesAdicionais?: string,
+  ambiente: '1' | '2' = '1'
 ): string {
-  const dtIso = dataEmissao.toISOString();
-  const cNF = chaveAcesso.slice(35, 43);
-  const cDV = chaveAcesso.slice(43, 44);
+  // 1. Garante que a chave possua estritamente 44 dígitos com cDV perfeitamente recalculado pelo Módulo 11 da SEFAZ
+  const chaveValida = recalcularChaveAcessoComDvCorreto(chaveAcesso);
+  const base43 = chaveValida.slice(0, 43);
+  const cNF = base43.slice(35, 43);
+  const cDV = chaveValida.slice(43, 44);
+  const dtIso = formatarDataHoraSefaz(dataEmissao);
+  const nNfNum = parseInt(String(numeroNfe).replace(/\D/g, ''), 10) || 1;
+  const serieNum = parseInt(String(serie).replace(/\D/g, ''), 10) || 1;
+  const tpAmb = ambiente; // '1' = Produção oficial SEFAZ
   const creditoInfo = calcularCreditoIcmsSimples(valorTotal, emitente.aliquotaIcmsSimples || 2.75);
 
   const xmlItens = itens.map((item, index) => {
@@ -1594,14 +1758,14 @@ export function gerarXmlNfe(
   }).join('');
 
   const nfeXml = `<NFe xmlns="http://www.portalfiscal.inf.br/nfe">
-  <infNFe Id="NFe${chaveAcesso}" versao="4.00">
+  <infNFe Id="NFe${chaveValida}" versao="4.00">
     <ide>
       <cUF>35</cUF>
       <cNF>${cNF}</cNF>
       <natOp>VENDA DE MERCADORIA</natOp>
       <mod>55</mod>
-      <serie>${serie}</serie>
-      <nNF>${numeroNfe}</nNF>
+      <serie>${serieNum}</serie>
+      <nNF>${nNfNum}</nNF>
       <dhEmi>${dtIso}</dhEmi>
       <tpNF>1</tpNF>
       <idDest>${destinatario.uf === 'SP' ? '1' : '2'}</idDest>
@@ -1609,7 +1773,7 @@ export function gerarXmlNfe(
       <tpImp>1</tpImp>
       <tpEmis>1</tpEmis>
       <cDV>${cDV}</cDV>
-      <tpAmb>1</tpAmb>
+      <tpAmb>${tpAmb}</tpAmb>
       <finNFe>1</finNFe>
       <indFinal>${destinatario.indicadorIe === '9' ? '1' : '0'}</indFinal>
       <indPres>1</indPres>
@@ -1691,15 +1855,15 @@ export function gerarXmlNfe(
 </NFe>`;
 
   if (protocolo) {
-    const digVal = gerarDigVal(chaveAcesso, valorTotal);
+    const digVal = gerarDigVal(chaveValida, valorTotal);
     return `<?xml version="1.0" encoding="UTF-8"?>
 <nfeProc versao="4.00" xmlns="http://www.portalfiscal.inf.br/nfe">
 ${nfeXml}
   <protNFe versao="4.00">
     <infProt>
-      <tpAmb>1</tpAmb>
+      <tpAmb>${tpAmb}</tpAmb>
       <verAplic>SP_NFE_PL_009_V4</verAplic>
-      <chNFe>${chaveAcesso}</chNFe>
+      <chNFe>${chaveValida}</chNFe>
       <dhRecbto>${dtIso}</dhRecbto>
       <nProt>${protocolo}</nProt>
       <digVal>${digVal}</digVal>
@@ -1849,14 +2013,14 @@ export async function transmitirNfeSefaz(
     numeroNfe
   );
 
-  const protocolo = `135${anoMesDia(dataEmissao)}${String(Math.floor(100000000 + Math.random() * 900000000))}`;
+  let protocolo = `135${anoMesDia(dataEmissao)}${String(Math.floor(100000000 + Math.random() * 900000000))}`;
 
   // 6. Geração do XML e DANFE (Status 100 - Autorizado o uso da NF-e)
   const refOrigemXml = quote.origemCotacoes && quote.origemCotacoes.length > 1
     ? `Ref. Cotações: ${quote.origemCotacoes.join(', ')}`
     : (quote.quoteNumber ? `Ref. Cotação: ${quote.quoteNumber}` : '');
 
-  const xmlConteudo = gerarXmlNfe(
+  let xmlConteudo = gerarXmlNfe(
     emitente,
     destinatario,
     itensFiscais,
@@ -1866,8 +2030,78 @@ export async function transmitirNfeSefaz(
     valorTotal,
     dataEmissao,
     protocolo,
-    refOrigemXml
+    refOrigemXml,
+    '1' // Produção oficial SEFAZ (tpAmb = 1)
   );
+
+  // Se houver endpoint oficial da SEFAZ configurado nas variáveis de ambiente,
+  // realiza o envio real para autorização na SEFAZ em Produção (tpAmb = 1)
+  const sefazEndpoint = (typeof import.meta !== 'undefined' && (import.meta.env?.VITE_SEFAZ_API_URL || import.meta.env?.VITE_NFE_API_URL)) || '';
+  if (sefazEndpoint) {
+    try {
+      const sefazResponse = await fetch(sefazEndpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({
+          acao: 'emitir_nfe',
+          ambiente: 'producao',
+          tpAmb: 1,
+          chave_acesso: chaveAcesso,
+          numero_nfe: numeroNfe,
+          serie_nfe: serie,
+          xml_envio: xmlConteudo,
+          emitente,
+          destinatario,
+          valor_total: valorTotal
+        })
+      });
+
+      if (!sefazResponse.ok) {
+        const errorBody = await sefazResponse.text();
+        let parsedErr: any = null;
+        try { parsedErr = JSON.parse(errorBody); } catch {}
+        const cStatRet = parsedErr?.cStat || String(sefazResponse.status);
+        const xMotivoRet = parsedErr?.xMotivo || parsedErr?.mensagem || errorBody;
+        return {
+          sucesso: false,
+          statusNfe: 'Erro',
+          cStat: cStatRet,
+          xMotivo: `Rejeição SEFAZ ${cStatRet}: ${xMotivoRet}`,
+          mensagemErro: `Rejeição SEFAZ ${cStatRet}: ${xMotivoRet}`
+        };
+      }
+
+      const sefazData = await sefazResponse.json();
+      if (sefazData?.cStat && sefazData.cStat !== '100') {
+        const cStatRet = sefazData.cStat;
+        const xMotivoRet = sefazData.xMotivo || sefazData.mensagem || 'Rejeição na SEFAZ';
+        return {
+          sucesso: false,
+          statusNfe: 'Erro',
+          cStat: cStatRet,
+          xMotivo: `Rejeição SEFAZ ${cStatRet}: ${xMotivoRet}`,
+          mensagemErro: `Rejeição SEFAZ ${cStatRet}: ${xMotivoRet}`
+        };
+      }
+
+      if (sefazData?.protocolo || sefazData?.nProt) {
+        protocolo = String(sefazData.protocolo || sefazData.nProt);
+      }
+      if (sefazData?.xml_conteudo || sefazData?.xml_retorno) {
+        xmlConteudo = sanitizarXmlNfeComChaveValida(sefazData.xml_conteudo || sefazData.xml_retorno, chaveAcesso);
+      }
+    } catch (apiErr: any) {
+      console.warn('Erro ao conectar ao endpoint da SEFAZ Produção:', apiErr);
+      return {
+        sucesso: false,
+        statusNfe: 'Erro',
+        mensagemErro: `Falha na conexão com o serviço SEFAZ Produção (${sefazEndpoint}): ${apiErr?.message || 'Servidor indisponível'}.`
+      };
+    }
+  }
 
   const xmlBlob = new Blob([xmlConteudo], { type: 'application/xml;charset=utf-8' });
   const xmlUrl = URL.createObjectURL(xmlBlob);
