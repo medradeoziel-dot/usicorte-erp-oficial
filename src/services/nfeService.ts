@@ -1758,10 +1758,21 @@ export function extrairDadosRetornoSefazXml(xmlString: string): DadosRetornoSefa
     if (tpAmbMatch) tpAmb = tpAmbMatch[1];
   }
 
-  // 4. Determinação dos campos consolidados
   const effectiveCStat = cStatNota || cStatLote;
   const effectiveXMotivo = xMotivoNota || xMotivoLote;
-  const isAutorizada = (cStatNota === '100' || cStatNota === '150');
+
+  // Se nProt não veio no nó <nProt>, busca se foi informado no xMotivo ou texto bruto (comum em cStat 204: Duplicidade de NF-e [nProt: 135...])
+  if (!nProt && (xMotivoNota || xMotivoLote || xmlString)) {
+    const rawText = `${xMotivoNota || ''} ${xMotivoLote || ''} ${xmlString}`;
+    const matchXMotProt = rawText.match(/(?:nProt|protocolo)[:\s=]*(\d{15})/i);
+    if (matchXMotProt) {
+      nProt = matchXMotProt[1];
+    }
+  }
+
+  // 4. Determinação dos campos consolidados com tratamento inteligente de Duplicidade (204)
+  const isDuplicidadeComProtocolo = (cStatNota === '204' || cStatLote === '204' || effectiveCStat === '204') && !!nProt;
+  const isAutorizada = (cStatNota === '100' || cStatNota === '150' || isDuplicidadeComProtocolo);
   const isLotePendente = (cStatLote === '103' || cStatLote === '105' || (!cStatNota && !!nRec));
 
   return {
@@ -2709,33 +2720,106 @@ export async function transmitirNfeSefaz(
   // Antes de enviar qualquer lote ou consumir novo número fiscal, consulta se a nota
   // já se encontra autorizada na SEFAZ (evita Duplicidade cStat 204 se a conexão anterior caiu).
   // =========================================================================================
+  // 0. Se a cotação já estiver emitida e com protocolo, não retransmite
+  if (isNfeAutorizada(quote.status_nfe) && (quote.protocolo_autorizacao || quote.protocolo_nfe)) {
+    console.log(`[SEFAZ Anti-Duplicidade] Cotação ${quoteIdOrNum} já consta como Emitida (Protocolo ${quote.protocolo_autorizacao || quote.protocolo_nfe}). Retornando dados autorizados sem retransmitir.`);
+    return {
+      sucesso: true,
+      statusNfe: 'Emitida',
+      chaveAcesso: quote.nfe_chave || quote.chave_acesso || '',
+      nfeChave: quote.nfe_chave || quote.chave_acesso || '',
+      nfeNumero: quote.nfe_numero || '',
+      serie: quote.serie_nfe || '1',
+      protocolo: quote.protocolo_autorizacao || quote.protocolo_nfe || '',
+      protocoloAutorizacao: quote.protocolo_autorizacao || quote.protocolo_nfe || '',
+      dataEmissao: quote.nfe_emitida_em || new Date().toISOString(),
+      danfeUrl: quote.danfe_url,
+      xmlUrl: quote.xml_url,
+      xmlConteudo: quote.xml_conteudo,
+      cStat: '100',
+      xMotivo: 'NF-e já se encontra autorizada perante a SEFAZ.',
+      origemRecuperacao: 'consulta_previa'
+    };
+  }
+
+  // 1. Se houver recibo pendente (nRec), consulta o recibo antes de enviar novo lote
   if (nRecPrevio) {
-    console.log(`[SEFAZ Anti-Duplicidade] Recibo pendente ${nRecPrevio} detectado para cotação ${quoteIdOrNum}. Consultando recibo antes do envio...`);
+    console.log(`[SEFAZ Anti-Duplicidade] Recibo pendente ${nRecPrevio} detectado para cotação ${quoteIdOrNum}. Consultando recibo antes de qualquer envio...`);
     try {
-      const consultaReciboPrevia = await consultarReciboLoteSefaz(nRecPrevio, 8000);
+      const consultaReciboPrevia = await consultarReciboLoteSefaz(nRecPrevio, 9000);
       if (consultaReciboPrevia.isAutorizada && consultaReciboPrevia.nProt) {
         console.log(`[SEFAZ Anti-Duplicidade] NF-e autorizada via recibo prévio (${consultaReciboPrevia.nProt})! Evitando retransmissão.`);
-        return await consultarStatusOuReciboNfe(quote, client);
+        return await consultarStatusOuReciboNfe({
+          ...quote,
+          nfe_chave: chaveExistente || consultaReciboPrevia.chNFe || quote.nfe_chave,
+          chave_acesso: chaveExistente || consultaReciboPrevia.chNFe || quote.chave_acesso,
+          nfe_numero: quote.nfe_numero,
+          serie_nfe: quote.serie_nfe
+        }, client);
+      } else if (consultaReciboPrevia.isLotePendente || consultaReciboPrevia.cStat === '105') {
+        console.log(`[SEFAZ Anti-Duplicidade] Lote com recibo ${nRecPrevio} ainda em processamento na SEFAZ. Aguardando 2.5s para 2ª verificação...`);
+        await new Promise(r => setTimeout(r, 2500));
+        const retryRecibo = await consultarReciboLoteSefaz(nRecPrevio, 9000);
+        if (retryRecibo.isAutorizada && retryRecibo.nProt) {
+          return await consultarStatusOuReciboNfe({
+            ...quote,
+            nfe_chave: chaveExistente || retryRecibo.chNFe || quote.nfe_chave,
+            chave_acesso: chaveExistente || retryRecibo.chNFe || quote.chave_acesso,
+            nfe_numero: quote.nfe_numero,
+            serie_nfe: quote.serie_nfe
+          }, client);
+        } else if (retryRecibo.isLotePendente || retryRecibo.cStat === '105') {
+          const msgAindaPendente = `Lote em processamento na SEFAZ (Recibo Nº ${nRecPrevio}). O lote já foi recebido e aguarda processamento da SEFAZ. O reenvio foi bloqueado para evitar duplicidade de notas. Clique em "Consultar Recibo / Situação" para obter o resultado final.`;
+          return {
+            sucesso: false,
+            statusNfe: 'Pendente',
+            chaveAcesso: chaveExistente,
+            nRec: nRecPrevio,
+            cStat: '105',
+            xMotivo: msgAindaPendente,
+            mensagemErro: msgAindaPendente
+          };
+        }
       }
     } catch (eRec) {
       console.warn('Aviso ao consultar recibo prévio:', eRec);
     }
   }
 
+  // 2. Se houver chave existente na cotação, consulta situação na SEFAZ antes do envio
   if (chaveExistente && chaveExistente.length === 44) {
     console.log(`[SEFAZ Anti-Duplicidade] Chave ${chaveExistente} detectada na cotação. Consultando situação na SEFAZ antes do envio...`);
     try {
-      const consultaChavePrevia = await consultarSituacaoNfeSefaz(chaveExistente, 8000);
+      const consultaChavePrevia = await consultarSituacaoNfeSefaz(chaveExistente, 9000);
       if (consultaChavePrevia.isAutorizada && consultaChavePrevia.nProt) {
         console.log(`[SEFAZ Anti-Duplicidade] Chave ${chaveExistente} já se encontra autorizada (Protocolo ${consultaChavePrevia.nProt})! Evitando envio duplicado.`);
-        return await consultarStatusOuReciboNfe(quote, client);
+        return await consultarStatusOuReciboNfe({
+          ...quote,
+          nfe_chave: chaveExistente,
+          chave_acesso: chaveExistente,
+          nfe_numero: quote.nfe_numero || chaveExistente.slice(25, 34),
+          serie_nfe: quote.serie_nfe || chaveExistente.slice(22, 25)
+        }, client);
+      } else if (consultaChavePrevia.cStat === '204') {
+        const matchP = (consultaChavePrevia.xMotivo || '').match(/(?:nProt|protocolo)[:\s=]*(\d{15})/i);
+        if (matchP) {
+          console.log(`[SEFAZ Anti-Duplicidade] Protocolo ${matchP[1]} recuperado do retorno de duplicidade da chave ${chaveExistente}!`);
+          return await consultarStatusOuReciboNfe({
+            ...quote,
+            nfe_chave: chaveExistente,
+            chave_acesso: chaveExistente,
+            nfe_numero: quote.nfe_numero || chaveExistente.slice(25, 34),
+            serie_nfe: quote.serie_nfe || chaveExistente.slice(22, 25),
+            protocolo_autorizacao: matchP[1]
+          }, client);
+        }
       }
     } catch (eChave) {
       console.warn('Aviso ao consultar situação prévia da chave:', eChave);
     }
   }
 
-  // Preservação do número e série caso a cotação já estivesse em estado Pendente
+  // Preservação do número e série caso a cotação já estivesse em estado Pendente ou possuísse chave
   let proximoNumeroNfe: number;
   let numeroNfe: string;
   let serie: string;
@@ -2746,6 +2830,11 @@ export async function transmitirNfeSefaz(
     proximoNumeroNfe = parseInt(String(quote.nfe_numero).replace(/\D/g, ''), 10) || (ultimoNfeNum + 1);
     numeroNfe = String(proximoNumeroNfe).padStart(6, '0');
     serie = String(quote.serie_nfe || nfeConfig.serieNfe || companyData.serie_nfe || '1');
+    chaveAcesso = chaveExistente;
+  } else if (chaveExistente && chaveExistente.length === 44) {
+    proximoNumeroNfe = parseInt(chaveExistente.slice(25, 34), 10) || (ultimoNfeNum + 1);
+    numeroNfe = String(proximoNumeroNfe).padStart(6, '0');
+    serie = String(quote.serie_nfe || chaveExistente.slice(22, 25) || '1');
     chaveAcesso = chaveExistente;
   } else {
     proximoNumeroNfe = ultimoNfeNum + 1;
@@ -2760,9 +2849,9 @@ export async function transmitirNfeSefaz(
     );
   }
 
-  // Verificação de segurança da nova chave gerada
+  // Verificação de segurança da chave gerada antes do envio
   try {
-    const checkNova = await consultarSituacaoNfeSefaz(chaveAcesso, 5000);
+    const checkNova = await consultarSituacaoNfeSefaz(chaveAcesso, 6000);
     if (checkNova.isAutorizada && checkNova.nProt) {
       console.log(`[SEFAZ Anti-Duplicidade] Nova chave ${chaveAcesso} já consta como autorizada na SEFAZ! Recuperando protocolo...`);
       return await consultarStatusOuReciboNfe({
@@ -2772,6 +2861,18 @@ export async function transmitirNfeSefaz(
         nfe_numero: numeroNfe,
         serie_nfe: serie
       }, client);
+    } else if (checkNova.cStat === '204') {
+      const matchP = (checkNova.xMotivo || '').match(/(?:nProt|protocolo)[:\s=]*(\d{15})/i);
+      if (matchP) {
+        return await consultarStatusOuReciboNfe({
+          ...quote,
+          nfe_chave: chaveAcesso,
+          chave_acesso: chaveAcesso,
+          nfe_numero: numeroNfe,
+          serie_nfe: serie,
+          protocolo_autorizacao: matchP[1]
+        }, client);
+      }
     }
   } catch {}
 
@@ -2843,15 +2944,23 @@ export async function transmitirNfeSefaz(
       // =========================================================================================
       // TRAVA 3: CONSULTA AUTOMÁTICA DE RECIBO (103 / 105)
       // Caso a SEFAZ retorne lote recebido (103) ou em processamento (105), salva o recibo (nRec),
-      // aguarda 2.5s e consulta o processamento do lote para obter a autorização definitiva.
+      // executa polling automático e fornece uma rotina segura para consulta posterior.
       // =========================================================================================
       if (dadosRetorno.isLotePendente || dadosRetorno.cStatLote === '103' || dadosRetorno.cStatLote === '105') {
         const nRecibo = dadosRetorno.nRec || 'NÃO INFORMADO';
         salvarReciboLocal(quoteIdOrNum, nRecibo, chaveAcesso);
-        console.log(`[SEFAZ-SP] Lote recebido (cStat ${dadosRetorno.cStatLote}). Recibo ${nRecibo}. Consultando resultado do lote em 2.5s...`);
+        console.log(`[SEFAZ-SP] Lote recebido (cStat ${dadosRetorno.cStatLote}). Recibo ${nRecibo}. Executando consulta automática em 2.5s...`);
 
+        // 1ª Tentativa de consulta de recibo após 2.5s
         await new Promise(r => setTimeout(r, 2500));
-        const consultaRecibo = await consultarReciboLoteSefaz(nRecibo, 10000);
+        let consultaRecibo = await consultarReciboLoteSefaz(nRecibo, 10000);
+
+        // Se ainda estiver processando (105), realiza 2ª tentativa após 3.5s
+        if (!consultaRecibo.isAutorizada && (consultaRecibo.isLotePendente || consultaRecibo.cStat === '105')) {
+          console.log(`[SEFAZ-SP] Lote ainda em processamento na SEFAZ. Aguardando 3.5s para 2ª tentativa de consulta do recibo ${nRecibo}...`);
+          await new Promise(r => setTimeout(r, 3500));
+          consultaRecibo = await consultarReciboLoteSefaz(nRecibo, 10000);
+        }
 
         if (consultaRecibo.isAutorizada && consultaRecibo.nProt) {
           console.log(`[SEFAZ-SP] Lote processado e autorizado com sucesso (Protocolo ${consultaRecibo.nProt})!`);
@@ -2859,7 +2968,7 @@ export async function transmitirNfeSefaz(
           autorizacaoConfirmadaSefaz = true;
           origemRecuperacao = 'consulta_recibo';
         } else {
-          const msgPendente = `Lote pendente na SEFAZ (cStat ${consultaRecibo.cStat || dadosRetorno.cStatLote}: ${consultaRecibo.xMotivo || dadosRetorno.xMotivoLote || 'Lote em processamento'}). Recibo Nº ${nRecibo}. O recibo foi salvo e o status gravado como Pendente. Utilize "Consultar Recibo / Situação" para obter a autorização final sem reenviar.`;
+          const msgPendente = `Lote recebido com sucesso pela SEFAZ e atualmente em processamento (cStat ${consultaRecibo.cStat || dadosRetorno.cStatLote}: ${consultaRecibo.xMotivo || dadosRetorno.xMotivoLote || 'Lote em processamento'}). Recibo Nº ${nRecibo}. O recibo foi salvo e o status gravado como Pendente. Utilize "Consultar Recibo / Situação" para obter a autorização final sem duplicidade.`;
           try {
             await updateCotacaoNfeStatusDb(quoteIdOrNum, {
               status_nfe: 'Pendente',
@@ -2904,7 +3013,31 @@ export async function transmitirNfeSefaz(
         };
       }
 
-      // CASO 3: Rejeição da Nota específica dentro de <infProt> (ex: cStat 204 Duplicidade, 539, 207, etc.)
+      // CASO 2.5: Verificação especial para Duplicidade (cStat 204 ou 539)
+      const cStatCheck = dadosRetorno.cStatNota || dadosRetorno.cStatLote || dadosRetorno.cStat;
+      const xMotivoCheck = dadosRetorno.xMotivoNota || dadosRetorno.xMotivoLote || dadosRetorno.xMotivo || '';
+      if (!autorizacaoConfirmadaSefaz && (cStatCheck === '204' || cStatCheck === '539' || xMotivoCheck.toLowerCase().includes('duplicidade'))) {
+        console.log(`[SEFAZ Anti-Duplicidade] SEFAZ retornou duplicidade (cStat ${cStatCheck}). Recuperando protocolo oficial da nota já autorizada...`);
+        const matchProt = xMotivoCheck.match(/(?:nProt|protocolo)[:\s=]*(\d{15})/i);
+        if (matchProt) {
+          protocolo = matchProt[1];
+          autorizacaoConfirmadaSefaz = true;
+          origemRecuperacao = 'consulta_previa';
+        } else {
+          try {
+            const consultaDup = await consultarSituacaoNfeSefaz(chaveAcesso, 10000);
+            if (consultaDup.isAutorizada && consultaDup.nProt) {
+              protocolo = consultaDup.nProt;
+              autorizacaoConfirmadaSefaz = true;
+              origemRecuperacao = 'consulta_previa';
+            }
+          } catch (eDup) {
+            console.warn('Aviso ao consultar duplicidade na SEFAZ:', eDup);
+          }
+        }
+      }
+
+      // CASO 3: Rejeição da Nota específica dentro de <infProt> (diferente de 100, 150 e 204)
       if (!autorizacaoConfirmadaSefaz && dadosRetorno.cStatNota && dadosRetorno.cStatNota !== '100' && dadosRetorno.cStatNota !== '150') {
         const cStatNota = dadosRetorno.cStatNota;
         const xMotivoNota = dadosRetorno.xMotivoNota || 'Nota fiscal rejeitada pela SEFAZ';
@@ -2973,18 +3106,25 @@ export async function transmitirNfeSefaz(
     } catch (soapErr: any) {
       // =========================================================================================
       // TRAVA 2: TRATAMENTO DE TIMEOUT E PERDA DE CONEXÃO
-      // Se a requisição sofrer timeout (15s) ou erro de rede, o ERP NÃO gera novo XML ou envio cego.
-      // Dispara obrigatoriamente consulta de situação por chave para capturar o protocolo real.
+      // Se a requisição sofrer timeout ou falhar por rede, o ERP NÃO deve gerar novo XML ou reenvio cego.
+      // Dispara obrigatoriamente consulta de situação por chave para capturar o protocolo real caso o lote tenha sido processado.
       // =========================================================================================
       console.warn(`[SEFAZ-SP Produção] Erro/Timeout na transmissão SOAP direta (${soapErr?.message || soapErr}). Acionando consulta de situação por chave para verificar processamento...`);
 
       try {
-        const consultaTimeout = await consultarSituacaoNfeSefaz(chaveAcesso, 10000);
+        const consultaTimeout = await consultarSituacaoNfeSefaz(chaveAcesso, 12000);
         if (consultaTimeout.isAutorizada && consultaTimeout.nProt) {
           console.log(`[SEFAZ-SP Produção] Protocolo ${consultaTimeout.nProt} recuperado com sucesso pós-timeout! Evitada duplicidade.`);
           protocolo = consultaTimeout.nProt;
           autorizacaoConfirmadaSefaz = true;
           origemRecuperacao = 'timeout_consulta';
+        } else if (consultaTimeout.cStat === '204') {
+          const matchP = (consultaTimeout.xMotivo || '').match(/(?:nProt|protocolo)[:\s=]*(\d{15})/i);
+          if (matchP) {
+            protocolo = matchP[1];
+            autorizacaoConfirmadaSefaz = true;
+            origemRecuperacao = 'timeout_consulta';
+          }
         } else if (consultaTimeout.isLotePendente || consultaTimeout.cStatLote === '103' || consultaTimeout.cStatLote === '105') {
           const nRec = consultaTimeout.nRec || 'PENDENTE';
           salvarReciboLocal(quoteIdOrNum, nRec, chaveAcesso);
@@ -3012,7 +3152,7 @@ export async function transmitirNfeSefaz(
           };
         } else {
           // Nota não autorizada e status incerto: salva como Pendente com a mesma chave para não gastar numeração
-          const msgPendente = `A requisição sofreu timeout ou oscilação na rede (${soapErr?.message || 'Servidor indisponível'}). A chave ${chaveAcesso} foi preservada com status Pendente. Execute "Consultar Recibo / Situação" para verificar se a SEFAZ processou o documento antes de reenviar.`;
+          const msgPendente = `A requisição sofreu timeout ou oscilação na rede (${soapErr?.message || 'Servidor indisponível'}). O documento foi preservado com status Pendente e a Chave ${chaveAcesso}. Execute "Consultar Recibo / Situação" para verificar se a SEFAZ processou o documento antes de reenviar.`;
           try {
             await updateCotacaoNfeStatusDb(quoteIdOrNum, {
               status_nfe: 'Pendente',
@@ -3035,7 +3175,7 @@ export async function transmitirNfeSefaz(
           };
         }
       } catch (eCons) {
-        const errMsg = `Falha de conexão com a SEFAZ-SP Produção (${sefazEndpoint}): ${soapErr?.message || 'Erro de rede'}. Status marcado como Pendente para evitar duplicidade.`;
+        const errMsg = `Falha de conexão com a SEFAZ-SP Produção (${sefazEndpoint}): ${soapErr?.message || 'Erro de rede'}. Status mantido como Pendente para evitar duplicidade.`;
         try {
           await updateCotacaoNfeStatusDb(quoteIdOrNum, {
             status_nfe: 'Pendente',
@@ -3105,7 +3245,9 @@ export async function transmitirNfeSefaz(
 
       const sefazData = await sefazResponse.json();
 
-      // Verifica se o proxy reportou lote pendente (cStat 103 ou 105)
+      // =========================================================================================
+      // TRAVA 3: CONSULTA AUTOMÁTICA DE RECIBO (103 / 105) NO PROXY
+      // =========================================================================================
       const cStatProxy = String(sefazData?.cStat || '');
       if (cStatProxy === '103' || cStatProxy === '105') {
         const nRec = sefazData?.nRec || sefazData?.numero_recibo || 'N/A';
@@ -3113,14 +3255,19 @@ export async function transmitirNfeSefaz(
         console.log(`[SEFAZ-SP Proxy] Lote recebido (cStat ${cStatProxy}). Recibo ${nRec}. Aguardando consulta...`);
 
         await new Promise(r => setTimeout(r, 2500));
-        const consultaRecibo = await consultarReciboLoteSefaz(nRec, 10000);
+        let consultaRecibo = await consultarReciboLoteSefaz(nRec, 10000);
+
+        if (!consultaRecibo.isAutorizada && (consultaRecibo.isLotePendente || consultaRecibo.cStat === '105')) {
+          await new Promise(r => setTimeout(r, 3500));
+          consultaRecibo = await consultarReciboLoteSefaz(nRec, 10000);
+        }
 
         if (consultaRecibo.isAutorizada && consultaRecibo.nProt) {
           protocolo = consultaRecibo.nProt;
           autorizacaoConfirmadaSefaz = true;
           origemRecuperacao = 'consulta_recibo';
         } else {
-          const msgPendente = `Lote pendente na SEFAZ (cStat ${cStatProxy}: ${sefazData?.xMotivo || 'Lote em processamento'}). Recibo Nº ${nRec}. O recibo foi salvo. Utilize "Consultar Recibo / Situação" para obter a autorização final.`;
+          const msgPendente = `Lote recebido com sucesso pela SEFAZ e atualmente em processamento (cStat ${cStatProxy}: ${sefazData?.xMotivo || 'Lote em processamento'}). Recibo Nº ${nRec}. O recibo foi salvo e o documento mantido com status Pendente. Utilize "Consultar Recibo / Situação" para obter a autorização final sem duplicidade.`;
           try {
             await updateCotacaoNfeStatusDb(quoteIdOrNum, {
               status_nfe: 'Pendente',
@@ -3142,6 +3289,25 @@ export async function transmitirNfeSefaz(
             xMotivo: msgPendente,
             mensagemErro: msgPendente
           };
+        }
+      }
+
+      // Verificação de Duplicidade (204 / 539) no Proxy
+      if (!autorizacaoConfirmadaSefaz && (cStatProxy === '204' || cStatProxy === '539' || String(sefazData.xMotivo || '').toLowerCase().includes('duplicidade'))) {
+        const matchProt = String(sefazData.xMotivo || '').match(/(?:nProt|protocolo)[:\s=]*(\d{15})/i);
+        if (matchProt) {
+          protocolo = matchProt[1];
+          autorizacaoConfirmadaSefaz = true;
+          origemRecuperacao = 'consulta_previa';
+        } else {
+          try {
+            const consultaDup = await consultarSituacaoNfeSefaz(chaveAcesso, 10000);
+            if (consultaDup.isAutorizada && consultaDup.nProt) {
+              protocolo = consultaDup.nProt;
+              autorizacaoConfirmadaSefaz = true;
+              origemRecuperacao = 'consulta_previa';
+            }
+          } catch (eDup) {}
         }
       }
 
@@ -3192,11 +3358,43 @@ export async function transmitirNfeSefaz(
     } catch (apiErr: any) {
       console.warn('Timeout ou erro de rede no serviço SEFAZ:', apiErr);
       try {
-        const consultaTimeout = await consultarSituacaoNfeSefaz(chaveAcesso, 10000);
+        const consultaTimeout = await consultarSituacaoNfeSefaz(chaveAcesso, 12000);
         if (consultaTimeout.isAutorizada && consultaTimeout.nProt) {
           protocolo = consultaTimeout.nProt;
           autorizacaoConfirmadaSefaz = true;
           origemRecuperacao = 'timeout_consulta';
+        } else if (consultaTimeout.cStat === '204') {
+          const matchP = (consultaTimeout.xMotivo || '').match(/(?:nProt|protocolo)[:\s=]*(\d{15})/i);
+          if (matchP) {
+            protocolo = matchP[1];
+            autorizacaoConfirmadaSefaz = true;
+            origemRecuperacao = 'timeout_consulta';
+          }
+        } else if (consultaTimeout.isLotePendente || consultaTimeout.cStatLote === '103' || consultaTimeout.cStatLote === '105') {
+          const nRec = consultaTimeout.nRec || 'PENDENTE';
+          salvarReciboLocal(quoteIdOrNum, nRec, chaveAcesso);
+          const msgPendente = `Timeout na resposta, mas o lote consta como recebido na SEFAZ (Recibo Nº ${nRec}). Chave e número preservados com status Pendente. Utilize "Consultar Recibo / Situação" para obter a resposta final sem duplicidade.`;
+          try {
+            await updateCotacaoNfeStatusDb(quoteIdOrNum, {
+              status_nfe: 'Pendente',
+              nfe_chave: chaveAcesso,
+              chave_acesso: chaveAcesso,
+              nfe_numero: numeroNfe,
+              serie_nfe: serie,
+              mensagem_erro_nfe: msgPendente
+            });
+          } catch {}
+          return {
+            sucesso: false,
+            statusNfe: 'Pendente',
+            chaveAcesso,
+            nfeNumero: numeroNfe,
+            serie,
+            nRec,
+            cStat: '105',
+            xMotivo: msgPendente,
+            mensagemErro: msgPendente
+          };
         } else {
           const errMsg = `Timeout na conexão com a SEFAZ Produção (${sefazEndpoint}). Chave ${chaveAcesso} preservada com status Pendente para evitar duplicidade.`;
           try {
@@ -3505,6 +3703,17 @@ export async function consultarStatusOuReciboNfe(
   if (chaveAcesso && chaveAcesso.length === 44) {
     console.log(`[SEFAZ Consulta] Consultando situação da chave ${chaveAcesso}...`);
     const resChave = await consultarSituacaoNfeSefaz(chaveAcesso, 12000);
+
+    // Se a SEFAZ acusou duplicidade (cStat 204), extrai o protocolo existente
+    if (!resChave.nProt && (resChave.cStat === '204' || resChave.cStatNota === '204' || (resChave.xMotivo || '').toLowerCase().includes('duplicidade'))) {
+      const matchP = (resChave.xMotivo || '').match(/(?:nProt|protocolo)[:\s=]*(\d{15})/i);
+      if (matchP) {
+        console.log(`[SEFAZ Consulta] Protocolo ${matchP[1]} recuperado do retorno de duplicidade (cStat 204) na consulta de situação!`);
+        resChave.nProt = matchP[1];
+        resChave.isAutorizada = true;
+      }
+    }
+
     if (resChave.isAutorizada && resChave.nProt) {
       const companyData = await fetchCompanyData(true);
       const cliDanfe = await fetchClienteCompletoParaDanfe(quote, client);

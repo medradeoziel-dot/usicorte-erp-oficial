@@ -369,10 +369,42 @@ export default function EmissaoNfeModal({
     return primeiro || '101';
   }, [itensFiscais]);
 
-  // 4. Confirmar & Transmitir SEFAZ
+  // 4. Confirmar & Transmitir SEFAZ com travas anti-duplicidade
   const handleTransmitirSefaz = async () => {
     setIsTransmitting(true);
     setErrorMessage(null);
+
+    // TRAVA DE SEGURANÇA 1: Se o documento já estiver em estado Pendente ou possuir recibo gravado,
+    // executa consulta prévia imediata na SEFAZ para evitar duplicidade de nota (Rejeição 204)
+    if (currentQuoteState.status_nfe === 'Pendente' || reciboPendente) {
+      console.log('[SEFAZ Anti-Duplicidade UI] Documento em estado Pendente detectado na UI. Consultando situação na SEFAZ antes de qualquer retransmissão...');
+      try {
+        const resConsulta = await consultarStatusOuReciboNfe(currentQuoteState, client);
+        if (resConsulta.sucesso && resConsulta.statusNfe === 'Emitida') {
+          setTransmissionResult(resConsulta);
+          const updatedQuote: Quote = {
+            ...currentQuoteState,
+            status_nfe: 'Emitida',
+            nfe_chave: resConsulta.nfeChave,
+            nfe_numero: resConsulta.nfeNumero,
+            serie_nfe: resConsulta.serie,
+            danfe_url: resConsulta.danfeUrl,
+            xml_url: resConsulta.xmlUrl,
+            xml_conteudo: resConsulta.xmlConteudo,
+            mensagem_erro_nfe: undefined,
+            nfe_emitida_em: resConsulta.dataEmissao
+          };
+          setCurrentQuoteState(updatedQuote);
+          onSuccess(updatedQuote);
+          setShowDanfeOficialModal(true);
+          setAutoPrintDanfe(true);
+          setIsTransmitting(false);
+          return;
+        }
+      } catch (ePre) {
+        console.warn('Aviso na verificação prévia de status na UI:', ePre);
+      }
+    }
 
     // 1. Altera o status_nfe para "Processando"
     try {
@@ -481,20 +513,33 @@ export default function EmissaoNfeModal({
         onSuccess(errorQuote);
       }
     } catch (err: any) {
-      const msg = err?.message || 'Falha na comunicação com os servidores da SEFAZ.';
+      const isNetOrTimeout = err?.name === 'TimeoutError' || 
+                             err?.message?.toLowerCase().includes('timeout') || 
+                             err?.message?.toLowerCase().includes('abort') ||
+                             err?.message?.toLowerCase().includes('failed to fetch') ||
+                             err?.message?.toLowerCase().includes('network') ||
+                             err?.message?.toLowerCase().includes('conexão') ||
+                             err?.message?.toLowerCase().includes('offline');
+
+      const targetStatus = isNetOrTimeout ? 'Pendente' : 'Erro';
+      const msg = isNetOrTimeout
+        ? `Tempo limite ou oscilação de rede ao comunicar com a SEFAZ (${err?.message || 'Timeout'}). O documento foi mantido como Pendente para evitar duplicidade. Clique em "Consultar Recibo / Situação" para verificar se a SEFAZ autorizou a nota.`
+        : (err?.message || 'Falha na comunicação com os servidores da SEFAZ.');
+
       setErrorMessage(msg);
       try {
         await updateCotacaoNfeStatusDb(currentQuoteState.id || currentQuoteState.quoteNumber, {
-          status_nfe: 'Erro',
+          status_nfe: targetStatus,
           mensagem_erro_nfe: msg
         });
       } catch {}
-      const errorQuote: Quote = {
+      const resultingQuote: Quote = {
         ...currentQuoteState,
-        status_nfe: 'Erro',
+        status_nfe: targetStatus,
         mensagem_erro_nfe: msg
       };
-      onSuccess(errorQuote);
+      setCurrentQuoteState(resultingQuote);
+      onSuccess(resultingQuote);
     } finally {
       setIsTransmitting(false);
     }
@@ -1210,6 +1255,28 @@ export default function EmissaoNfeModal({
                   <Eye className="w-4 h-4 text-indigo-400" />
                   <span>👁️ Pré-visualizar DANFE</span>
                 </button>
+                {/* BOTÃO DE CONSULTA DE RECIBO / SITUAÇÃO SEFAZ (QUANDO PENDENTE) */}
+                {isPendente && (
+                  <button
+                    type="button"
+                    onClick={handleConsultarStatusOuRecibo}
+                    disabled={isConsultingRecibo || isTransmitting}
+                    className="px-4 py-2.5 bg-amber-600 hover:bg-amber-500 active:bg-amber-700 text-white font-bold text-xs rounded-xl transition-all shadow-md shadow-amber-600/30 flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                    title="Consultar processamento do recibo ou situação da chave na SEFAZ sem retransmitir"
+                  >
+                    {isConsultingRecibo ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin text-white" />
+                        <span>Consultando SEFAZ...</span>
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="w-4 h-4 text-white" />
+                        <span>Consultar Recibo / Situação</span>
+                      </>
+                    )}
+                  </button>
+                )}
 
                 {/* BOTÃO DE TRANSMISSÃO PRINCIPAL */}
                 <button
