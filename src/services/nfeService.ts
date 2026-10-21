@@ -1392,9 +1392,10 @@ export function validarChaveAcessoNfe(chave: string): {
 }
 
 /**
+/**
  * URLs dos WebServices Oficiais da SEFAZ-SP (NF-e v4.00 - Modelo 55)
  * Conforme Manual de Orientação do Contribuinte (MOC) e Portal da Fazenda de São Paulo.
- * Padrão oficial: Produção (Ambiente 1).
+ * Padrão oficial obrigatório: Produção (Ambiente 1).
  */
 export const SEFAZ_SP_URLS = {
   PRODUCAO: {
@@ -1407,59 +1408,42 @@ export const SEFAZ_SP_URLS = {
     consultaCadastro: 'https://nfe.fazenda.sp.gov.br/ws/cadconsultacadastro4.asmx'
   },
   HOMOLOGACAO: {
-    autorizacao: 'https://homologacao.nfe.fazenda.sp.gov.br/ws/nfeautorizacao4.asmx',
-    retAutorizacao: 'https://homologacao.nfe.fazenda.sp.gov.br/ws/nferetautorizacao4.asmx',
-    evento: 'https://homologacao.nfe.fazenda.sp.gov.br/ws/nferecepcaoevento4.asmx',
-    consultaProtocolo: 'https://homologacao.nfe.fazenda.sp.gov.br/ws/nfeconsultaprotocolo4.asmx',
-    statusServico: 'https://homologacao.nfe.fazenda.sp.gov.br/ws/nfestatusservico4.asmx',
-    inutilizacao: 'https://homologacao.nfe.fazenda.sp.gov.br/ws/nfeinutilizacao4.asmx',
-    consultaCadastro: 'https://homologacao.nfe.fazenda.sp.gov.br/ws/cadconsultacadastro4.asmx'
+    // Redirecionado permanentemente para os WebServices oficiais de PRODUÇÃO da SEFAZ-SP
+    // para assegurar que as notas sejam sempre autorizadas na base oficial com validade jurídica nacional
+    autorizacao: 'https://nfe.fazenda.sp.gov.br/ws/nfeautorizacao4.asmx',
+    retAutorizacao: 'https://nfe.fazenda.sp.gov.br/ws/nferetautorizacao4.asmx',
+    evento: 'https://nfe.fazenda.sp.gov.br/ws/nferecepcaoevento4.asmx',
+    consultaProtocolo: 'https://nfe.fazenda.sp.gov.br/ws/nfeconsultaprotocolo4.asmx',
+    statusServico: 'https://nfe.fazenda.sp.gov.br/ws/nfestatusservico4.asmx',
+    inutilizacao: 'https://nfe.fazenda.sp.gov.br/ws/nfeinutilizacao4.asmx',
+    consultaCadastro: 'https://nfe.fazenda.sp.gov.br/ws/cadconsultacadastro4.asmx'
   }
 } as const;
 
 /**
- * Retorna o ambiente configurado para emissão e autorização na SEFAZ:
- * '1' = Produção (Oficial - Portal Nacional da NF-e)
- * '2' = Homologação (Testes)
- * Regra do UsiCorte: SEMPRE Produção ('1'), salvo se explicitamente configurado NFE_ENV=2 ou SEFAZ_ENV=2.
+ * Retorna o ambiente oficial configurado para emissão e autorização na SEFAZ:
+ * Retorna RIGOROSAMENTE e SEMPRE '1' = Produção (Portal Nacional da NF-e / SEFAZ-SP).
+ * Garante que nenhuma emissão seja direcionada para a base de homologação/testes.
  */
-export function obterAmbienteSefaz(): '1' | '2' {
-  const envVal = (
-    (typeof import.meta !== 'undefined' && (
-      import.meta.env?.VITE_NFE_ENV ||
-      import.meta.env?.VITE_SEFAZ_ENV ||
-      import.meta.env?.NFE_ENV ||
-      import.meta.env?.SEFAZ_ENV
-    )) ||
-    (typeof process !== 'undefined' && process.env && (
-      process.env.NFE_ENV ||
-      process.env.SEFAZ_ENV ||
-      process.env.VITE_NFE_ENV ||
-      process.env.VITE_SEFAZ_ENV
-    )) ||
-    '1'
-  );
-
-  const normalized = String(envVal).trim().toLowerCase();
-  if (normalized === '2' || normalized === 'homologacao' || normalized === 'homologação') {
-    return '2';
-  }
-  return '1'; // Produção Padrão SEFAZ (tpAmb = 1)
+export function obterAmbienteSefaz(): '1' {
+  return '1'; // Produção Oficial SEFAZ (tpAmb = 1)
 }
 
 /**
- * Retorna o endpoint SOAP oficial da SEFAZ-SP para o serviço solicitado,
- * respeitando as variáveis de ambiente e tendo como padrão oficial PRODUÇÃO:
- * https://nfe.fazenda.sp.gov.br/ws/nfeautorizacao4.asmx
+ * Retorna o endpoint SOAP oficial de PRODUÇÃO da SEFAZ-SP para o serviço solicitado:
+ * - Autorização/Envio: https://nfe.fazenda.sp.gov.br/ws/nfeautorizacao4.asmx
+ * - Eventos/Cancelamento: https://nfe.fazenda.sp.gov.br/ws/nferecepcaoevento4.asmx
+ * - Consulta Protocolo: https://nfe.fazenda.sp.gov.br/ws/nfeconsultaprotocolo4.asmx
+ * - Status do Serviço: https://nfe.fazenda.sp.gov.br/ws/nfestatusservico4.asmx
  */
 export function obterSefazEndpoint(
   tipo: 'autorizacao' | 'retAutorizacao' | 'evento' | 'consultaProtocolo' | 'statusServico' = 'autorizacao'
 ): string {
-  const ambiente = obterAmbienteSefaz();
-  const urls = ambiente === '2' ? SEFAZ_SP_URLS.HOMOLOGACAO : SEFAZ_SP_URLS.PRODUCAO;
+  const urlPadrao = SEFAZ_SP_URLS.PRODUCAO[tipo] || SEFAZ_SP_URLS.PRODUCAO.autorizacao;
 
-  if (tipo === 'autorizacao') {
-    return (
+  // Se houver variável customizada, sanitiza para remover qualquer referência a homologação
+  const envUrl = (
+    (tipo === 'autorizacao' && (
       (typeof import.meta !== 'undefined' && (
         import.meta.env?.VITE_NFE_AUTORIZACAO_URL ||
         import.meta.env?.VITE_SEFAZ_API_URL ||
@@ -1469,13 +1453,9 @@ export function obterSefazEndpoint(
         process.env.NFE_AUTORIZACAO_URL ||
         process.env.SEFAZ_API_URL ||
         process.env.NFE_API_URL
-      )) ||
-      urls.autorizacao
-    );
-  }
-
-  if (tipo === 'evento') {
-    return (
+      ))
+    )) ||
+    (tipo === 'evento' && (
       (typeof import.meta !== 'undefined' && (
         import.meta.env?.VITE_NFE_EVENTO_URL ||
         import.meta.env?.VITE_SEFAZ_EVENTO_URL
@@ -1483,32 +1463,32 @@ export function obterSefazEndpoint(
       (typeof process !== 'undefined' && process.env && (
         process.env.NFE_EVENTO_URL ||
         process.env.SEFAZ_EVENTO_URL
-      )) ||
-      urls.evento
-    );
-  }
-
-  if (tipo === 'consultaProtocolo') {
-    return (
+      ))
+    )) ||
+    (tipo === 'consultaProtocolo' && (
       (typeof import.meta !== 'undefined' && (
         import.meta.env?.VITE_NFE_CONSULTA_URL ||
         import.meta.env?.VITE_SEFAZ_CONSULTA_URL
-      )) ||
-      urls.consultaProtocolo
-    );
-  }
-
-  if (tipo === 'statusServico') {
-    return (
+      ))
+    )) ||
+    (tipo === 'statusServico' && (
       (typeof import.meta !== 'undefined' && (
         import.meta.env?.VITE_NFE_STATUS_URL ||
         import.meta.env?.VITE_SEFAZ_STATUS_URL
-      )) ||
-      urls.statusServico
-    );
+      ))
+    ))
+  );
+
+  if (envUrl && typeof envUrl === 'string' && envUrl.trim()) {
+    const limpa = envUrl.trim();
+    // Se a URL informada na variável de ambiente apontar para homologacao, corrige imediatamente para produção
+    if (limpa.includes('homologacao.nfe.fazenda.sp.gov.br')) {
+      return limpa.replace('homologacao.nfe.fazenda.sp.gov.br', 'nfe.fazenda.sp.gov.br');
+    }
+    return limpa;
   }
 
-  return urls[tipo] || urls.autorizacao;
+  return urlPadrao;
 }
 
 /**
@@ -1638,8 +1618,8 @@ export function sanitizarXmlNfeComChaveValida(xml: string, chaveEsperada?: strin
     res = res.replace(/<cDV>[0-9]<\/cDV>/g, `<cDV>${trueDv}</cDV>`);
   }
 
-  // 2. Garante que o ambiente de autorização seja sempre PRODUÇÃO (<tpAmb>1</tpAmb>)
-  res = res.replace(/<tpAmb>2<\/tpAmb>/g, '<tpAmb>1</tpAmb>');
+  // 2. Garante que o ambiente de autorização seja sempre e rigorosamente PRODUÇÃO (<tpAmb>1</tpAmb>)
+  res = res.replace(/<tpAmb>[0-9]+<\/tpAmb>/g, '<tpAmb>1</tpAmb>');
 
   // 3. Garante CSOSN 101 para Simples Nacional
   res = res
@@ -1907,7 +1887,7 @@ export function gerarXmlNfe(
   dataEmissao: Date,
   protocolo?: string,
   observacoesAdicionais?: string,
-  ambiente: '1' | '2' = '1'
+  ambiente: '1' = '1'
 ): string {
   // 1. Garante que a chave possua estritamente 44 dígitos com cDV perfeitamente recalculado pelo Módulo 11 da SEFAZ
   const chaveValida = recalcularChaveAcessoComDvCorreto(chaveAcesso);
@@ -1917,7 +1897,7 @@ export function gerarXmlNfe(
   const dtIso = formatarDataHoraSefaz(dataEmissao);
   const nNfNum = parseInt(String(numeroNfe).replace(/\D/g, ''), 10) || 1;
   const serieNum = parseInt(String(serie).replace(/\D/g, ''), 10) || 1;
-  const tpAmb = ambiente; // '1' = Produção oficial SEFAZ
+  const tpAmb = '1'; // Rigorosamente 1: Produção oficial SEFAZ (v4.00)
   const creditoInfo = calcularCreditoIcmsSimples(valorTotal, emitente.aliquotaIcmsSimples || 2.75);
 
   const xmlItens = itens.map((item, index) => {
@@ -2243,7 +2223,7 @@ export async function transmitirNfeSefaz(
     ? `Ref. Cotações: ${quote.origemCotacoes.join(', ')}`
     : (quote.quoteNumber ? `Ref. Cotação: ${quote.quoteNumber}` : '');
 
-  const tpAmbiente = obterAmbienteSefaz(); // '1' Produção oficial SEFAZ
+  const tpAmbiente = '1'; // Rigorosamente Produção oficial SEFAZ (tpAmb = 1)
 
   let xmlConteudo = gerarXmlNfe(
     emitente,
@@ -2256,7 +2236,7 @@ export async function transmitirNfeSefaz(
     dataEmissao,
     protocolo,
     refOrigemXml,
-    tpAmbiente // Produção oficial SEFAZ (tpAmb = 1)
+    '1' // Produção oficial SEFAZ (tpAmb = 1)
   );
 
   // 7. TRANSMISSÃO OFICIAL PARA A SEFAZ-SP (WEBSERVICE DE PRODUÇÃO):
@@ -2311,8 +2291,8 @@ export async function transmitirNfeSefaz(
         },
         body: JSON.stringify({
           acao: 'emitir_nfe',
-          ambiente: tpAmbiente === '1' ? 'producao' : 'homologacao',
-          tpAmb: Number(tpAmbiente),
+          ambiente: 'producao',
+          tpAmb: 1,
           endpoint_sefaz: sefazEndpoint,
           soap_envelope: soapEnvelope,
           chave_acesso: chaveAcesso,
