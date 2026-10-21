@@ -1650,7 +1650,13 @@ export async function enviarSoapSefaz(
   soapEnvelope: string,
   timeoutMs: number = 15000
 ): Promise<RespostaSoapSefaz> {
-  const proxyEndpoint = '/api/sefaz/soap';
+  const customProxy = (typeof import.meta !== 'undefined' && (
+    import.meta.env?.VITE_SEFAZ_PROXY_URL ||
+    import.meta.env?.VITE_NFE_PROXY_URL
+  )) || '';
+  const proxyEndpoint = (customProxy && typeof customProxy === 'string' && customProxy.trim())
+    ? customProxy.trim()
+    : '/api/sefaz/soap';
 
   try {
     const res = await fetch(proxyEndpoint, {
@@ -1690,6 +1696,18 @@ export async function enviarSoapSefaz(
     }
 
     const textBody = await res.text();
+    if (res.status === 404) {
+      return {
+        sucessoHttp: false,
+        statusHttp: 404,
+        xml: '',
+        codigoErro: '404_NOT_FOUND',
+        mensagemErro: `Endpoint do Proxy SEFAZ (${proxyEndpoint}) não encontrado (404).`,
+        detalheErro: textBody || 'A rota /api/sefaz/soap não respondeu no servidor de hospedagem.',
+        sugestao: 'Certifique-se de que a Vercel Serverless Function em api/sefaz/soap.ts ou o backend Express esteja implantado.'
+      };
+    }
+
     return {
       sucessoHttp: res.ok,
       statusHttp: res.status,

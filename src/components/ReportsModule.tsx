@@ -4967,7 +4967,6 @@ export default function ReportsModule({
                                 const novoStatus = e.target.value;
                                 handleStatusChange(item, novoStatus);
                               }}
-                              {...{ onValueChange: (val: string) => handleStatusChange(item, val) } as any}
                               disabled={updatingQuoteKey === (item.cotacao || item.cotacaoId || String(item.idVer))}
                               className="btn-no-print h-[28px] pl-7 pr-7 bg-white hover:bg-slate-50 border border-slate-300 hover:border-blue-400 text-blue-700 font-semibold text-xs rounded-md shadow-xs cursor-pointer appearance-none transition-all focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-60 disabled:cursor-wait"
                               title="Clique para alterar a situação desta cotação"
