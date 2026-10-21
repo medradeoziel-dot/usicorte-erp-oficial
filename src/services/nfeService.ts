@@ -809,36 +809,36 @@ export async function transmitirCancelamentoNfeSefaz(
   // Utiliza o endpoint oficial de recepção de eventos da SEFAZ-SP em PRODUÇÃO (tpAmb = 1)
   const endpointCancelamento = obterSefazEndpoint('evento');
   const soapEnvelopeCancelamento = gerarEnvelopeSoapEvento(xmlCancelamento, '1');
+  const soapActionCancelamento = 'http://www.portalfiscal.inf.br/nfe/wsdl/NFeRecepcaoEvento4';
   const isDirectSoapCancel = endpointCancelamento.includes('.asmx') || endpointCancelamento.includes('fazenda.sp.gov.br');
 
   let cancelamentoConfirmado = false;
 
   if (isDirectSoapCancel) {
     try {
-      const sefazResponse = await fetch(endpointCancelamento, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/soap+xml; charset=utf-8; action="http://www.portalfiscal.inf.br/nfe/wsdl/NFeRecepcaoEvento4"',
-          'Accept': 'application/soap+xml, application/xml, text/xml'
-        },
-        body: soapEnvelopeCancelamento
-      });
+      const resSoap = await enviarSoapSefaz(
+        endpointCancelamento,
+        soapActionCancelamento,
+        soapEnvelopeCancelamento,
+        15000
+      );
 
-      if (!sefazResponse.ok) {
-        const errorText = await sefazResponse.text();
-        const dadosErr = extrairDadosRetornoSefazXml(errorText);
-        const cStatErr = dadosErr.cStat || String(sefazResponse.status);
-        const xMotivoErr = dadosErr.xMotivo || sefazResponse.statusText || 'Falha de comunicação SOAP com a SEFAZ-SP';
+      if (!resSoap.sucessoHttp && !resSoap.xml) {
+        const cStatErr = resSoap.codigoErro || 'CONEXAO_FALHOU';
+        const msgErr = resSoap.mensagemErro || 'Falha de comunicação SOAP com a SEFAZ-SP';
+        const detalhe = resSoap.detalheErro ? `\nDetalhe: ${resSoap.detalheErro}` : '';
+        const sugestao = resSoap.sugestao ? `\nSugestão: ${resSoap.sugestao}` : '';
+        const errMsg = `Falha na transmissão do cancelamento para a SEFAZ-SP [${cStatErr}]: ${msgErr}${detalhe}${sugestao}`;
         return {
           sucesso: false,
           statusNfe: 'Erro',
           cStat: cStatErr,
-          xMotivo: `Falha WebService Cancelamento SEFAZ-SP (${sefazResponse.status}): ${xMotivoErr}`,
-          mensagemErro: `Falha WebService Cancelamento SEFAZ-SP (${sefazResponse.status}): ${xMotivoErr}`
+          xMotivo: errMsg,
+          mensagemErro: errMsg
         };
       }
 
-      const responseXml = await sefazResponse.text();
+      const responseXml = resSoap.xml;
       const dadosRetorno = extrairDadosRetornoSefazXml(responseXml);
       if (dadosRetorno.cStat && dadosRetorno.cStat !== '101' && dadosRetorno.cStat !== '135') {
         return {
@@ -855,13 +855,14 @@ export async function transmitirCancelamentoNfeSefaz(
       }
       cancelamentoConfirmado = true;
     } catch (soapErr: any) {
-      console.warn(`[SEFAZ-SP Produção] Comunicação SOAP direta de cancelamento falhou (${soapErr?.message || soapErr}).`);
+      console.warn(`[SEFAZ-SP Produção] Comunicação SOAP de cancelamento falhou:`, soapErr);
+      const errMsg = `Falha na conexão com o WebService de Recepção de Eventos da SEFAZ-SP Produção (${endpointCancelamento}): ${soapErr?.message || 'Erro de rede ou certificado'}.`;
       return {
         sucesso: false,
         statusNfe: 'Erro',
         cStat: 'CONEXAO_FALHOU',
-        xMotivo: `Falha na conexão com o WebService de Recepção de Eventos da SEFAZ-SP Produção (${endpointCancelamento}): ${soapErr?.message || 'Erro de rede ou certificado'}.`,
-        mensagemErro: `Falha na conexão com o WebService de Recepção de Eventos da SEFAZ-SP Produção (${endpointCancelamento}): ${soapErr?.message || 'Erro de rede ou certificado'}.`
+        xMotivo: errMsg,
+        mensagemErro: errMsg
       };
     }
   } else if (endpointCancelamento) {
@@ -1628,6 +1629,91 @@ export function gerarEnvelopeSoapConsultaRecibo(numeroRecibo: string): string {
 </soap12:Envelope>`;
 }
 
+export interface RespostaSoapSefaz {
+  sucessoHttp: boolean;
+  statusHttp: number;
+  xml: string;
+  codigoErro?: string;
+  mensagemErro?: string;
+  detalheErro?: string;
+  sugestao?: string;
+}
+
+/**
+ * Envia envelopes SOAP para os WebServices oficiais da SEFAZ através do Agente HTTPS seguro (/api/sefaz/soap),
+ * utilizando certificado digital (A1/A3), TLS 1.2+ e rejectUnauthorized: false para a cadeia ICP-Brasil.
+ * Captura e detalha rigorosamente erros de socket, SSL, timeout e resposta HTTP sem mascarar em "Failed to fetch".
+ */
+export async function enviarSoapSefaz(
+  endpointSefaz: string,
+  soapAction: string,
+  soapEnvelope: string,
+  timeoutMs: number = 15000
+): Promise<RespostaSoapSefaz> {
+  const proxyEndpoint = '/api/sefaz/soap';
+
+  try {
+    const res = await fetch(proxyEndpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json, application/soap+xml, application/xml, text/xml'
+      },
+      body: JSON.stringify({
+        endpoint: endpointSefaz,
+        soapAction,
+        soapEnvelope,
+        timeoutMs
+      }),
+      signal: AbortSignal.timeout(timeoutMs + 3000)
+    });
+
+    const contentType = res.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      const jsonRes = await res.json();
+      if (res.ok && jsonRes.ok) {
+        return {
+          sucessoHttp: true,
+          statusHttp: jsonRes.statusHttp || res.status,
+          xml: jsonRes.xml || ''
+        };
+      }
+      return {
+        sucessoHttp: false,
+        statusHttp: jsonRes.statusHttp || res.status,
+        xml: jsonRes.xml || '',
+        codigoErro: jsonRes.codigo || `HTTP_${res.status}`,
+        mensagemErro: jsonRes.mensagem || `Falha HTTP ${res.status} ao comunicar com a SEFAZ`,
+        detalheErro: jsonRes.detalhe || jsonRes.rawError || res.statusText,
+        sugestao: jsonRes.sugestao
+      };
+    }
+
+    const textBody = await res.text();
+    return {
+      sucessoHttp: res.ok,
+      statusHttp: res.status,
+      xml: textBody,
+      mensagemErro: !res.ok ? `Erro HTTP ${res.status}: ${res.statusText}` : undefined
+    };
+  } catch (err: any) {
+    const isTimeout = err?.name === 'TimeoutError' || err?.message?.toLowerCase().includes('timeout') || err?.message?.toLowerCase().includes('abort');
+    const msg = isTimeout 
+      ? `Timeout de conexão (${timeoutMs}ms) aguardando resposta da SEFAZ.` 
+      : (err?.message || 'Falha na conexão com o servidor proxy SEFAZ.');
+
+    return {
+      sucessoHttp: false,
+      statusHttp: isTimeout ? 504 : 502,
+      xml: '',
+      codigoErro: isTimeout ? 'TIMEOUT' : (err?.code || 'FALHA_CONEXAO'),
+      mensagemErro: msg,
+      detalheErro: err?.stack || err?.message || String(err),
+      sugestao: 'Verifique se o backend do ERP está em execução e se o Certificado Digital A1 está configurado.'
+    };
+  }
+}
+
 /**
  * Salva número de recibo do lote localmente para garantir rastreabilidade em caso de pendência (103/105)
  */
@@ -1818,83 +1904,26 @@ export async function consultarSituacaoNfeSefaz(
   const chaveValida = recalcularChaveAcessoComDvCorreto(cleanChave);
   const endpoint = obterSefazEndpoint('consultaProtocolo');
   const soapEnvelope = gerarEnvelopeSoapConsultaSituacao(chaveValida);
-  const isDirectSoap = endpoint.includes('.asmx') || endpoint.includes('fazenda.sp.gov.br');
+  const soapAction = 'http://www.portalfiscal.inf.br/nfe/wsdl/NFeConsultaProtocolo4';
 
   try {
-    let responseXml = '';
-    if (isDirectSoap) {
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/soap+xml; charset=utf-8; action="http://www.portalfiscal.inf.br/nfe/wsdl/NFeConsultaProtocolo4"',
-          'Accept': 'application/soap+xml, application/xml, text/xml'
-        },
-        body: soapEnvelope,
-        signal: AbortSignal.timeout(timeoutMs)
-      });
+    const resSoap = await enviarSoapSefaz(endpoint, soapAction, soapEnvelope, timeoutMs);
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        const dadosErr = extrairDadosRetornoSefazXml(errorText);
-        return {
-          ...dadosErr,
-          rawXml: errorText,
-          cStat: dadosErr.cStat || String(response.status),
-          xMotivo: dadosErr.xMotivo || response.statusText || 'Erro na consulta de protocolo SEFAZ',
-          error: `HTTP ${response.status}: ${dadosErr.xMotivo || response.statusText}`
-        };
-      }
-      responseXml = await response.text();
-    } else {
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify({
-          acao: 'consultar_situacao',
-          chave_acesso: chaveValida,
-          ambiente: 'producao',
-          tpAmb: 1,
-          endpoint_sefaz: endpoint,
-          soap_envelope: soapEnvelope
-        }),
-        signal: AbortSignal.timeout(timeoutMs)
-      });
-
-      if (!response.ok) {
-        return {
-          isAutorizada: false,
-          isLotePendente: false,
-          cStat: String(response.status),
-          xMotivo: 'Erro na resposta do proxy de consulta SEFAZ',
-          error: `HTTP ${response.status}`
-        };
-      }
-      const data = await response.json();
-      if (data?.xml_retorno || data?.xml_conteudo) {
-        responseXml = data.xml_retorno || data.xml_conteudo;
-      } else {
-        const isAuth = data?.cStat === '100' || data?.cStat === '150' || !!data?.protocolo || !!data?.nProt;
-        return {
-          cStat: String(data?.cStat || (isAuth ? '100' : '999')),
-          xMotivo: data?.xMotivo || data?.mensagem || (isAuth ? 'Autorizado o uso da NF-e' : 'Não autorizado'),
-          nProt: data?.protocolo || data?.nProt,
-          chNFe: chaveValida,
-          isAutorizada: isAuth,
-          isLotePendente: data?.cStat === '103' || data?.cStat === '105',
-          nRec: data?.nRec || data?.numero_recibo,
-          rawXml: JSON.stringify(data)
-        };
-      }
+    if (!resSoap.sucessoHttp && !resSoap.xml) {
+      return {
+        isAutorizada: false,
+        isLotePendente: false,
+        cStat: resSoap.codigoErro || 'ERRO_CONEXAO',
+        xMotivo: resSoap.mensagemErro || 'Falha na comunicação com a SEFAZ',
+        error: resSoap.detalheErro || resSoap.mensagemErro
+      };
     }
 
-    const dados = extrairDadosRetornoSefazXml(responseXml);
+    const dados = extrairDadosRetornoSefazXml(resSoap.xml);
     return {
       ...dados,
       chNFe: dados.chNFe || chaveValida,
-      rawXml: responseXml
+      rawXml: resSoap.xml
     };
   } catch (err: any) {
     const isTimeout = err?.name === 'TimeoutError' || err?.message?.toLowerCase().includes('timeout') || err?.message?.toLowerCase().includes('abort');
@@ -1931,82 +1960,27 @@ export async function consultarReciboLoteSefaz(
 
   const endpoint = obterSefazEndpoint('retAutorizacao');
   const soapEnvelope = gerarEnvelopeSoapConsultaRecibo(cleanRecibo);
-  const isDirectSoap = endpoint.includes('.asmx') || endpoint.includes('fazenda.sp.gov.br');
+  const soapAction = 'http://www.portalfiscal.inf.br/nfe/wsdl/NFeRetAutorizacao4';
 
   try {
-    let responseXml = '';
-    if (isDirectSoap) {
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/soap+xml; charset=utf-8; action="http://www.portalfiscal.inf.br/nfe/wsdl/NFeRetAutorizacao4"',
-          'Accept': 'application/soap+xml, application/xml, text/xml'
-        },
-        body: soapEnvelope,
-        signal: AbortSignal.timeout(timeoutMs)
-      });
+    const resSoap = await enviarSoapSefaz(endpoint, soapAction, soapEnvelope, timeoutMs);
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        const dadosErr = extrairDadosRetornoSefazXml(errorText);
-        return {
-          ...dadosErr,
-          rawXml: errorText,
-          cStat: dadosErr.cStat || String(response.status),
-          xMotivo: dadosErr.xMotivo || response.statusText || 'Erro na consulta de recibo SEFAZ',
-          error: `HTTP ${response.status}: ${dadosErr.xMotivo || response.statusText}`
-        };
-      }
-      responseXml = await response.text();
-    } else {
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify({
-          acao: 'consultar_recibo',
-          numero_recibo: cleanRecibo,
-          ambiente: 'producao',
-          tpAmb: 1,
-          endpoint_sefaz: endpoint,
-          soap_envelope: soapEnvelope
-        }),
-        signal: AbortSignal.timeout(timeoutMs)
-      });
-
-      if (!response.ok) {
-        return {
-          isAutorizada: false,
-          isLotePendente: false,
-          cStat: String(response.status),
-          xMotivo: 'Erro na resposta do proxy de consulta de recibo',
-          error: `HTTP ${response.status}`
-        };
-      }
-      const data = await response.json();
-      if (data?.xml_retorno || data?.xml_conteudo) {
-        responseXml = data.xml_retorno || data.xml_conteudo;
-      } else {
-        const isAuth = data?.cStat === '100' || data?.cStat === '150' || !!data?.protocolo || !!data?.nProt;
-        return {
-          cStat: String(data?.cStat || (isAuth ? '100' : '105')),
-          xMotivo: data?.xMotivo || data?.mensagem || (isAuth ? 'Autorizado o uso da NF-e' : 'Lote em processamento'),
-          nProt: data?.protocolo || data?.nProt,
-          isAutorizada: isAuth,
-          isLotePendente: data?.cStat === '103' || data?.cStat === '105',
-          nRec: cleanRecibo,
-          rawXml: JSON.stringify(data)
-        };
-      }
+    if (!resSoap.sucessoHttp && !resSoap.xml) {
+      return {
+        isAutorizada: false,
+        isLotePendente: false,
+        cStat: resSoap.codigoErro || 'ERRO_CONEXAO',
+        xMotivo: resSoap.mensagemErro || 'Falha na consulta de recibo na SEFAZ',
+        error: resSoap.detalheErro || resSoap.mensagemErro,
+        rawXml: ''
+      };
     }
 
-    const dados = extrairDadosRetornoSefazXml(responseXml);
+    const dados = extrairDadosRetornoSefazXml(resSoap.xml);
     return {
       ...dados,
       nRec: dados.nRec || cleanRecibo,
-      rawXml: responseXml
+      rawXml: resSoap.xml
     };
   } catch (err: any) {
     const isTimeout = err?.name === 'TimeoutError' || err?.message?.toLowerCase().includes('timeout') || err?.message?.toLowerCase().includes('abort');
@@ -2902,43 +2876,26 @@ export async function transmitirNfeSefaz(
   // Endpoint oficial: https://nfe.fazenda.sp.gov.br/ws/nfeautorizacao4.asmx
   const sefazEndpoint = obterSefazEndpoint('autorizacao');
   const soapEnvelope = gerarEnvelopeSoapNfe(xmlConteudo, '1', '1');
+  const soapAction = 'http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4';
   const isDirectSoap = sefazEndpoint.includes('.asmx') || sefazEndpoint.includes('fazenda.sp.gov.br');
   let autorizacaoConfirmadaSefaz = false;
 
   if (isDirectSoap) {
     try {
-      const sefazResponse = await fetch(sefazEndpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/soap+xml; charset=utf-8; action="http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4"',
-          'Accept': 'application/soap+xml, application/xml, text/xml'
-        },
-        body: soapEnvelope,
-        signal: AbortSignal.timeout(15000)
-      });
+      const resSoap = await enviarSoapSefaz(sefazEndpoint, soapAction, soapEnvelope, 15000);
 
-      if (!sefazResponse.ok) {
-        const errorText = await sefazResponse.text();
-        const dadosErr = extrairDadosRetornoSefazXml(errorText);
-        const cStatErr = dadosErr.cStat || String(sefazResponse.status);
-        const xMotivoErr = dadosErr.xMotivo || sefazResponse.statusText || 'Falha de comunicação SOAP com a SEFAZ-SP';
-        const errMsg = `Rejeição/Falha WebService SEFAZ-SP (${sefazResponse.status}): cStat ${cStatErr} - ${xMotivoErr}`;
-        try {
-          await updateCotacaoNfeStatusDb(quoteIdOrNum, {
-            status_nfe: 'Erro',
-            mensagem_erro_nfe: errMsg
-          });
-        } catch {}
-        return {
-          sucesso: false,
-          statusNfe: 'Erro',
-          cStat: cStatErr,
-          xMotivo: errMsg,
-          mensagemErro: errMsg
-        };
+      if (!resSoap.sucessoHttp && !resSoap.xml) {
+        const cStatErr = resSoap.codigoErro || 'ERRO_CONEXAO';
+        const msgErr = resSoap.mensagemErro || 'Falha na transmissão SOAP para a SEFAZ-SP';
+        const detalhe = resSoap.detalheErro ? `\nDetalhe: ${resSoap.detalheErro}` : '';
+        const sugestao = resSoap.sugestao ? `\nSugestão: ${resSoap.sugestao}` : '';
+        const errMsg = `Falha na transmissão para a SEFAZ-SP [${cStatErr}]: ${msgErr}${detalhe}${sugestao}`;
+        
+        // Aciona o catch para executar a Trava 2 de verificação de status pós-falha
+        throw new Error(errMsg);
       }
 
-      const responseXml = await sefazResponse.text();
+      const responseXml = resSoap.xml;
       const dadosRetorno = extrairDadosRetornoSefazXml(responseXml);
 
       // =========================================================================================
