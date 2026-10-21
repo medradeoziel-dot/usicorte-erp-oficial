@@ -540,7 +540,7 @@ export async function fetchClienteCompletoParaDanfe(
 
 export interface NfeTransmissionResult {
   sucesso: boolean;
-  statusNfe: 'Emitida' | 'Erro';
+  statusNfe: 'Emitida' | 'Erro' | 'Pendente';
   nfeChave?: string;
   chaveAcesso?: string;
   nfeNumero?: string;
@@ -553,6 +553,8 @@ export interface NfeTransmissionResult {
   xmlConteudo?: string;
   cStat?: string;
   xMotivo?: string;
+  nRec?: string;
+  origemRecuperacao?: 'consulta_previa' | 'timeout_consulta' | 'consulta_recibo';
   mensagemErro?: string;
 }
 
@@ -1587,6 +1589,74 @@ export function gerarEnvelopeSoapEvento(
 </soap12:Envelope>`;
 }
 
+/**
+ * Constrói o Envelope SOAP 1.2 oficial para consulta da situação da NF-e por chave de acesso
+ * Serviço NFeConsultaProtocolo4 (https://nfe.fazenda.sp.gov.br/ws/nfeconsultaprotocolo4.asmx)
+ */
+export function gerarEnvelopeSoapConsultaSituacao(chaveAcesso: string): string {
+  const cleanChave = chaveAcesso.replace(/\D/g, '');
+  return `<?xml version="1.0" encoding="utf-8"?>
+<soap12:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap12="http://www.w3.org/2003/05/soap-envelope">
+  <soap12:Body>
+    <nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeConsultaProtocolo4">
+      <consSitNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+        <tpAmb>1</tpAmb>
+        <xServ>CONSULTAR</xServ>
+        <chNFe>${cleanChave}</chNFe>
+      </consSitNFe>
+    </nfeDadosMsg>
+  </soap12:Body>
+</soap12:Envelope>`;
+}
+
+/**
+ * Constrói o Envelope SOAP 1.2 oficial para consulta do resultado do processamento do lote por recibo
+ * Serviço NFeRetAutorizacao4 (https://nfe.fazenda.sp.gov.br/ws/nferetautorizacao4.asmx)
+ */
+export function gerarEnvelopeSoapConsultaRecibo(numeroRecibo: string): string {
+  const cleanRecibo = numeroRecibo.replace(/\D/g, '');
+  return `<?xml version="1.0" encoding="utf-8"?>
+<soap12:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap12="http://www.w3.org/2003/05/soap-envelope">
+  <soap12:Body>
+    <nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeRetAutorizacao4">
+      <consReciNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+        <tpAmb>1</tpAmb>
+        <nRec>${cleanRecibo}</nRec>
+      </consReciNFe>
+    </nfeDadosMsg>
+  </soap12:Body>
+</soap12:Envelope>`;
+}
+
+/**
+ * Salva número de recibo do lote localmente para garantir rastreabilidade em caso de pendência (103/105)
+ */
+export function salvarReciboLocal(quoteId: string, nRec: string, chaveAcesso?: string): void {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      if (quoteId) localStorage.setItem(`nfe_recibo_${quoteId}`, nRec);
+      if (chaveAcesso) localStorage.setItem(`nfe_recibo_chave_${chaveAcesso}`, nRec);
+    }
+  } catch {}
+}
+
+/**
+ * Recupera número de recibo do lote gravado localmente
+ */
+export function obterReciboLocal(quoteId: string, chaveAcesso?: string): string | null {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      if (quoteId && localStorage.getItem(`nfe_recibo_${quoteId}`)) {
+        return localStorage.getItem(`nfe_recibo_${quoteId}`);
+      }
+      if (chaveAcesso && localStorage.getItem(`nfe_recibo_chave_${chaveAcesso}`)) {
+        return localStorage.getItem(`nfe_recibo_chave_${chaveAcesso}`);
+      }
+    }
+  } catch {}
+  return null;
+}
+
 export interface DadosRetornoSefaz {
   cStat?: string;
   xMotivo?: string;
@@ -1711,6 +1781,235 @@ export function extrairDadosRetornoSefazXml(xmlString: string): DadosRetornoSefa
     isLotePendente
   };
 }
+
+/**
+ * Consulta a situação cadastral e fiscal da NF-e por chave de acesso de 44 dígitos
+ * perante os WebServices oficiais de Produção da SEFAZ-SP (NFeConsultaProtocolo4).
+ * Utilizado para:
+ * 1. Verificação prévia de status antes do envio (evita Rejeição 204 se já autorizada).
+ * 2. Recuperação de autorização pós-timeout ou queda de conexão.
+ */
+export async function consultarSituacaoNfeSefaz(
+  chaveAcesso: string,
+  timeoutMs: number = 10000
+): Promise<DadosRetornoSefaz & { rawXml?: string; error?: string }> {
+  const cleanChave = (chaveAcesso || '').replace(/\D/g, '');
+  if (!cleanChave || cleanChave.length < 43) {
+    return {
+      isAutorizada: false,
+      isLotePendente: false,
+      cStat: 'CHAVE_INVALIDA',
+      xMotivo: 'Chave de acesso incompleta para consulta na SEFAZ',
+      error: 'Chave de acesso incompleta'
+    };
+  }
+
+  const chaveValida = recalcularChaveAcessoComDvCorreto(cleanChave);
+  const endpoint = obterSefazEndpoint('consultaProtocolo');
+  const soapEnvelope = gerarEnvelopeSoapConsultaSituacao(chaveValida);
+  const isDirectSoap = endpoint.includes('.asmx') || endpoint.includes('fazenda.sp.gov.br');
+
+  try {
+    let responseXml = '';
+    if (isDirectSoap) {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/soap+xml; charset=utf-8; action="http://www.portalfiscal.inf.br/nfe/wsdl/NFeConsultaProtocolo4"',
+          'Accept': 'application/soap+xml, application/xml, text/xml'
+        },
+        body: soapEnvelope,
+        signal: AbortSignal.timeout(timeoutMs)
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        const dadosErr = extrairDadosRetornoSefazXml(errorText);
+        return {
+          ...dadosErr,
+          rawXml: errorText,
+          cStat: dadosErr.cStat || String(response.status),
+          xMotivo: dadosErr.xMotivo || response.statusText || 'Erro na consulta de protocolo SEFAZ',
+          error: `HTTP ${response.status}: ${dadosErr.xMotivo || response.statusText}`
+        };
+      }
+      responseXml = await response.text();
+    } else {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({
+          acao: 'consultar_situacao',
+          chave_acesso: chaveValida,
+          ambiente: 'producao',
+          tpAmb: 1,
+          endpoint_sefaz: endpoint,
+          soap_envelope: soapEnvelope
+        }),
+        signal: AbortSignal.timeout(timeoutMs)
+      });
+
+      if (!response.ok) {
+        return {
+          isAutorizada: false,
+          isLotePendente: false,
+          cStat: String(response.status),
+          xMotivo: 'Erro na resposta do proxy de consulta SEFAZ',
+          error: `HTTP ${response.status}`
+        };
+      }
+      const data = await response.json();
+      if (data?.xml_retorno || data?.xml_conteudo) {
+        responseXml = data.xml_retorno || data.xml_conteudo;
+      } else {
+        const isAuth = data?.cStat === '100' || data?.cStat === '150' || !!data?.protocolo || !!data?.nProt;
+        return {
+          cStat: String(data?.cStat || (isAuth ? '100' : '999')),
+          xMotivo: data?.xMotivo || data?.mensagem || (isAuth ? 'Autorizado o uso da NF-e' : 'Não autorizado'),
+          nProt: data?.protocolo || data?.nProt,
+          chNFe: chaveValida,
+          isAutorizada: isAuth,
+          isLotePendente: data?.cStat === '103' || data?.cStat === '105',
+          nRec: data?.nRec || data?.numero_recibo,
+          rawXml: JSON.stringify(data)
+        };
+      }
+    }
+
+    const dados = extrairDadosRetornoSefazXml(responseXml);
+    return {
+      ...dados,
+      chNFe: dados.chNFe || chaveValida,
+      rawXml: responseXml
+    };
+  } catch (err: any) {
+    const isTimeout = err?.name === 'TimeoutError' || err?.message?.toLowerCase().includes('timeout') || err?.message?.toLowerCase().includes('abort');
+    console.warn(`[SEFAZ Consulta Situação] ${isTimeout ? 'Timeout' : 'Falha'}:`, err?.message || err);
+    return {
+      isAutorizada: false,
+      isLotePendente: false,
+      cStat: isTimeout ? 'TIMEOUT' : 'ERRO_CONEXAO',
+      xMotivo: isTimeout ? 'Tempo limite esgotado ao consultar situação da NF-e na SEFAZ' : (err?.message || 'Erro de comunicação'),
+      error: err?.message || 'Falha de conexão com SEFAZ'
+    };
+  }
+}
+
+/**
+ * Consulta o resultado do processamento do lote na SEFAZ pelo número do recibo (nRec)
+ * Serviço oficial NFeRetAutorizacao4 (https://nfe.fazenda.sp.gov.br/ws/nferetautorizacao4.asmx).
+ * Retorna os dados do protocolo da NF-e autorizada quando o lote for finalizado (cStat 104 -> cStat 100).
+ */
+export async function consultarReciboLoteSefaz(
+  numeroRecibo: string,
+  timeoutMs: number = 10000
+): Promise<DadosRetornoSefaz & { rawXml?: string; error?: string }> {
+  const cleanRecibo = (numeroRecibo || '').replace(/\D/g, '');
+  if (!cleanRecibo) {
+    return {
+      isAutorizada: false,
+      isLotePendente: false,
+      cStat: 'RECIBO_INVALIDO',
+      xMotivo: 'Número de recibo não informado para consulta',
+      error: 'Recibo não informado'
+    };
+  }
+
+  const endpoint = obterSefazEndpoint('retAutorizacao');
+  const soapEnvelope = gerarEnvelopeSoapConsultaRecibo(cleanRecibo);
+  const isDirectSoap = endpoint.includes('.asmx') || endpoint.includes('fazenda.sp.gov.br');
+
+  try {
+    let responseXml = '';
+    if (isDirectSoap) {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/soap+xml; charset=utf-8; action="http://www.portalfiscal.inf.br/nfe/wsdl/NFeRetAutorizacao4"',
+          'Accept': 'application/soap+xml, application/xml, text/xml'
+        },
+        body: soapEnvelope,
+        signal: AbortSignal.timeout(timeoutMs)
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        const dadosErr = extrairDadosRetornoSefazXml(errorText);
+        return {
+          ...dadosErr,
+          rawXml: errorText,
+          cStat: dadosErr.cStat || String(response.status),
+          xMotivo: dadosErr.xMotivo || response.statusText || 'Erro na consulta de recibo SEFAZ',
+          error: `HTTP ${response.status}: ${dadosErr.xMotivo || response.statusText}`
+        };
+      }
+      responseXml = await response.text();
+    } else {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify({
+          acao: 'consultar_recibo',
+          numero_recibo: cleanRecibo,
+          ambiente: 'producao',
+          tpAmb: 1,
+          endpoint_sefaz: endpoint,
+          soap_envelope: soapEnvelope
+        }),
+        signal: AbortSignal.timeout(timeoutMs)
+      });
+
+      if (!response.ok) {
+        return {
+          isAutorizada: false,
+          isLotePendente: false,
+          cStat: String(response.status),
+          xMotivo: 'Erro na resposta do proxy de consulta de recibo',
+          error: `HTTP ${response.status}`
+        };
+      }
+      const data = await response.json();
+      if (data?.xml_retorno || data?.xml_conteudo) {
+        responseXml = data.xml_retorno || data.xml_conteudo;
+      } else {
+        const isAuth = data?.cStat === '100' || data?.cStat === '150' || !!data?.protocolo || !!data?.nProt;
+        return {
+          cStat: String(data?.cStat || (isAuth ? '100' : '105')),
+          xMotivo: data?.xMotivo || data?.mensagem || (isAuth ? 'Autorizado o uso da NF-e' : 'Lote em processamento'),
+          nProt: data?.protocolo || data?.nProt,
+          isAutorizada: isAuth,
+          isLotePendente: data?.cStat === '103' || data?.cStat === '105',
+          nRec: cleanRecibo,
+          rawXml: JSON.stringify(data)
+        };
+      }
+    }
+
+    const dados = extrairDadosRetornoSefazXml(responseXml);
+    return {
+      ...dados,
+      nRec: dados.nRec || cleanRecibo,
+      rawXml: responseXml
+    };
+  } catch (err: any) {
+    const isTimeout = err?.name === 'TimeoutError' || err?.message?.toLowerCase().includes('timeout') || err?.message?.toLowerCase().includes('abort');
+    console.warn(`[SEFAZ Consulta Recibo] ${isTimeout ? 'Timeout' : 'Falha'}:`, err?.message || err);
+    return {
+      isAutorizada: false,
+      isLotePendente: false,
+      cStat: isTimeout ? 'TIMEOUT' : 'ERRO_CONEXAO',
+      xMotivo: isTimeout ? 'Tempo limite esgotado ao consultar recibo na SEFAZ' : (err?.message || 'Erro de comunicação'),
+      error: err?.message || 'Falha de conexão com SEFAZ'
+    };
+  }
+}
+
 
 /**
  * Formata data e hora no padrão exigido pelo layout SEFAZ 4.00 (AAAA-MM-DDThh:mm:ss-03:00)
@@ -2394,33 +2693,95 @@ export async function transmitirNfeSefaz(
   const itensFiscais = prepararItensFiscais(quote.items, ufDest);
   const valorTotal = quote.grandTotal || quote.subtotalTotal || itensFiscais.reduce((s, it) => s + it.subtotal, 0);
 
-  // 5. Geração de Numeração e Chave de Acesso
-  // O número da NF-e DEVE SER: ultimo_numero_nfe + 1 (totalmente independente do número da cotação)
+  // 5. Geração de Numeração e Chave de Acesso com Travas de Segurança Anti-Duplicidade
   const nfeConfig = await fetchEmitenteNfeConfig();
   const ultimoNfeNum = typeof nfeConfig.ultimoNumeroNfe === 'number' && !isNaN(nfeConfig.ultimoNumeroNfe)
     ? nfeConfig.ultimoNumeroNfe
     : (typeof companyData.ultimo_numero_nfe === 'number' && !isNaN(companyData.ultimo_numero_nfe) ? companyData.ultimo_numero_nfe : 0);
-  const proximoNumeroNfe = ultimoNfeNum + 1;
-  const numeroNfe = String(proximoNumeroNfe).padStart(6, '0');
-  const serie = String(nfeConfig.serieNfe || companyData.serie_nfe || '1');
+
+  // Se a cotação já possuía uma chave previamente gravada ou pendente
+  const chaveExistente = recalcularChaveAcessoComDvCorreto(quote.nfe_chave || quote.chave_acesso || '');
+  const quoteIdOrNum = quote.id || quote.quoteNumber;
+  const nRecPrevio = obterReciboLocal(quoteIdOrNum, chaveExistente);
+
+  // =========================================================================================
+  // TRAVA 1: VERIFICAÇÃO PRÉVIA DE STATUS (CONSULTA POR CHAVE / RECIBO NA SEFAZ)
+  // Antes de enviar qualquer lote ou consumir novo número fiscal, consulta se a nota
+  // já se encontra autorizada na SEFAZ (evita Duplicidade cStat 204 se a conexão anterior caiu).
+  // =========================================================================================
+  if (nRecPrevio) {
+    console.log(`[SEFAZ Anti-Duplicidade] Recibo pendente ${nRecPrevio} detectado para cotação ${quoteIdOrNum}. Consultando recibo antes do envio...`);
+    try {
+      const consultaReciboPrevia = await consultarReciboLoteSefaz(nRecPrevio, 8000);
+      if (consultaReciboPrevia.isAutorizada && consultaReciboPrevia.nProt) {
+        console.log(`[SEFAZ Anti-Duplicidade] NF-e autorizada via recibo prévio (${consultaReciboPrevia.nProt})! Evitando retransmissão.`);
+        return await consultarStatusOuReciboNfe(quote, client);
+      }
+    } catch (eRec) {
+      console.warn('Aviso ao consultar recibo prévio:', eRec);
+    }
+  }
+
+  if (chaveExistente && chaveExistente.length === 44) {
+    console.log(`[SEFAZ Anti-Duplicidade] Chave ${chaveExistente} detectada na cotação. Consultando situação na SEFAZ antes do envio...`);
+    try {
+      const consultaChavePrevia = await consultarSituacaoNfeSefaz(chaveExistente, 8000);
+      if (consultaChavePrevia.isAutorizada && consultaChavePrevia.nProt) {
+        console.log(`[SEFAZ Anti-Duplicidade] Chave ${chaveExistente} já se encontra autorizada (Protocolo ${consultaChavePrevia.nProt})! Evitando envio duplicado.`);
+        return await consultarStatusOuReciboNfe(quote, client);
+      }
+    } catch (eChave) {
+      console.warn('Aviso ao consultar situação prévia da chave:', eChave);
+    }
+  }
+
+  // Preservação do número e série caso a cotação já estivesse em estado Pendente
+  let proximoNumeroNfe: number;
+  let numeroNfe: string;
+  let serie: string;
+  let chaveAcesso: string;
   const dataEmissao = new Date();
 
-  const chaveAcesso = gerarChaveAcessoNfe(
-    emitente.uf,
-    dataEmissao,
-    emitente.cnpj,
-    serie,
-    numeroNfe
-  );
+  if (quote.status_nfe === 'Pendente' && quote.nfe_numero && chaveExistente && chaveExistente.length === 44) {
+    proximoNumeroNfe = parseInt(String(quote.nfe_numero).replace(/\D/g, ''), 10) || (ultimoNfeNum + 1);
+    numeroNfe = String(proximoNumeroNfe).padStart(6, '0');
+    serie = String(quote.serie_nfe || nfeConfig.serieNfe || companyData.serie_nfe || '1');
+    chaveAcesso = chaveExistente;
+  } else {
+    proximoNumeroNfe = ultimoNfeNum + 1;
+    numeroNfe = String(proximoNumeroNfe).padStart(6, '0');
+    serie = String(nfeConfig.serieNfe || companyData.serie_nfe || '1');
+    chaveAcesso = gerarChaveAcessoNfe(
+      emitente.uf,
+      dataEmissao,
+      emitente.cnpj,
+      serie,
+      numeroNfe
+    );
+  }
+
+  // Verificação de segurança da nova chave gerada
+  try {
+    const checkNova = await consultarSituacaoNfeSefaz(chaveAcesso, 5000);
+    if (checkNova.isAutorizada && checkNova.nProt) {
+      console.log(`[SEFAZ Anti-Duplicidade] Nova chave ${chaveAcesso} já consta como autorizada na SEFAZ! Recuperando protocolo...`);
+      return await consultarStatusOuReciboNfe({
+        ...quote,
+        nfe_chave: chaveAcesso,
+        chave_acesso: chaveAcesso,
+        nfe_numero: numeroNfe,
+        serie_nfe: serie
+      }, client);
+    }
+  } catch {}
 
   let protocolo = `135${anoMesDia(dataEmissao)}${String(Math.floor(100000000 + Math.random() * 900000000))}`;
+  let origemRecuperacao: 'consulta_previa' | 'timeout_consulta' | 'consulta_recibo' | undefined;
 
   // 6. Geração do XML e DANFE (Status 100 - Autorizado o uso da NF-e)
   const refOrigemXml = quote.origemCotacoes && quote.origemCotacoes.length > 1
     ? `Ref. Cotações: ${quote.origemCotacoes.join(', ')}`
     : (quote.quoteNumber ? `Ref. Cotação: ${quote.quoteNumber}` : '');
-
-  const tpAmbiente = '1'; // Rigorosamente Produção oficial SEFAZ (tpAmb = 1)
 
   let xmlConteudo = gerarXmlNfe(
     emitente,
@@ -2451,7 +2812,8 @@ export async function transmitirNfeSefaz(
           'Content-Type': 'application/soap+xml; charset=utf-8; action="http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4"',
           'Accept': 'application/soap+xml, application/xml, text/xml'
         },
-        body: soapEnvelope
+        body: soapEnvelope,
+        signal: AbortSignal.timeout(15000)
       });
 
       if (!sefazResponse.ok) {
@@ -2461,7 +2823,7 @@ export async function transmitirNfeSefaz(
         const xMotivoErr = dadosErr.xMotivo || sefazResponse.statusText || 'Falha de comunicação SOAP com a SEFAZ-SP';
         const errMsg = `Rejeição/Falha WebService SEFAZ-SP (${sefazResponse.status}): cStat ${cStatErr} - ${xMotivoErr}`;
         try {
-          await updateCotacaoNfeStatusDb(quote.id || quote.quoteNumber, {
+          await updateCotacaoNfeStatusDb(quoteIdOrNum, {
             status_nfe: 'Erro',
             mensagem_erro_nfe: errMsg
           });
@@ -2478,33 +2840,57 @@ export async function transmitirNfeSefaz(
       const responseXml = await sefazResponse.text();
       const dadosRetorno = extrairDadosRetornoSefazXml(responseXml);
 
-      // CASO 1: Lote recebido ou em processamento (pendente - cStat 103 ou 105)
-      // NUNCA tratar recibo ou lote pendente como autorização definitiva!
+      // =========================================================================================
+      // TRAVA 3: CONSULTA AUTOMÁTICA DE RECIBO (103 / 105)
+      // Caso a SEFAZ retorne lote recebido (103) ou em processamento (105), salva o recibo (nRec),
+      // aguarda 2.5s e consulta o processamento do lote para obter a autorização definitiva.
+      // =========================================================================================
       if (dadosRetorno.isLotePendente || dadosRetorno.cStatLote === '103' || dadosRetorno.cStatLote === '105') {
         const nRecibo = dadosRetorno.nRec || 'NÃO INFORMADO';
-        const msgPendente = `Lote pendente na SEFAZ (cStat ${dadosRetorno.cStatLote}: ${dadosRetorno.xMotivoLote || 'Lote em processamento'}). Recibo Nº ${nRecibo}. A NF-e NÃO foi autorizada definitivamente (aguardando cStat 100).`;
-        try {
-          await updateCotacaoNfeStatusDb(quote.id || quote.quoteNumber, {
-            status_nfe: 'Pendente',
-            mensagem_erro_nfe: msgPendente
-          });
-        } catch {}
-        return {
-          sucesso: false,
-          statusNfe: 'Erro',
-          cStat: dadosRetorno.cStatLote || '105',
-          xMotivo: msgPendente,
-          mensagemErro: msgPendente
-        };
+        salvarReciboLocal(quoteIdOrNum, nRecibo, chaveAcesso);
+        console.log(`[SEFAZ-SP] Lote recebido (cStat ${dadosRetorno.cStatLote}). Recibo ${nRecibo}. Consultando resultado do lote em 2.5s...`);
+
+        await new Promise(r => setTimeout(r, 2500));
+        const consultaRecibo = await consultarReciboLoteSefaz(nRecibo, 10000);
+
+        if (consultaRecibo.isAutorizada && consultaRecibo.nProt) {
+          console.log(`[SEFAZ-SP] Lote processado e autorizado com sucesso (Protocolo ${consultaRecibo.nProt})!`);
+          protocolo = consultaRecibo.nProt;
+          autorizacaoConfirmadaSefaz = true;
+          origemRecuperacao = 'consulta_recibo';
+        } else {
+          const msgPendente = `Lote pendente na SEFAZ (cStat ${consultaRecibo.cStat || dadosRetorno.cStatLote}: ${consultaRecibo.xMotivo || dadosRetorno.xMotivoLote || 'Lote em processamento'}). Recibo Nº ${nRecibo}. O recibo foi salvo e o status gravado como Pendente. Utilize "Consultar Recibo / Situação" para obter a autorização final sem reenviar.`;
+          try {
+            await updateCotacaoNfeStatusDb(quoteIdOrNum, {
+              status_nfe: 'Pendente',
+              nfe_chave: chaveAcesso,
+              chave_acesso: chaveAcesso,
+              nfe_numero: numeroNfe,
+              serie_nfe: serie,
+              mensagem_erro_nfe: msgPendente
+            });
+          } catch {}
+          return {
+            sucesso: false,
+            statusNfe: 'Pendente',
+            chaveAcesso,
+            nfeNumero: numeroNfe,
+            serie,
+            nRec: nRecibo,
+            cStat: consultaRecibo.cStat || dadosRetorno.cStatLote || '105',
+            xMotivo: msgPendente,
+            mensagemErro: msgPendente
+          };
+        }
       }
 
       // CASO 2: Lote rejeitado na raiz (ex: schema inválido, erro de certificado, cStat != 100 e != 104)
-      if (dadosRetorno.cStatLote && dadosRetorno.cStatLote !== '100' && dadosRetorno.cStatLote !== '104') {
+      if (!autorizacaoConfirmadaSefaz && dadosRetorno.cStatLote && dadosRetorno.cStatLote !== '100' && dadosRetorno.cStatLote !== '104') {
         const cStatLote = dadosRetorno.cStatLote;
         const xMotivoLote = dadosRetorno.xMotivoLote || 'Rejeição no lote da NF-e na SEFAZ';
         const errMsg = `Rejeição do Lote SEFAZ ${cStatLote}: ${xMotivoLote}`;
         try {
-          await updateCotacaoNfeStatusDb(quote.id || quote.quoteNumber, {
+          await updateCotacaoNfeStatusDb(quoteIdOrNum, {
             status_nfe: 'Erro',
             mensagem_erro_nfe: errMsg
           });
@@ -2519,12 +2905,12 @@ export async function transmitirNfeSefaz(
       }
 
       // CASO 3: Rejeição da Nota específica dentro de <infProt> (ex: cStat 204 Duplicidade, 539, 207, etc.)
-      if (dadosRetorno.cStatNota && dadosRetorno.cStatNota !== '100' && dadosRetorno.cStatNota !== '150') {
+      if (!autorizacaoConfirmadaSefaz && dadosRetorno.cStatNota && dadosRetorno.cStatNota !== '100' && dadosRetorno.cStatNota !== '150') {
         const cStatNota = dadosRetorno.cStatNota;
         const xMotivoNota = dadosRetorno.xMotivoNota || 'Nota fiscal rejeitada pela SEFAZ';
         const errMsg = `Rejeição SEFAZ ${cStatNota}: ${xMotivoNota}`;
         try {
-          await updateCotacaoNfeStatusDb(quote.id || quote.quoteNumber, {
+          await updateCotacaoNfeStatusDb(quoteIdOrNum, {
             status_nfe: 'Erro',
             mensagem_erro_nfe: errMsg
           });
@@ -2539,12 +2925,12 @@ export async function transmitirNfeSefaz(
       }
 
       // CASO 4: Validação rigorosa de Autorização Oficial (cStat == 100 ou 150)
-      if (!dadosRetorno.isAutorizada && dadosRetorno.cStat !== '100' && dadosRetorno.cStat !== '150') {
+      if (!autorizacaoConfirmadaSefaz && !dadosRetorno.isAutorizada && dadosRetorno.cStat !== '100' && dadosRetorno.cStat !== '150') {
         const cStatFinal = dadosRetorno.cStat || 'NAO_AUTORIZADO';
         const xMotivoFinal = dadosRetorno.xMotivo || 'A SEFAZ não autorizou a NF-e';
         const errMsg = `Nota não autorizada na SEFAZ (cStat: ${cStatFinal} - ${xMotivoFinal}).`;
         try {
-          await updateCotacaoNfeStatusDb(quote.id || quote.quoteNumber, {
+          await updateCotacaoNfeStatusDb(quoteIdOrNum, {
             status_nfe: 'Erro',
             mensagem_erro_nfe: errMsg
           });
@@ -2559,10 +2945,10 @@ export async function transmitirNfeSefaz(
       }
 
       // CASO 5: Exigência do número de protocolo oficial da SEFAZ (<nProt>)
-      if (!dadosRetorno.nProt) {
+      if (!autorizacaoConfirmadaSefaz && !dadosRetorno.nProt) {
         const errMsg = `A SEFAZ confirmou recebimento (cStat ${dadosRetorno.cStat || '100'}), porém não retornou o número de protocolo oficial de autorização (<nProt>). A nota não pôde ser gravada como autorizada.`;
         try {
-          await updateCotacaoNfeStatusDb(quote.id || quote.quoteNumber, {
+          await updateCotacaoNfeStatusDb(quoteIdOrNum, {
             status_nfe: 'Erro',
             mensagem_erro_nfe: errMsg
           });
@@ -2577,26 +2963,98 @@ export async function transmitirNfeSefaz(
       }
 
       // Autorização confirmada com sucesso pela SEFAZ
-      protocolo = dadosRetorno.nProt;
-      autorizacaoConfirmadaSefaz = true;
+      if (!autorizacaoConfirmadaSefaz && dadosRetorno.nProt) {
+        protocolo = dadosRetorno.nProt;
+        autorizacaoConfirmadaSefaz = true;
+      }
       if (responseXml.includes('<nfeProc')) {
         xmlConteudo = sanitizarXmlNfeComChaveValida(responseXml, chaveAcesso);
       }
     } catch (soapErr: any) {
-      console.warn(`[SEFAZ-SP Produção] Comunicação SOAP direta falhou (${soapErr?.message || soapErr}). Verificando canal proxy/backend...`);
-      // Se não houver proxy configurado ou se falhar, retorna o erro de conexão em vez de forjar autorização falsa
-      const errMsg = `Falha na conexão segura com o WebService da SEFAZ-SP Produção (${sefazEndpoint}): ${soapErr?.message || 'Erro de rede ou certificado digital'}. Verifique o certificado A1 e conectividade.`;
+      // =========================================================================================
+      // TRAVA 2: TRATAMENTO DE TIMEOUT E PERDA DE CONEXÃO
+      // Se a requisição sofrer timeout (15s) ou erro de rede, o ERP NÃO gera novo XML ou envio cego.
+      // Dispara obrigatoriamente consulta de situação por chave para capturar o protocolo real.
+      // =========================================================================================
+      console.warn(`[SEFAZ-SP Produção] Erro/Timeout na transmissão SOAP direta (${soapErr?.message || soapErr}). Acionando consulta de situação por chave para verificar processamento...`);
+
       try {
-        await updateCotacaoNfeStatusDb(quote.id || quote.quoteNumber, {
-          status_nfe: 'Erro',
-          mensagem_erro_nfe: errMsg
-        });
-      } catch {}
-      return {
-        sucesso: false,
-        statusNfe: 'Erro',
-        mensagemErro: errMsg
-      };
+        const consultaTimeout = await consultarSituacaoNfeSefaz(chaveAcesso, 10000);
+        if (consultaTimeout.isAutorizada && consultaTimeout.nProt) {
+          console.log(`[SEFAZ-SP Produção] Protocolo ${consultaTimeout.nProt} recuperado com sucesso pós-timeout! Evitada duplicidade.`);
+          protocolo = consultaTimeout.nProt;
+          autorizacaoConfirmadaSefaz = true;
+          origemRecuperacao = 'timeout_consulta';
+        } else if (consultaTimeout.isLotePendente || consultaTimeout.cStatLote === '103' || consultaTimeout.cStatLote === '105') {
+          const nRec = consultaTimeout.nRec || 'PENDENTE';
+          salvarReciboLocal(quoteIdOrNum, nRec, chaveAcesso);
+          const msgPendente = `Timeout na resposta, mas o lote consta como recebido na SEFAZ (Recibo Nº ${nRec}). Chave e número preservados com status Pendente. Utilize "Consultar Recibo / Situação" para obter a resposta final sem duplicidade.`;
+          try {
+            await updateCotacaoNfeStatusDb(quoteIdOrNum, {
+              status_nfe: 'Pendente',
+              nfe_chave: chaveAcesso,
+              chave_acesso: chaveAcesso,
+              nfe_numero: numeroNfe,
+              serie_nfe: serie,
+              mensagem_erro_nfe: msgPendente
+            });
+          } catch {}
+          return {
+            sucesso: false,
+            statusNfe: 'Pendente',
+            chaveAcesso,
+            nfeNumero: numeroNfe,
+            serie,
+            nRec,
+            cStat: '105',
+            xMotivo: msgPendente,
+            mensagemErro: msgPendente
+          };
+        } else {
+          // Nota não autorizada e status incerto: salva como Pendente com a mesma chave para não gastar numeração
+          const msgPendente = `A requisição sofreu timeout ou oscilação na rede (${soapErr?.message || 'Servidor indisponível'}). A chave ${chaveAcesso} foi preservada com status Pendente. Execute "Consultar Recibo / Situação" para verificar se a SEFAZ processou o documento antes de reenviar.`;
+          try {
+            await updateCotacaoNfeStatusDb(quoteIdOrNum, {
+              status_nfe: 'Pendente',
+              nfe_chave: chaveAcesso,
+              chave_acesso: chaveAcesso,
+              nfe_numero: numeroNfe,
+              serie_nfe: serie,
+              mensagem_erro_nfe: msgPendente
+            });
+          } catch {}
+          return {
+            sucesso: false,
+            statusNfe: 'Pendente',
+            chaveAcesso,
+            nfeNumero: numeroNfe,
+            serie,
+            cStat: 'TIMEOUT',
+            xMotivo: msgPendente,
+            mensagemErro: msgPendente
+          };
+        }
+      } catch (eCons) {
+        const errMsg = `Falha de conexão com a SEFAZ-SP Produção (${sefazEndpoint}): ${soapErr?.message || 'Erro de rede'}. Status marcado como Pendente para evitar duplicidade.`;
+        try {
+          await updateCotacaoNfeStatusDb(quoteIdOrNum, {
+            status_nfe: 'Pendente',
+            nfe_chave: chaveAcesso,
+            chave_acesso: chaveAcesso,
+            nfe_numero: numeroNfe,
+            serie_nfe: serie,
+            mensagem_erro_nfe: errMsg
+          });
+        } catch {}
+        return {
+          sucesso: false,
+          statusNfe: 'Pendente',
+          chaveAcesso,
+          nfeNumero: numeroNfe,
+          serie,
+          mensagemErro: errMsg
+        };
+      }
     }
   } else if (sefazEndpoint) {
     try {
@@ -2619,7 +3077,8 @@ export async function transmitirNfeSefaz(
           emitente,
           destinatario,
           valor_total: valorTotal
-        })
+        }),
+        signal: AbortSignal.timeout(15000)
       });
 
       if (!sefazResponse.ok) {
@@ -2630,7 +3089,7 @@ export async function transmitirNfeSefaz(
         const xMotivoRet = parsedErr?.xMotivo || parsedErr?.mensagem || errorBody;
         const errMsg = `Rejeição SEFAZ ${cStatRet}: ${xMotivoRet}`;
         try {
-          await updateCotacaoNfeStatusDb(quote.id || quote.quoteNumber, {
+          await updateCotacaoNfeStatusDb(quoteIdOrNum, {
             status_nfe: 'Erro',
             mensagem_erro_nfe: errMsg
           });
@@ -2650,29 +3109,49 @@ export async function transmitirNfeSefaz(
       const cStatProxy = String(sefazData?.cStat || '');
       if (cStatProxy === '103' || cStatProxy === '105') {
         const nRec = sefazData?.nRec || sefazData?.numero_recibo || 'N/A';
-        const msgPendente = `Lote pendente na SEFAZ (cStat ${cStatProxy}: ${sefazData?.xMotivo || 'Lote em processamento'}). Recibo Nº ${nRec}. A NF-e NÃO foi autorizada definitivamente (aguardando cStat 100).`;
-        try {
-          await updateCotacaoNfeStatusDb(quote.id || quote.quoteNumber, {
-            status_nfe: 'Pendente',
-            mensagem_erro_nfe: msgPendente
-          });
-        } catch {}
-        return {
-          sucesso: false,
-          statusNfe: 'Erro',
-          cStat: cStatProxy,
-          xMotivo: msgPendente,
-          mensagemErro: msgPendente
-        };
+        salvarReciboLocal(quoteIdOrNum, nRec, chaveAcesso);
+        console.log(`[SEFAZ-SP Proxy] Lote recebido (cStat ${cStatProxy}). Recibo ${nRec}. Aguardando consulta...`);
+
+        await new Promise(r => setTimeout(r, 2500));
+        const consultaRecibo = await consultarReciboLoteSefaz(nRec, 10000);
+
+        if (consultaRecibo.isAutorizada && consultaRecibo.nProt) {
+          protocolo = consultaRecibo.nProt;
+          autorizacaoConfirmadaSefaz = true;
+          origemRecuperacao = 'consulta_recibo';
+        } else {
+          const msgPendente = `Lote pendente na SEFAZ (cStat ${cStatProxy}: ${sefazData?.xMotivo || 'Lote em processamento'}). Recibo Nº ${nRec}. O recibo foi salvo. Utilize "Consultar Recibo / Situação" para obter a autorização final.`;
+          try {
+            await updateCotacaoNfeStatusDb(quoteIdOrNum, {
+              status_nfe: 'Pendente',
+              nfe_chave: chaveAcesso,
+              chave_acesso: chaveAcesso,
+              nfe_numero: numeroNfe,
+              serie_nfe: serie,
+              mensagem_erro_nfe: msgPendente
+            });
+          } catch {}
+          return {
+            sucesso: false,
+            statusNfe: 'Pendente',
+            chaveAcesso,
+            nfeNumero: numeroNfe,
+            serie,
+            nRec,
+            cStat: cStatProxy,
+            xMotivo: msgPendente,
+            mensagemErro: msgPendente
+          };
+        }
       }
 
       // Validação estrita de autorização (cStat == 100 ou 150)
-      if (cStatProxy !== '100' && cStatProxy !== '150') {
+      if (!autorizacaoConfirmadaSefaz && cStatProxy !== '100' && cStatProxy !== '150') {
         const cStatRet = cStatProxy || 'REJEICAO';
         const xMotivoRet = sefazData.xMotivo || sefazData.mensagem || 'Rejeição na SEFAZ';
         const errMsg = `Rejeição SEFAZ ${cStatRet}: ${xMotivoRet}`;
         try {
-          await updateCotacaoNfeStatusDb(quote.id || quote.quoteNumber, {
+          await updateCotacaoNfeStatusDb(quoteIdOrNum, {
             status_nfe: 'Erro',
             mensagem_erro_nfe: errMsg
           });
@@ -2686,10 +3165,10 @@ export async function transmitirNfeSefaz(
         };
       }
 
-      if (!sefazData?.protocolo && !sefazData?.nProt) {
+      if (!autorizacaoConfirmadaSefaz && !sefazData?.protocolo && !sefazData?.nProt) {
         const errMsg = 'A SEFAZ confirmou recebimento mas não retornou o número de protocolo oficial de autorização (<nProt>).';
         try {
-          await updateCotacaoNfeStatusDb(quote.id || quote.quoteNumber, {
+          await updateCotacaoNfeStatusDb(quoteIdOrNum, {
             status_nfe: 'Erro',
             mensagem_erro_nfe: errMsg
           });
@@ -2703,25 +3182,43 @@ export async function transmitirNfeSefaz(
         };
       }
 
-      protocolo = String(sefazData.protocolo || sefazData.nProt);
-      autorizacaoConfirmadaSefaz = true;
+      if (!autorizacaoConfirmadaSefaz) {
+        protocolo = String(sefazData.protocolo || sefazData.nProt);
+        autorizacaoConfirmadaSefaz = true;
+      }
       if (sefazData?.xml_conteudo || sefazData?.xml_retorno) {
         xmlConteudo = sanitizarXmlNfeComChaveValida(sefazData.xml_conteudo || sefazData.xml_retorno, chaveAcesso);
       }
     } catch (apiErr: any) {
-      console.warn('Erro ao conectar ao serviço da SEFAZ Produção:', apiErr);
-      const errMsg = `Falha na conexão com o serviço SEFAZ Produção (${sefazEndpoint}): ${apiErr?.message || 'Servidor indisponível'}.`;
+      console.warn('Timeout ou erro de rede no serviço SEFAZ:', apiErr);
       try {
-        await updateCotacaoNfeStatusDb(quote.id || quote.quoteNumber, {
-          status_nfe: 'Erro',
-          mensagem_erro_nfe: errMsg
-        });
+        const consultaTimeout = await consultarSituacaoNfeSefaz(chaveAcesso, 10000);
+        if (consultaTimeout.isAutorizada && consultaTimeout.nProt) {
+          protocolo = consultaTimeout.nProt;
+          autorizacaoConfirmadaSefaz = true;
+          origemRecuperacao = 'timeout_consulta';
+        } else {
+          const errMsg = `Timeout na conexão com a SEFAZ Produção (${sefazEndpoint}). Chave ${chaveAcesso} preservada com status Pendente para evitar duplicidade.`;
+          try {
+            await updateCotacaoNfeStatusDb(quoteIdOrNum, {
+              status_nfe: 'Pendente',
+              nfe_chave: chaveAcesso,
+              chave_acesso: chaveAcesso,
+              nfe_numero: numeroNfe,
+              serie_nfe: serie,
+              mensagem_erro_nfe: errMsg
+            });
+          } catch {}
+          return {
+            sucesso: false,
+            statusNfe: 'Pendente',
+            chaveAcesso,
+            nfeNumero: numeroNfe,
+            serie,
+            mensagemErro: errMsg
+          };
+        }
       } catch {}
-      return {
-        sucesso: false,
-        statusNfe: 'Erro',
-        mensagemErro: errMsg
-      };
     }
   }
 
@@ -2729,7 +3226,7 @@ export async function transmitirNfeSefaz(
   if (!autorizacaoConfirmadaSefaz) {
     const errMsg = 'Transmissão interrompida: Não houve confirmação oficial de autorização da NF-e (cStat 100) perante os WebServices da SEFAZ-SP Produção.';
     try {
-      await updateCotacaoNfeStatusDb(quote.id || quote.quoteNumber, {
+      await updateCotacaoNfeStatusDb(quoteIdOrNum, {
         status_nfe: 'Erro',
         mensagem_erro_nfe: errMsg
       });
@@ -2862,7 +3359,277 @@ export async function transmitirNfeSefaz(
     xmlUrl: xmlUrl,
     xmlConteudo: xmlConteudo,
     cStat: '100',
-    xMotivo: 'Autorizado o uso da NF-e'
+    xMotivo: 'Autorizado o uso da NF-e',
+    origemRecuperacao
+  };
+}
+
+/**
+ * Consulta a situação da NF-e ou o processamento do lote por recibo na SEFAZ,
+ * recuperando o protocolo oficial e atualizando a base de dados caso a nota já tenha sido processada.
+ */
+export async function consultarStatusOuReciboNfe(
+  quote: Quote,
+  client?: Client | null
+): Promise<NfeTransmissionResult> {
+  const quoteIdOrNum = quote.id || quote.quoteNumber;
+  let chaveAcesso = recalcularChaveAcessoComDvCorreto(quote.nfe_chave || quote.chave_acesso || '');
+  let nRec = obterReciboLocal(quoteIdOrNum, chaveAcesso);
+
+  if (!nRec && quote.mensagem_erro_nfe) {
+    const matchRec = quote.mensagem_erro_nfe.match(/Recibo\s*(?:Nº|N|n°)?\s*(\d+)/i);
+    if (matchRec) {
+      nRec = matchRec[1];
+    }
+  }
+
+  // 1. Se possuir recibo gravado, consulta o recibo (NFeRetAutorizacao4)
+  if (nRec) {
+    console.log(`[SEFAZ Consulta] Consultando processamento do recibo de lote ${nRec} para cotação ${quoteIdOrNum}...`);
+    const resRecibo = await consultarReciboLoteSefaz(nRec, 12000);
+    if (resRecibo.isAutorizada && resRecibo.nProt) {
+      const companyData = await fetchCompanyData(true);
+      const cliDanfe = await fetchClienteCompletoParaDanfe(quote, client);
+      const cleanDoc = cliDanfe.doc.replace(/\D/g, '');
+      const tipoDoc = cleanDoc.length > 11 ? 'CNPJ' : 'CPF';
+      const ufDest = (cliDanfe.uf || quote.clientState || 'SP').toUpperCase();
+      const itensFiscais = prepararItensFiscais(quote.items || [], ufDest);
+      const valorTotal = quote.grandTotal || quote.subtotalTotal || itensFiscais.reduce((s, it) => s + it.subtotal, 0);
+      const numeroNfe = quote.nfe_numero || (chaveAcesso ? chaveAcesso.slice(25, 34) : '000001');
+      const serie = String(quote.serie_nfe || (chaveAcesso ? chaveAcesso.slice(22, 25) : '1'));
+      const dtEmissao = quote.nfe_emitida_em ? new Date(quote.nfe_emitida_em) : new Date();
+      const finalChave = resRecibo.chNFe || chaveAcesso;
+      const refDanfeTexto = quote.origemCotacoes && quote.origemCotacoes.length > 1
+        ? `Ref. Cotações: ${quote.origemCotacoes.join(', ')}`
+        : quote.quoteNumber;
+
+      const emitente: DadosEmitenteNfe = {
+        razaoSocial: companyData.corporateName || companyData.razao_social || 'L. M. BANZATTO METAIS',
+        nomeFantasia: companyData.tradeName || companyData.nome_fantasia || 'USICORTE METAIS',
+        cnpj: companyData.cnpj || '25.038.430/0001-23',
+        ie: companyData.ie || companyData.inscricao_estadual || '20963213114',
+        im: companyData.im || companyData.inscricao_municipal || '558747',
+        endereco: companyData.street || companyData.endereco || '',
+        numero: companyData.number || companyData.numero || 'S/N',
+        bairro: companyData.neighborhood || companyData.bairro || '',
+        cidade: companyData.city || companyData.cidade || 'BAURU',
+        uf: (companyData.state || companyData.uf || 'SP').toUpperCase(),
+        cep: companyData.cep || '17031-350',
+        telefone: companyData.phone || companyData.telefone || '(14) 99880-9362',
+        regimeTributario: companyData.taxRegime || companyData.regime_tributario || 'Simples Nacional',
+        aliquotaIcmsSimples: obterAliquotaIcmsSimples(companyData)
+      };
+
+      const destinatario: DadosDestinatarioNfe = {
+        nome: cliDanfe.nome,
+        documento: cliDanfe.doc,
+        tipoDocumento: tipoDoc,
+        inscricaoEstadual: cliDanfe.ie,
+        indicadorIe: tipoDoc === 'CNPJ' ? '1' : '9',
+        endereco: cliDanfe.endereco,
+        bairro: cliDanfe.bairro,
+        cidade: cliDanfe.cidade,
+        uf: ufDest,
+        cep: cliDanfe.cep,
+        telefone: cliDanfe.telefone,
+        email: client?.email || quote.clientEmail
+      };
+
+      let xmlConteudo = quote.xml_conteudo;
+      if (!xmlConteudo) {
+        xmlConteudo = gerarXmlNfe(
+          emitente, destinatario, itensFiscais,
+          numeroNfe, serie, finalChave, valorTotal,
+          dtEmissao, resRecibo.nProt, refDanfeTexto, '1'
+        );
+      }
+      const danfeHtml = gerarDanfeHtml(
+        emitente, destinatario, itensFiscais,
+        numeroNfe, serie, finalChave, resRecibo.nProt,
+        dtEmissao, valorTotal, false, refDanfeTexto,
+        undefined, false, xmlConteudo
+      );
+
+      const xmlBlob = new Blob([xmlConteudo], { type: 'application/xml;charset=utf-8' });
+      const xmlUrl = URL.createObjectURL(xmlBlob);
+      const danfeBlob = new Blob([danfeHtml], { type: 'text/html' });
+      const danfeUrl = URL.createObjectURL(danfeBlob);
+
+      await updateCotacaoNfeStatusDb(quoteIdOrNum, {
+        status_nfe: 'Emitida',
+        nfe_chave: finalChave,
+        chave_acesso: finalChave,
+        nfe_numero: numeroNfe,
+        serie_nfe: serie,
+        protocolo_autorizacao: resRecibo.nProt,
+        protocolo_nfe: resRecibo.nProt,
+        danfe_url: danfeUrl,
+        xml_url: xmlUrl,
+        xml_conteudo: xmlConteudo,
+        mensagem_erro_nfe: null,
+        nfe_emitida_em: dtEmissao.toISOString(),
+        situacao: 'FATURADO'
+      });
+
+      return {
+        sucesso: true,
+        statusNfe: 'Emitida',
+        chaveAcesso: finalChave,
+        nfeChave: finalChave,
+        nfeNumero: numeroNfe,
+        serie,
+        protocolo: resRecibo.nProt,
+        protocoloAutorizacao: resRecibo.nProt,
+        dataEmissao: dtEmissao.toISOString(),
+        danfeUrl,
+        xmlUrl,
+        xmlConteudo,
+        cStat: '100',
+        xMotivo: 'Autorizado o uso da NF-e (Recuperado via Consulta de Recibo SEFAZ)',
+        nRec,
+        origemRecuperacao: 'consulta_recibo'
+      };
+    } else if (resRecibo.isLotePendente || resRecibo.cStat === '105') {
+      return {
+        sucesso: false,
+        statusNfe: 'Pendente',
+        cStat: '105',
+        nRec,
+        xMotivo: `Lote em processamento na SEFAZ (Recibo Nº ${nRec}). Aguarde alguns instantes e consulte novamente.`,
+        mensagemErro: `Lote em processamento na SEFAZ (Recibo Nº ${nRec}). Aguarde alguns instantes e consulte novamente.`
+      };
+    }
+  }
+
+  // 2. Se não possuir recibo ou recibo ainda não finalizado, consulta por chave (NFeConsultaProtocolo4)
+  if (chaveAcesso && chaveAcesso.length === 44) {
+    console.log(`[SEFAZ Consulta] Consultando situação da chave ${chaveAcesso}...`);
+    const resChave = await consultarSituacaoNfeSefaz(chaveAcesso, 12000);
+    if (resChave.isAutorizada && resChave.nProt) {
+      const companyData = await fetchCompanyData(true);
+      const cliDanfe = await fetchClienteCompletoParaDanfe(quote, client);
+      const cleanDoc = cliDanfe.doc.replace(/\D/g, '');
+      const tipoDoc = cleanDoc.length > 11 ? 'CNPJ' : 'CPF';
+      const ufDest = (cliDanfe.uf || quote.clientState || 'SP').toUpperCase();
+      const itensFiscais = prepararItensFiscais(quote.items || [], ufDest);
+      const valorTotal = quote.grandTotal || quote.subtotalTotal || itensFiscais.reduce((s, it) => s + it.subtotal, 0);
+      const numeroNfe = quote.nfe_numero || chaveAcesso.slice(25, 34);
+      const serie = String(quote.serie_nfe || chaveAcesso.slice(22, 25) || '1');
+      const dtEmissao = quote.nfe_emitida_em ? new Date(quote.nfe_emitida_em) : new Date();
+      const refDanfeTexto = quote.origemCotacoes && quote.origemCotacoes.length > 1
+        ? `Ref. Cotações: ${quote.origemCotacoes.join(', ')}`
+        : quote.quoteNumber;
+
+      const emitente: DadosEmitenteNfe = {
+        razaoSocial: companyData.corporateName || companyData.razao_social || 'L. M. BANZATTO METAIS',
+        nomeFantasia: companyData.tradeName || companyData.nome_fantasia || 'USICORTE METAIS',
+        cnpj: companyData.cnpj || '25.038.430/0001-23',
+        ie: companyData.ie || companyData.inscricao_estadual || '20963213114',
+        im: companyData.im || companyData.inscricao_municipal || '558747',
+        endereco: companyData.street || companyData.endereco || '',
+        numero: companyData.number || companyData.numero || 'S/N',
+        bairro: companyData.neighborhood || companyData.bairro || '',
+        cidade: companyData.city || companyData.cidade || 'BAURU',
+        uf: (companyData.state || companyData.uf || 'SP').toUpperCase(),
+        cep: companyData.cep || '17031-350',
+        telefone: companyData.phone || companyData.telefone || '(14) 99880-9362',
+        regimeTributario: companyData.taxRegime || companyData.regime_tributario || 'Simples Nacional',
+        aliquotaIcmsSimples: obterAliquotaIcmsSimples(companyData)
+      };
+
+      const destinatario: DadosDestinatarioNfe = {
+        nome: cliDanfe.nome,
+        documento: cliDanfe.doc,
+        tipoDocumento: tipoDoc,
+        inscricaoEstadual: cliDanfe.ie,
+        indicadorIe: tipoDoc === 'CNPJ' ? '1' : '9',
+        endereco: cliDanfe.endereco,
+        bairro: cliDanfe.bairro,
+        cidade: cliDanfe.cidade,
+        uf: ufDest,
+        cep: cliDanfe.cep,
+        telefone: cliDanfe.telefone,
+        email: client?.email || quote.clientEmail
+      };
+
+      let xmlConteudo = quote.xml_conteudo;
+      if (!xmlConteudo) {
+        xmlConteudo = gerarXmlNfe(
+          emitente, destinatario, itensFiscais,
+          numeroNfe, serie, chaveAcesso, valorTotal,
+          dtEmissao, resChave.nProt, refDanfeTexto, '1'
+        );
+      }
+      const danfeHtml = gerarDanfeHtml(
+        emitente, destinatario, itensFiscais,
+        numeroNfe, serie, chaveAcesso, resChave.nProt,
+        dtEmissao, valorTotal, false, refDanfeTexto,
+        undefined, false, xmlConteudo
+      );
+
+      const xmlBlob = new Blob([xmlConteudo], { type: 'application/xml;charset=utf-8' });
+      const xmlUrl = URL.createObjectURL(xmlBlob);
+      const danfeBlob = new Blob([danfeHtml], { type: 'text/html' });
+      const danfeUrl = URL.createObjectURL(danfeBlob);
+
+      await updateCotacaoNfeStatusDb(quoteIdOrNum, {
+        status_nfe: 'Emitida',
+        nfe_chave: chaveAcesso,
+        chave_acesso: chaveAcesso,
+        nfe_numero: numeroNfe,
+        serie_nfe: serie,
+        protocolo_autorizacao: resChave.nProt,
+        protocolo_nfe: resChave.nProt,
+        danfe_url: danfeUrl,
+        xml_url: xmlUrl,
+        xml_conteudo: xmlConteudo,
+        mensagem_erro_nfe: null,
+        nfe_emitida_em: dtEmissao.toISOString(),
+        situacao: 'FATURADO'
+      });
+
+      return {
+        sucesso: true,
+        statusNfe: 'Emitida',
+        chaveAcesso,
+        nfeChave: chaveAcesso,
+        nfeNumero: numeroNfe,
+        serie,
+        protocolo: resChave.nProt,
+        protocoloAutorizacao: resChave.nProt,
+        dataEmissao: dtEmissao.toISOString(),
+        danfeUrl,
+        xmlUrl,
+        xmlConteudo,
+        cStat: '100',
+        xMotivo: 'Autorizado o uso da NF-e (Recuperado via Consulta de Situação SEFAZ)',
+        origemRecuperacao: 'timeout_consulta'
+      };
+    } else if (resChave.cStat === '217') {
+      return {
+        sucesso: false,
+        statusNfe: 'Erro',
+        cStat: '217',
+        xMotivo: 'NF-e não consta na base de dados da SEFAZ (o lote não chegou a ser recebido). É seguro efetuar uma nova transmissão.',
+        mensagemErro: 'NF-e não consta na base de dados da SEFAZ (o lote não chegou a ser recebido). É seguro efetuar uma nova transmissão.'
+      };
+    } else {
+      return {
+        sucesso: false,
+        statusNfe: resChave.isLotePendente ? 'Pendente' : 'Erro',
+        cStat: resChave.cStat,
+        xMotivo: resChave.xMotivo || 'Situação da NF-e não autorizada na SEFAZ',
+        mensagemErro: resChave.xMotivo || 'Situação da NF-e não autorizada na SEFAZ'
+      };
+    }
+  }
+
+  return {
+    sucesso: false,
+    statusNfe: 'Erro',
+    cStat: 'DADOS_INSUFICIENTES',
+    xMotivo: 'Não há chave de acesso ou número de recibo associado a esta cotação para consultar na SEFAZ.',
+    mensagemErro: 'Não há chave de acesso ou número de recibo associado a esta cotação para consultar na SEFAZ.'
   };
 }
 

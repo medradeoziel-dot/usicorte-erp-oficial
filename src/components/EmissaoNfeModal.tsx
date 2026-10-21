@@ -19,7 +19,9 @@ import {
   obterAliquotaIcmsSimples,
   calcularCreditoIcmsSimples,
   recalcularChaveAcessoComDvCorreto,
-  calcularDvModulo11
+  calcularDvModulo11,
+  consultarStatusOuReciboNfe,
+  obterReciboLocal
 } from '../services/nfeService';
 import CancelarNfeModal from './CancelarNfeModal';
 import DanfeEspelhoA4Modal from './DanfeEspelhoA4Modal';
@@ -46,7 +48,9 @@ import {
   Eye,
   Mail,
   Ban,
-  Copy
+  Copy,
+  Clock,
+  RefreshCw
 } from 'lucide-react';
 
 interface EmissaoNfeModalProps {
@@ -76,6 +80,7 @@ export default function EmissaoNfeModal({
   const [showDanfeOficialModal, setShowDanfeOficialModal] = useState<boolean>(false);
   const [autoPrintDanfe, setAutoPrintDanfe] = useState<boolean>(false);
   const [copiedKey, setCopiedKey] = useState<boolean>(false);
+  const [isConsultingRecibo, setIsConsultingRecibo] = useState<boolean>(false);
 
   const [isLoadingItems, setIsLoadingItems] = useState<boolean>(false);
 
@@ -230,6 +235,11 @@ export default function EmissaoNfeModal({
 
   const isCancelada = isNfeCancelada(currentQuoteState.status_nfe);
   const isAutorizada = isNfeAutorizada(currentQuoteState.status_nfe);
+  const isPendente = currentQuoteState.status_nfe === 'Pendente' || transmissionResult?.statusNfe === 'Pendente';
+  const reciboPendente = transmissionResult?.nRec || 
+    obterReciboLocal(currentQuoteState.id || currentQuoteState.quoteNumber, currentQuoteState.nfe_chave || currentQuoteState.chave_acesso) ||
+    currentQuoteState.mensagem_erro_nfe?.match(/Recibo\s*(?:Nº|N|n°)?\s*(\d+)/i)?.[1] ||
+    null;
 
   const handleOpenPreDanfeNewTab = async () => {
     setOpeningNewTab(true);
@@ -438,9 +448,24 @@ export default function EmissaoNfeModal({
         } catch (emailErr) {
           console.warn('Aviso ao disparar e-mail automático pós-autorização:', emailErr);
         }
+      } else if (res.statusNfe === 'Pendente') {
+        // Status Pendente (cStat 103/105 ou Timeout): Mantém número/chave reservados e avisa operador
+        setTransmissionResult(res);
+        const msgPendente = res.xMotivo || res.mensagemErro || 'Lote recebido e em processamento na SEFAZ. O recibo foi salvo para consulta posterior.';
+        setErrorMessage(msgPendente);
+        const pendenteQuote: Quote = {
+          ...currentQuoteState,
+          status_nfe: 'Pendente',
+          nfe_chave: res.chaveAcesso || res.nfeChave || currentQuoteState.nfe_chave,
+          nfe_numero: res.nfeNumero || currentQuoteState.nfe_numero,
+          serie_nfe: res.serie || currentQuoteState.serie_nfe,
+          mensagem_erro_nfe: msgPendente
+        };
+        setCurrentQuoteState(pendenteQuote);
+        onSuccess(pendenteQuote);
       } else {
         // 4. Rejeição/Erro: Salva o erro em mensagem_erro_nfe e exibe o alerta explicativo na tela
-        const msg = res.mensagemErro || 'Rejeição desconhecida pela SEFAZ.';
+        const msg = res.mensagemErro || res.xMotivo || 'Rejeição desconhecida pela SEFAZ.';
         setErrorMessage(msg);
         try {
           await updateCotacaoNfeStatusDb(currentQuoteState.id || currentQuoteState.quoteNumber, {
@@ -472,6 +497,60 @@ export default function EmissaoNfeModal({
       onSuccess(errorQuote);
     } finally {
       setIsTransmitting(false);
+    }
+  };
+
+  const handleConsultarStatusOuRecibo = async () => {
+    setIsConsultingRecibo(true);
+    setErrorMessage(null);
+    try {
+      const res = await consultarStatusOuReciboNfe(currentQuoteState, client);
+      if (res.sucesso && res.statusNfe === 'Emitida') {
+        setTransmissionResult(res);
+        const updatedQuote: Quote = {
+          ...currentQuoteState,
+          status_nfe: 'Emitida',
+          nfe_chave: res.nfeChave,
+          nfe_numero: res.nfeNumero,
+          serie_nfe: res.serie,
+          danfe_url: res.danfeUrl,
+          xml_url: res.xmlUrl,
+          xml_conteudo: res.xmlConteudo,
+          mensagem_erro_nfe: undefined,
+          nfe_emitida_em: res.dataEmissao
+        };
+        setCurrentQuoteState(updatedQuote);
+        onSuccess(updatedQuote);
+
+        const numAutorizado = parseInt(String(res.nfeNumero).replace(/\D/g, ''), 10);
+        if (numAutorizado > 0) {
+          try {
+            await updateEmitenteNfeConfig(numAutorizado, parseInt(String(res.serie || serieNfe || 1), 10));
+          } catch {}
+        }
+
+        setShowDanfeOficialModal(true);
+        setAutoPrintDanfe(true);
+
+        try {
+          const emailRes = enviarEmailNfe(updatedQuote, client, company, res.xmlConteudo, true);
+          if (emailRes.destinatariosDescricao) {
+            setEmailFeedback(emailRes.destinatariosDescricao);
+            setTimeout(() => setEmailFeedback(null), 8000);
+          }
+        } catch {}
+      } else if (res.statusNfe === 'Pendente') {
+        const msg = res.xMotivo || res.mensagemErro || 'Lote ainda em processamento na SEFAZ.';
+        setErrorMessage(msg);
+        setTransmissionResult(res);
+      } else {
+        const msg = res.mensagemErro || res.xMotivo || 'Situação não autorizada pela SEFAZ.';
+        setErrorMessage(msg);
+      }
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'Falha ao consultar recibo/situação na SEFAZ.');
+    } finally {
+      setIsConsultingRecibo(false);
     }
   };
 
@@ -589,6 +668,63 @@ export default function EmissaoNfeModal({
                       <strong>Justificativa Informada:</strong> <span className="italic text-slate-200">"{currentQuoteState.motivo_cancelamento}"</span>
                     </p>
                   )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Banner de NF-e PENDENTE / PROCESSAMENTO DE RECIBO (STATUS 103 / 105 / TIMEOUT) */}
+          {isPendente && !isAutorizada && !isCancelada && (
+            <div className="p-4 rounded-xl bg-amber-950/80 border border-amber-500/60 text-amber-100 space-y-3 animate-in fade-in duration-300">
+              <div className="flex items-start gap-3">
+                <Clock className="w-6 h-6 text-amber-400 shrink-0 mt-0.5 animate-pulse" />
+                <div className="flex-1 space-y-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h4 className="font-bold text-sm text-amber-200">
+                      Lote Pendente / Em Processamento na SEFAZ (Status 103 / 105)
+                    </h4>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/30 text-amber-200 border border-amber-500/50">
+                      AGUARDANDO PROTOCOLO FINAL
+                    </span>
+                  </div>
+                  <p className="text-xs text-amber-200/90 leading-relaxed">
+                    A NF-e foi recebida pelos WebServices da SEFAZ ou sofreu oscilação temporária de rede. O número fiscal e a chave foram preservados com status Pendente para garantir que não haja duplicidade de emissão (Rejeição 204).
+                  </p>
+                  {reciboPendente && (
+                    <div className="p-2.5 bg-slate-900/80 rounded-lg border border-amber-500/40 mt-1">
+                      <span className="text-xs text-slate-300">
+                        <strong>Número do Recibo do Lote:</strong> <span className="font-mono text-amber-300 font-bold">{reciboPendente}</span>
+                      </span>
+                    </div>
+                  )}
+                  {currentQuoteState.mensagem_erro_nfe && (
+                    <p className="text-[11px] text-amber-300/80 italic mt-1 font-mono">
+                      {currentQuoteState.mensagem_erro_nfe}
+                    </p>
+                  )}
+                  <div className="pt-2 flex items-center gap-3 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={handleConsultarStatusOuRecibo}
+                      disabled={isConsultingRecibo || isTransmitting}
+                      className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-lg transition-colors flex items-center gap-2 cursor-pointer shadow-sm text-xs disabled:opacity-50"
+                    >
+                      {isConsultingRecibo ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>Consultando SEFAZ...</span>
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5" />
+                          <span>Consultar Recibo / Situação na SEFAZ</span>
+                        </>
+                      )}
+                    </button>
+                    <span className="text-[11px] text-slate-400">
+                      A rotina verifica o protocolo real na base oficial sem gerar nova numeração.
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
