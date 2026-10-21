@@ -530,9 +530,9 @@ export default function EmissaoNfeModal({
                   <FileText className="w-3 h-3 text-emerald-400" />
                   NF-e Nº {proximoNumeroNfe} - Série {serieNfe}
                 </span>
-                <span className="px-2.5 py-0.5 rounded text-[10px] font-mono font-bold bg-blue-500/20 text-blue-300 border border-blue-500/40 flex items-center gap-1.5 shadow-xs" title="Ambiente de Emissão Oficial SEFAZ: Produção com Validade Jurídica (tpAmb = 1)">
-                  <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse"></span>
-                  Produção (tpAmb = 1)
+                <span className="px-2.5 py-0.5 rounded text-[10px] font-mono font-bold bg-blue-500/20 text-blue-300 border border-blue-500/40 flex items-center gap-1.5 shadow-xs" title="Ambiente Oficial SEFAZ-SP: Produção (tpAmb = 1) | WebService: https://nfe.fazenda.sp.gov.br/ws/nfeautorizacao4.asmx">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                  SEFAZ-SP Produção (tpAmb = 1)
                 </span>
               </div>
               {currentQuoteState.origemCotacoes && currentQuoteState.origemCotacoes.length > 1 ? (

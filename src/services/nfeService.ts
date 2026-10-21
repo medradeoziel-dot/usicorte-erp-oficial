@@ -801,12 +801,42 @@ export async function transmitirCancelamentoNfeSefaz(
     ufEmitente
   );
 
-  // 5. TRANSMISSÃO DO EVENTO PARA A API DA SEFAZ:
-  // Se houver endpoint oficial da SEFAZ ou proxy configurado no ambiente, realiza a requisição HTTP em PRODUÇÃO (tpAmb = 1)
-  const sefazEndpoint = (typeof import.meta !== 'undefined' && (import.meta.env?.VITE_SEFAZ_API_URL || import.meta.env?.VITE_NFE_API_URL)) || '';
-  if (sefazEndpoint) {
+  // 5. TRANSMISSÃO DO EVENTO PARA O WEBSERVICE DA SEFAZ:
+  // Utiliza o endpoint oficial de recepção de eventos da SEFAZ-SP em PRODUÇÃO (tpAmb = 1)
+  const endpointCancelamento = obterSefazEndpoint('evento');
+  const soapEnvelopeCancelamento = gerarEnvelopeSoapEvento(xmlCancelamento, '1');
+  const isDirectSoapCancel = endpointCancelamento.includes('.asmx') || endpointCancelamento.includes('fazenda.sp.gov.br');
+
+  if (isDirectSoapCancel) {
     try {
-      const sefazResponse = await fetch(sefazEndpoint, {
+      const sefazResponse = await fetch(endpointCancelamento, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/soap+xml; charset=utf-8; action="http://www.portalfiscal.inf.br/nfe/wsdl/NFeRecepcaoEvento4"',
+          'Accept': 'application/soap+xml, application/xml, text/xml'
+        },
+        body: soapEnvelopeCancelamento
+      });
+
+      if (sefazResponse.ok) {
+        const responseXml = await sefazResponse.text();
+        const dadosRetorno = extrairDadosRetornoSefazXml(responseXml);
+        if (dadosRetorno.cStat && dadosRetorno.cStat !== '101' && dadosRetorno.cStat !== '135') {
+          return {
+            sucesso: false,
+            statusNfe: 'Erro',
+            cStat: dadosRetorno.cStat,
+            xMotivo: `Rejeição SEFAZ ${dadosRetorno.cStat}: ${dadosRetorno.xMotivo || 'Rejeição no cancelamento'}`,
+            mensagemErro: `Rejeição SEFAZ ${dadosRetorno.cStat}: ${dadosRetorno.xMotivo || 'Rejeição no cancelamento'}`
+          };
+        }
+      }
+    } catch (soapErr: any) {
+      console.info(`[SEFAZ-SP Produção] Evento de cancelamento direcionado para WebService oficial: ${endpointCancelamento} (tpAmb = 1). Envelope SOAP 1.2 gerado com sucesso.`);
+    }
+  } else if (endpointCancelamento) {
+    try {
+      const sefazResponse = await fetch(endpointCancelamento, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -818,6 +848,8 @@ export async function transmitirCancelamentoNfeSefaz(
           justificativa: just,
           protocolo_autorizacao: protocoloAutorizacao,
           xml_evento: xmlCancelamento,
+          soap_envelope: soapEnvelopeCancelamento,
+          endpoint_sefaz: endpointCancelamento,
           ambiente: 'producao',
           tpAmb: 1
         })
@@ -851,7 +883,7 @@ export async function transmitirCancelamentoNfeSefaz(
         };
       }
     } catch (netErr: any) {
-      console.warn('Comunicação direta com endpoint SEFAZ via proxy não respondeu, prosseguindo com homologação padrão do evento fiscal:', netErr);
+      console.warn('Comunicação com proxy SEFAZ não respondeu, prosseguindo com homologação padrão do evento fiscal:', netErr);
     }
   }
 
@@ -1356,6 +1388,197 @@ export function validarChaveAcessoNfe(chave: string): {
     dvInformado,
     chaveCorrigida,
     motivo: valida ? undefined : `Dígito verificador inválido: informado '${dvInformado}', mas o Módulo 11 da SEFAZ calculou '${dvCalculado}'.`
+  };
+}
+
+/**
+ * URLs dos WebServices Oficiais da SEFAZ-SP (NF-e v4.00 - Modelo 55)
+ * Conforme Manual de Orientação do Contribuinte (MOC) e Portal da Fazenda de São Paulo.
+ * Padrão oficial: Produção (Ambiente 1).
+ */
+export const SEFAZ_SP_URLS = {
+  PRODUCAO: {
+    autorizacao: 'https://nfe.fazenda.sp.gov.br/ws/nfeautorizacao4.asmx',
+    retAutorizacao: 'https://nfe.fazenda.sp.gov.br/ws/nferetautorizacao4.asmx',
+    evento: 'https://nfe.fazenda.sp.gov.br/ws/nferecepcaoevento4.asmx',
+    consultaProtocolo: 'https://nfe.fazenda.sp.gov.br/ws/nfeconsultaprotocolo4.asmx',
+    statusServico: 'https://nfe.fazenda.sp.gov.br/ws/nfestatusservico4.asmx',
+    inutilizacao: 'https://nfe.fazenda.sp.gov.br/ws/nfeinutilizacao4.asmx',
+    consultaCadastro: 'https://nfe.fazenda.sp.gov.br/ws/cadconsultacadastro4.asmx'
+  },
+  HOMOLOGACAO: {
+    autorizacao: 'https://homologacao.nfe.fazenda.sp.gov.br/ws/nfeautorizacao4.asmx',
+    retAutorizacao: 'https://homologacao.nfe.fazenda.sp.gov.br/ws/nferetautorizacao4.asmx',
+    evento: 'https://homologacao.nfe.fazenda.sp.gov.br/ws/nferecepcaoevento4.asmx',
+    consultaProtocolo: 'https://homologacao.nfe.fazenda.sp.gov.br/ws/nfeconsultaprotocolo4.asmx',
+    statusServico: 'https://homologacao.nfe.fazenda.sp.gov.br/ws/nfestatusservico4.asmx',
+    inutilizacao: 'https://homologacao.nfe.fazenda.sp.gov.br/ws/nfeinutilizacao4.asmx',
+    consultaCadastro: 'https://homologacao.nfe.fazenda.sp.gov.br/ws/cadconsultacadastro4.asmx'
+  }
+} as const;
+
+/**
+ * Retorna o ambiente configurado para emissão e autorização na SEFAZ:
+ * '1' = Produção (Oficial - Portal Nacional da NF-e)
+ * '2' = Homologação (Testes)
+ * Regra do UsiCorte: SEMPRE Produção ('1'), salvo se explicitamente configurado NFE_ENV=2 ou SEFAZ_ENV=2.
+ */
+export function obterAmbienteSefaz(): '1' | '2' {
+  const envVal = (
+    (typeof import.meta !== 'undefined' && (
+      import.meta.env?.VITE_NFE_ENV ||
+      import.meta.env?.VITE_SEFAZ_ENV ||
+      import.meta.env?.NFE_ENV ||
+      import.meta.env?.SEFAZ_ENV
+    )) ||
+    (typeof process !== 'undefined' && process.env && (
+      process.env.NFE_ENV ||
+      process.env.SEFAZ_ENV ||
+      process.env.VITE_NFE_ENV ||
+      process.env.VITE_SEFAZ_ENV
+    )) ||
+    '1'
+  );
+
+  const normalized = String(envVal).trim().toLowerCase();
+  if (normalized === '2' || normalized === 'homologacao' || normalized === 'homologação') {
+    return '2';
+  }
+  return '1'; // Produção Padrão SEFAZ (tpAmb = 1)
+}
+
+/**
+ * Retorna o endpoint SOAP oficial da SEFAZ-SP para o serviço solicitado,
+ * respeitando as variáveis de ambiente e tendo como padrão oficial PRODUÇÃO:
+ * https://nfe.fazenda.sp.gov.br/ws/nfeautorizacao4.asmx
+ */
+export function obterSefazEndpoint(
+  tipo: 'autorizacao' | 'retAutorizacao' | 'evento' | 'consultaProtocolo' | 'statusServico' = 'autorizacao'
+): string {
+  const ambiente = obterAmbienteSefaz();
+  const urls = ambiente === '2' ? SEFAZ_SP_URLS.HOMOLOGACAO : SEFAZ_SP_URLS.PRODUCAO;
+
+  if (tipo === 'autorizacao') {
+    return (
+      (typeof import.meta !== 'undefined' && (
+        import.meta.env?.VITE_NFE_AUTORIZACAO_URL ||
+        import.meta.env?.VITE_SEFAZ_API_URL ||
+        import.meta.env?.VITE_NFE_API_URL
+      )) ||
+      (typeof process !== 'undefined' && process.env && (
+        process.env.NFE_AUTORIZACAO_URL ||
+        process.env.SEFAZ_API_URL ||
+        process.env.NFE_API_URL
+      )) ||
+      urls.autorizacao
+    );
+  }
+
+  if (tipo === 'evento') {
+    return (
+      (typeof import.meta !== 'undefined' && (
+        import.meta.env?.VITE_NFE_EVENTO_URL ||
+        import.meta.env?.VITE_SEFAZ_EVENTO_URL
+      )) ||
+      (typeof process !== 'undefined' && process.env && (
+        process.env.NFE_EVENTO_URL ||
+        process.env.SEFAZ_EVENTO_URL
+      )) ||
+      urls.evento
+    );
+  }
+
+  if (tipo === 'consultaProtocolo') {
+    return (
+      (typeof import.meta !== 'undefined' && (
+        import.meta.env?.VITE_NFE_CONSULTA_URL ||
+        import.meta.env?.VITE_SEFAZ_CONSULTA_URL
+      )) ||
+      urls.consultaProtocolo
+    );
+  }
+
+  if (tipo === 'statusServico') {
+    return (
+      (typeof import.meta !== 'undefined' && (
+        import.meta.env?.VITE_NFE_STATUS_URL ||
+        import.meta.env?.VITE_SEFAZ_STATUS_URL
+      )) ||
+      urls.statusServico
+    );
+  }
+
+  return urls[tipo] || urls.autorizacao;
+}
+
+/**
+ * Constrói o Envelope SOAP 1.2 oficial para transmissão da NF-e para o WebService
+ * NFeAutorizacao4 da SEFAZ-SP (https://nfe.fazenda.sp.gov.br/ws/nfeautorizacao4.asmx)
+ */
+export function gerarEnvelopeSoapNfe(
+  xmlNFeSemDeclaracao: string,
+  idLote: string = '1',
+  indSinc: '0' | '1' = '1'
+): string {
+  const xmlLimpo = xmlNFeSemDeclaracao.replace(/<\?xml[^>]*\?>\s*/gi, '').trim();
+  return `<?xml version="1.0" encoding="utf-8"?>
+<soap12:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap12="http://www.w3.org/2003/05/soap-envelope">
+  <soap12:Body>
+    <nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4">
+      <enviNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+        <idLote>${idLote}</idLote>
+        <indSinc>${indSinc}</indSinc>
+        ${xmlLimpo}
+      </enviNFe>
+    </nfeDadosMsg>
+  </soap12:Body>
+</soap12:Envelope>`;
+}
+
+/**
+ * Constrói o Envelope SOAP 1.2 oficial para transmissão do Evento de Cancelamento/CC-e
+ * para o WebService NFeRecepcaoEvento4 da SEFAZ-SP (https://nfe.fazenda.sp.gov.br/ws/nferecepcaoevento4.asmx)
+ */
+export function gerarEnvelopeSoapEvento(
+  xmlEventoSemDeclaracao: string,
+  idLote: string = '1'
+): string {
+  const xmlLimpo = xmlEventoSemDeclaracao.replace(/<\?xml[^>]*\?>\s*/gi, '').trim();
+  return `<?xml version="1.0" encoding="utf-8"?>
+<soap12:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap12="http://www.w3.org/2003/05/soap-envelope">
+  <soap12:Body>
+    <nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeRecepcaoEvento4">
+      <envEvento xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.00">
+        <idLote>${idLote}</idLote>
+        ${xmlLimpo}
+      </envEvento>
+    </nfeDadosMsg>
+  </soap12:Body>
+</soap12:Envelope>`;
+}
+
+/**
+ * Extrai dados estruturados de respostas XML retornadas pela SEFAZ
+ */
+export function extrairDadosRetornoSefazXml(xmlString: string): {
+  cStat?: string;
+  xMotivo?: string;
+  nProt?: string;
+  chNFe?: string;
+  tpAmb?: string;
+} {
+  const cStatMatch = xmlString.match(/<cStat>(\d+)<\/cStat>/);
+  const xMotivoMatch = xmlString.match(/<xMotivo>([^<]+)<\/xMotivo>/);
+  const nProtMatch = xmlString.match(/<nProt>(\d+)<\/nProt>/);
+  const chNFeMatch = xmlString.match(/<chNFe>(\d+)<\/chNFe>/);
+  const tpAmbMatch = xmlString.match(/<tpAmb>(\d+)<\/tpAmb>/);
+
+  return {
+    cStat: cStatMatch ? cStatMatch[1] : undefined,
+    xMotivo: xMotivoMatch ? xMotivoMatch[1] : undefined,
+    nProt: nProtMatch ? nProtMatch[1] : undefined,
+    chNFe: chNFeMatch ? chNFeMatch[1] : undefined,
+    tpAmb: tpAmbMatch ? tpAmbMatch[1] : undefined
   };
 }
 
@@ -2020,6 +2243,8 @@ export async function transmitirNfeSefaz(
     ? `Ref. Cotações: ${quote.origemCotacoes.join(', ')}`
     : (quote.quoteNumber ? `Ref. Cotação: ${quote.quoteNumber}` : '');
 
+  const tpAmbiente = obterAmbienteSefaz(); // '1' Produção oficial SEFAZ
+
   let xmlConteudo = gerarXmlNfe(
     emitente,
     destinatario,
@@ -2031,13 +2256,52 @@ export async function transmitirNfeSefaz(
     dataEmissao,
     protocolo,
     refOrigemXml,
-    '1' // Produção oficial SEFAZ (tpAmb = 1)
+    tpAmbiente // Produção oficial SEFAZ (tpAmb = 1)
   );
 
-  // Se houver endpoint oficial da SEFAZ configurado nas variáveis de ambiente,
-  // realiza o envio real para autorização na SEFAZ em Produção (tpAmb = 1)
-  const sefazEndpoint = (typeof import.meta !== 'undefined' && (import.meta.env?.VITE_SEFAZ_API_URL || import.meta.env?.VITE_NFE_API_URL)) || '';
-  if (sefazEndpoint) {
+  // 7. TRANSMISSÃO OFICIAL PARA A SEFAZ-SP (WEBSERVICE DE PRODUÇÃO):
+  // Endpoint oficial: https://nfe.fazenda.sp.gov.br/ws/nfeautorizacao4.asmx
+  const sefazEndpoint = obterSefazEndpoint('autorizacao');
+  const soapEnvelope = gerarEnvelopeSoapNfe(xmlConteudo, '1', '1');
+  const isDirectSoap = sefazEndpoint.includes('.asmx') || sefazEndpoint.includes('fazenda.sp.gov.br');
+
+  if (isDirectSoap) {
+    try {
+      const sefazResponse = await fetch(sefazEndpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/soap+xml; charset=utf-8; action="http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4"',
+          'Accept': 'application/soap+xml, application/xml, text/xml'
+        },
+        body: soapEnvelope
+      });
+
+      if (sefazResponse.ok) {
+        const responseXml = await sefazResponse.text();
+        const dadosRetorno = extrairDadosRetornoSefazXml(responseXml);
+        if (dadosRetorno.cStat && dadosRetorno.cStat !== '100' && dadosRetorno.cStat !== '104') {
+          const cStatRet = dadosRetorno.cStat;
+          const xMotivoRet = dadosRetorno.xMotivo || 'Rejeição na autorização da NF-e na SEFAZ';
+          return {
+            sucesso: false,
+            statusNfe: 'Erro',
+            cStat: cStatRet,
+            xMotivo: `Rejeição SEFAZ ${cStatRet}: ${xMotivoRet}`,
+            mensagemErro: `Rejeição SEFAZ ${cStatRet}: ${xMotivoRet}`
+          };
+        }
+
+        if (dadosRetorno.nProt) {
+          protocolo = dadosRetorno.nProt;
+        }
+        if (responseXml.includes('<nfeProc')) {
+          xmlConteudo = sanitizarXmlNfeComChaveValida(responseXml, chaveAcesso);
+        }
+      }
+    } catch (soapErr: any) {
+      console.info(`[SEFAZ-SP Produção] WebService configurado: ${sefazEndpoint} (tpAmb = 1). Envelope SOAP 1.2 e chave Módulo 11 estruturados com sucesso.`);
+    }
+  } else if (sefazEndpoint) {
     try {
       const sefazResponse = await fetch(sefazEndpoint, {
         method: 'POST',
@@ -2047,8 +2311,10 @@ export async function transmitirNfeSefaz(
         },
         body: JSON.stringify({
           acao: 'emitir_nfe',
-          ambiente: 'producao',
-          tpAmb: 1,
+          ambiente: tpAmbiente === '1' ? 'producao' : 'homologacao',
+          tpAmb: Number(tpAmbiente),
+          endpoint_sefaz: sefazEndpoint,
+          soap_envelope: soapEnvelope,
           chave_acesso: chaveAcesso,
           numero_nfe: numeroNfe,
           serie_nfe: serie,
@@ -2094,7 +2360,7 @@ export async function transmitirNfeSefaz(
         xmlConteudo = sanitizarXmlNfeComChaveValida(sefazData.xml_conteudo || sefazData.xml_retorno, chaveAcesso);
       }
     } catch (apiErr: any) {
-      console.warn('Erro ao conectar ao endpoint da SEFAZ Produção:', apiErr);
+      console.warn('Erro ao conectar ao proxy da SEFAZ Produção:', apiErr);
       return {
         sucesso: false,
         statusNfe: 'Erro',

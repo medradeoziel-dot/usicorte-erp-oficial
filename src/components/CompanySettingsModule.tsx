@@ -36,6 +36,7 @@ import {
   DEFAULT_COMPANY_DATA 
 } from '../services/companyService';
 import { formatCNPJ, formatCPF, formatCEP, formatPhone } from '../utils/validators';
+import { SEFAZ_SP_URLS, obterAmbienteSefaz, obterSefazEndpoint } from '../services/nfeService';
 
 interface CompanySettingsModuleProps {
   onBackToDashboard?: () => void;
@@ -1068,22 +1069,46 @@ export default function CompanySettingsModule({ onBackToDashboard }: CompanySett
               </span>
             </div>
 
-            {/* Ambiente SEFAZ Oficial: Produção (tpAmb = 1) */}
-            <div className="md:col-span-12 p-4 bg-slate-950/90 border border-blue-500/30 rounded-xl space-y-2.5">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            {/* Ambiente SEFAZ Oficial: Produção (tpAmb = 1) e WebServices */}
+            <div className="md:col-span-12 p-4 bg-slate-950/90 border border-blue-500/30 rounded-xl space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-800">
                 <div className="flex items-center gap-2">
                   <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></div>
                   <span className="text-xs font-bold text-slate-100 uppercase tracking-wide">
                     Ambiente Oficial SEFAZ: PRODUÇÃO (tpAmb = 1)
                   </span>
                 </div>
-                <span className="px-2.5 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 w-fit">
-                  ✓ Validade Jurídica & Base Nacional
-                </span>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="px-2.5 py-0.5 rounded text-[10px] font-mono font-bold bg-blue-500/20 text-blue-300 border border-blue-500/40">
+                    SEFAZ-SP (São Paulo)
+                  </span>
+                  <span className="px-2.5 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                    ✓ Validade Jurídica & Base Nacional
+                  </span>
+                </div>
               </div>
+
               <p className="text-[11px] text-slate-300 leading-relaxed">
                 Todas as notas fiscais emitidas pelo sistema são geradas no ambiente de <strong>Produção (tpAmb = 1)</strong>, com chave de acesso de 44 dígitos calculada com precisão absoluta pelo algoritmo oficial <strong>Módulo 11 do Manual da SEFAZ</strong>, assegurando que o Dígito Verificador (cDV) coincida perfeitamente e que a nota possa ser consultada no Portal Nacional da NF-e (<code>nfe.fazenda.gov.br</code>).
               </p>
+
+              {/* Endpoints WebServices Oficiais SEFAZ-SP */}
+              <div className="p-3 bg-slate-900/80 rounded-lg border border-slate-800 space-y-2 text-[11px]">
+                <div className="text-xs font-bold text-slate-200 flex items-center justify-between">
+                  <span>WebServices Oficiais de Produção (SEFAZ-SP):</span>
+                  <span className="font-mono text-[10px] text-emerald-400">SOAP 1.2 / XML v4.00</span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[10px] font-mono">
+                  <div className="p-2 rounded bg-slate-950 border border-slate-800 space-y-0.5">
+                    <span className="text-slate-500 block uppercase font-bold text-[9px]">Autorização / Envio (NFeAutorizacao4):</span>
+                    <span className="text-blue-300 select-all break-all">https://nfe.fazenda.sp.gov.br/ws/nfeautorizacao4.asmx</span>
+                  </div>
+                  <div className="p-2 rounded bg-slate-950 border border-slate-800 space-y-0.5">
+                    <span className="text-slate-500 block uppercase font-bold text-[9px]">Eventos / Cancelamento (NFeRecepcaoEvento4):</span>
+                    <span className="text-blue-300 select-all break-all">https://nfe.fazenda.sp.gov.br/ws/nferecepcaoevento4.asmx</span>
+                  </div>
+                </div>
+              </div>
             </div>
 
             {/* Card Demonstrativo da Prévia da NF-e */}
