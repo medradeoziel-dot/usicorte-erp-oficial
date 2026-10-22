@@ -566,7 +566,7 @@ export async function fetchEstoqueMovimentacoesDb(): Promise<any[]> {
 
 export async function fetchMateriaisEstoqueDb(): Promise<MaterialEstoque[]> {
   try {
-    // 1. Tenta buscar da tabela 'estoque' com ordenação por nome (order=nome.asc)
+    // 1. Tenta buscar da tabela oficial 'estoque' com ordenação por nome (order=nome.asc)
     const { data: estoqueData, error: estoqueError, status: estoqueStatus } = await db
       .from('estoque')
       .select('*')
@@ -576,22 +576,6 @@ export async function fetchMateriaisEstoqueDb(): Promise<MaterialEstoque[]> {
       const mapped = estoqueData.map(mapSupabaseToMaterial);
       cacheMateriais = mapped;
       return mapped;
-    }
-
-    // 2. Tenta tabela alternativa 'estoque_materiais' caso 'estoque' não retorne itens
-    try {
-      const { data: matData, error: matError, status: matStatus } = await db
-        .from('estoque_materiais')
-        .select('*')
-        .order('nome', { ascending: true });
-
-      if (!matError && matStatus !== 404 && !isNotFoundError(matError, matStatus) && matData && matData.length > 0) {
-        const mapped = matData.map(mapSupabaseToMaterial);
-        cacheMateriais = mapped;
-        return mapped;
-      }
-    } catch {
-      // Silencioso
     }
   } catch {
     // Silencioso
@@ -618,17 +602,11 @@ export async function saveMaterialEstoqueDb(material: MaterialEstoque): Promise<
       payloadEstoque.id = material.id;
     }
 
-    const { error: estErr } = await db
+    await db
       .from('estoque')
       .upsert(payloadEstoque)
       .select()
       .maybeSingle();
-
-    // Sincroniza também com a tabela detalhada 'estoque_materiais'
-    const payloadMat = mapMaterialToSupabase(material);
-    payloadMat.peso_total_kg = pesoKgReal;
-    payloadMat.quantidade = pesoKgReal; // Saldo principal em KG
-    await db.from('estoque_materiais').upsert(payloadMat, { onConflict: 'id' });
   } catch (e: any) {
     // Captura qualquer exceção sem travar a aplicação
   }
@@ -642,7 +620,7 @@ export async function saveMaterialEstoqueDb(material: MaterialEstoque): Promise<
 }
 
 /**
- * Salva múltiplos materiais simultaneamente no Supabase (tabela 'estoque' e 'estoque_materiais'),
+ * Salva múltiplos materiais simultaneamente no Supabase na tabela 'estoque',
  * persistindo a quantidade principal estritamente em KG.
  */
 export async function saveMultiplosMateriaisEstoqueDb(
@@ -671,18 +649,7 @@ export async function saveMultiplosMateriaisEstoqueDb(
     // Envia upsert em batch para a tabela 'estoque'
     await db.from('estoque').upsert(payloadEstoqueBatch).select();
 
-    // 2. Sincroniza em batch na tabela detalhada 'estoque_materiais'
-    const payloadDetalhadoBatch = materiaisParaSalvar.map(material => {
-      const payloadMat = mapMaterialToSupabase(material);
-      const pesoKgReal = Number((material.pesoTotalKg ?? 0).toFixed(2));
-      payloadMat.peso_total_kg = pesoKgReal;
-      payloadMat.quantidade = pesoKgReal; // Saldo principal em KG
-      return payloadMat;
-    });
-
-    await db.from('estoque_materiais').upsert(payloadDetalhadoBatch, { onConflict: 'id' });
-
-    // 3. Atualiza cache em memória
+    // 2. Atualiza cache em memória
     for (const material of materiaisParaSalvar) {
       const idx = cacheMateriais.findIndex(m => m.id === material.id);
       if (idx >= 0) cacheMateriais[idx] = material;
@@ -707,7 +674,6 @@ export async function deleteMaterialEstoqueDb(id: string): Promise<{ error: any 
     if (isUuid(id)) {
       await db.from('estoque').delete().eq('id', id);
     }
-    await db.from('estoque_materiais').delete().eq('id', id);
   } catch (e: any) {
     // Silently continue
   }

@@ -903,13 +903,15 @@ export async function parseRequestBodyIfNeeded(req: any): Promise<void> {
 export async function sefazSoapHandler(req: any, res: any): Promise<void> {
   // CORS Headers padrão
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, HEAD');
-  res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, SOAPAction, action, x-custom-header');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, DELETE, HEAD');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Origin, X-Requested-With, Accept, SOAPAction, action, x-custom-header, *');
+  res.setHeader('Access-Control-Max-Age', '86400');
 
   if (req.method === 'OPTIONS') {
-    res.statusCode = 204;
-    res.end();
-    return;
+    res.statusCode = 200;
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Length', '0');
+    return res.end();
   }
 
   // Requisição GET devolve diagnóstico informativo evitando erro 404 em testes pelo navegador
@@ -983,6 +985,29 @@ export async function sefazSoapHandler(req: any, res: any): Promise<void> {
 
     const dadosEstruturados = extrairDadosRetornoSefazXmlServer(response.data);
 
+    // Se a SEFAZ recusou mTLS (403), devolve diagnóstico com HTTP 200 no proxy
+    if (response.status === 403) {
+      sendJson(res, 200, {
+        ok: false,
+        statusHttp: 403,
+        codigo: 'SEFAZ_403_CERTIFICADO_EXIGIDO',
+        cStat: '403',
+        xMotivo: 'Acesso recusado pela SEFAZ (403 Forbidden). O Certificado Digital A1 (.pfx) é obrigatório para autenticar a conexão com a SEFAZ-SP.',
+        mensagem: 'Acesso recusado pela SEFAZ (403 Forbidden). O Certificado Digital A1 (.pfx) é obrigatório para autenticar a conexão com a SEFAZ-SP.',
+        detalhe: 'A SEFAZ-SP exige autenticação mTLS com certificado digital ICP-Brasil válido emitido para o CNPJ 25.038.430/0001-23. Resposta original da SEFAZ: 403 Forbidden: Access is denied.',
+        sugestao: 'Configure o arquivo do Certificado Digital A1 (.pfx) e a senha correspondente nas Configurações da Empresa no ERP.',
+        tpAmb,
+        ambiente: tpAmb === 1 ? 'producao' : 'homologacao',
+        servico,
+        endpoint,
+        soapAction,
+        chaveAcesso,
+        xml: response.data,
+        xmlRetorno: response.data
+      });
+      return;
+    }
+
     sendJson(res, response.status, {
       ok: response.status >= 200 && response.status < 300,
       statusHttp: response.status,
@@ -1029,10 +1054,10 @@ export function createSefazExpressApp(): express.Express {
   // CORS Global
   app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, HEAD');
-    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, SOAPAction, action, x-custom-header');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, DELETE, HEAD');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Origin, X-Requested-With, Accept, SOAPAction, action, x-custom-header, *');
     if (req.method === 'OPTIONS') {
-      return res.sendStatus(204);
+      return res.status(200).end();
     }
     next();
   });

@@ -20,7 +20,7 @@ import { clientes as mockClientes, pedidosPorCliente as mockPedidos, itensPorPed
 import type { ViewType, ItemPedido, Cliente as LocalCliente, Pedido } from "@/lib/types";
 import type { Quote } from "@/types";
 import { useLocalStorage } from "@/lib/useLocalStorage";
-import { db, fetchCotacaoById, type SupabaseCotacao, type SupabaseCliente, type SupabaseCotacaoItem, type StatusCotacao, uploadDesenhoStorage } from "@/lib/db";
+import { db, isUuid, fetchCotacaoById, type SupabaseCotacao, type SupabaseCliente, type SupabaseCotacaoItem, type StatusCotacao, uploadDesenhoStorage } from "@/lib/db";
 import LabelPreview from "@/components/LabelPreview";
 import A4Preview from "@/components/A4Preview";
 import { fileToDxfImage, isDxfFile, renderDxfToDataUrl } from "@/utils/dxfRenderer";
@@ -60,15 +60,21 @@ export default function Proposals() {
     if (!targetId) return null;
     setIsLoadingDb(true);
     try {
-      // 1. Busca filtrada especificamente por ID no banco Supabase
-      let { data: cot, error } = await db
-        .from("cotacoes")
-        .select("*, cotacao_itens(*)")
-        .eq("id", targetId)
-        .maybeSingle();
+      // 1. Busca filtrada especificamente por ID no banco Supabase apenas se for UUID
+      let cot: any = null;
+      let error: any = null;
+      if (isUuid(targetId)) {
+        const res = await db
+          .from("cotacoes")
+          .select("*, cotacao_itens(*)")
+          .eq("id", targetId)
+          .maybeSingle();
+        cot = res.data;
+        error = res.error;
+      }
 
-      // Fallback para busca por número da cotação
-      if (!cot || error) {
+      // Fallback para busca por número textual da cotação (ex: COT-2026-000983)
+      if (!cot) {
         const res = await db
           .from("cotacoes")
           .select("*, cotacao_itens(*)")
@@ -268,11 +274,12 @@ export default function Proposals() {
         .select("*")
         .order("nome", { ascending: true });
 
-      // 2. Cotações do Supabase
+      // 2. Cotações do Supabase (limitado a 50 para evitar erro 500 por timeout de statement no Supabase)
       const { data: supaCotacoes, error: errCotacoes, status: statusCotacoes } = await db
         .from("cotacoes")
         .select("*, cotacao_itens(*)")
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: false })
+        .limit(50);
 
       let currentClientsList = [...mockClientes];
       if (!errClientes && statusClientes !== 404 && supaClientes && supaClientes.length > 0) {

@@ -1532,7 +1532,7 @@ export async function cancelarNotaFiscalSupabase(params: {
       if (isUuid(idOrNum)) {
         await db.from('cotacoes').update(cotPayloadUpdate).eq('id', idOrNum);
       } else {
-        await db.from('cotacoes').update(cotPayloadUpdate).or(`id.eq.${idOrNum},numero.eq.${idOrNum}`);
+        await db.from('cotacoes').update(cotPayloadUpdate).eq('numero', idOrNum);
       }
     }
 
@@ -1711,7 +1711,7 @@ export async function fetchCotacoesDb(
       q = q.lte('data', options.dataFim);
     }
 
-    // 5. Paginação e Limites: aplica apenas se explicitamente configurado pelo chamador
+    // 5. Paginação e Limites: aplica limite padrão de 50 para evitar erro 500 (Timeout / 57014) no Supabase
     if (options?.page && options.page > 0) {
       const limit = options?.limit ?? 50;
       const from = (options.page - 1) * limit;
@@ -1724,6 +1724,9 @@ export async function fetchCotacoesDb(
       q = q.range(from, to);
     } else if (options?.limit && options.limit > 0) {
       q = q.limit(options.limit);
+    } else {
+      // Limite padrão seguro de 50 registros para evitar estouro de tempo (500 Timeout no Supabase)
+      q = q.limit(50);
     }
 
     let { data, error, status } = await q;
@@ -1756,6 +1759,8 @@ export async function fetchCotacoesDb(
       }
       if (options?.limit && options.limit > 0) {
         retryQ = retryQ.limit(options.limit);
+      } else {
+        retryQ = retryQ.limit(50);
       }
       const retryRes = await retryQ;
       data = retryRes.data;
@@ -1899,7 +1904,10 @@ export async function updateCotacaoStatusDb(
   // Se a tabela cotacao_itens tiver o campo status ou updated_at, sincroniza os itens pertencentes a essa cotação
   if (targetId) {
     try {
-      await db.from('cotacao_itens').update({ updated_at: new Date().toISOString() }).eq('cotacao_id', targetId);
+      const uuidItens = isUuid(targetId) ? targetId : await resolveCotacaoUuid(targetId);
+      if (uuidItens && isUuid(uuidItens)) {
+        await db.from('cotacao_itens').update({ updated_at: new Date().toISOString() }).eq('cotacao_id', uuidItens);
+      }
     } catch (_) {
       // silencioso se cotacao_itens não tiver os campos
     }
@@ -2347,8 +2355,8 @@ export async function fetchCotacaoById(idOrNumero: string): Promise<SupabaseCota
       }
     }
 
-    // 3. Fallback adicional por ID sem restrição de regex UUID (ex: id numérico)
-    if (!cotacao) {
+    // 3. Fallback adicional por ID apenas se for UUID válido (evita erro 400 de sintaxe uuid)
+    if (!cotacao && isUuid(clean)) {
       const { data: dataFallback } = await db
         .from('cotacoes')
         .select('*')
@@ -2386,14 +2394,15 @@ export async function fetchCotacaoById(idOrNumero: string): Promise<SupabaseCota
       return [];
     };
 
-    // Busca direta pelo UUID / ID da cotação
-    if (cotacao.id) {
+    // Busca direta pelo UUID da cotação (o campo cotacao_id em cotacao_itens é UUID)
+    if (cotacao.id && isUuid(String(cotacao.id))) {
       itensDaCotacao = await buscarItensSemLimite('cotacao_id', String(cotacao.id));
-    }
-
-    // Se não encontrou por ID, ou se os itens foram associados pelo campo 'numero'
-    if (itensDaCotacao.length === 0 && cotacao.numero) {
-      itensDaCotacao = await buscarItensSemLimite('cotacao_id', String(cotacao.numero));
+    } else if (cotacao.numero) {
+      // Se cotacao.id não for UUID, busca o UUID real da cotação
+      const uuid = await resolveCotacaoUuid(String(cotacao.numero));
+      if (uuid && isUuid(uuid)) {
+        itensDaCotacao = await buscarItensSemLimite('cotacao_id', uuid);
+      }
     }
 
     cotacao.cotacao_itens = itensDaCotacao;
@@ -2428,31 +2437,21 @@ export async function fetchItensByCotacaoId(cotacaoIdOrNumero: string): Promise<
       return [];
     };
 
-    // 1. Busca direta por cotacao_id sem qualquer restrição de limite
-    let itens = await buscarItensSemLimite('cotacao_id', clean);
-    if (itens && itens.length > 0) {
-      return itens;
-    }
+    let itens: SupabaseCotacaoItem[] = [];
 
-    // 2. Se clean for número de cotação (ex: COT-2026-0001), resolve o UUID correspondente
-    if (!isUuid(clean)) {
-      const uuid = await resolveCotacaoUuid(clean);
-      if (uuid) {
-        itens = await buscarItensSemLimite('cotacao_id', uuid);
-        if (itens && itens.length > 0) {
-          return itens;
-        }
+    // 1. Se clean já for um UUID válido, busca direto por cotacao_id
+    if (isUuid(clean)) {
+      itens = await buscarItensSemLimite('cotacao_id', clean);
+      if (itens && itens.length > 0) {
+        return itens;
       }
     } else {
-      // 3. Se clean for UUID, busca o número da cotação e consulta por ele
-      const { data: cotData } = await db
-        .from('cotacoes')
-        .select('numero')
-        .eq('id', clean)
-        .maybeSingle();
-
-      if (cotData?.numero) {
-        itens = await buscarItensSemLimite('cotacao_id', cotData.numero);
+      // 2. Se clean for código textual (ex: COT-2026-000983), resolve PRIMEIRO o UUID da cotação!
+      // O campo cotacao_id na tabela cotacao_itens é do tipo UUID no PostgreSQL.
+      // Passar uma string como "COT-2026-000983" diretamente no eq('cotacao_id', ...) gerava Erro 400.
+      const uuid = await resolveCotacaoUuid(clean);
+      if (uuid && isUuid(uuid)) {
+        itens = await buscarItensSemLimite('cotacao_id', uuid);
         if (itens && itens.length > 0) {
           return itens;
         }

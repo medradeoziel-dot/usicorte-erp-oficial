@@ -93,7 +93,8 @@ export default function AndamentoMovimentacoesModule({
         const { data: dbData, error: dbErr } = await db
           .from('cotacoes')
           .select('*, cotacao_itens(*)')
-          .order('created_at', { ascending: false });
+          .order('created_at', { ascending: false })
+          .limit(50);
 
         if (!dbErr && Array.isArray(dbData)) {
           dbData.forEach((q: any) => {
