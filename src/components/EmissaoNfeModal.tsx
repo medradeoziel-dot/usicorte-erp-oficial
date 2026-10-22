@@ -455,14 +455,12 @@ export default function EmissaoNfeModal({
     return primeiro || '101';
   }, [itensFiscais]);
 
-  // 4. Confirmar & Transmitir SEFAZ com travas anti-duplicidade
+  // 4. Confirmar & Transmitir SEFAZ com envio direto via proxy
   const handleTransmitirSefaz = async () => {
-    if (bloqueioSefazAte && bloqueioSefazAte > Date.now()) {
-      setErrorMessage(msgBloqueio(bloqueioSefazAte));
-      return;
-    }
     setIsTransmitting(true);
     setErrorMessage(null);
+    setBloqueioSefazAte(null);
+    try { localStorage.removeItem(chaveBloqueioSefaz); } catch {}
 
     // TRAVA DE SEGURANÇA 1: Se o documento já estiver em estado Pendente ou possuir recibo gravado,
     // executa consulta prévia imediata na SEFAZ para evitar duplicidade de nota (Rejeição 204)
@@ -574,6 +572,7 @@ export default function EmissaoNfeModal({
         // 1. AÇÃO AUTOMÁTICA PÓS-AUTORIZAÇÃO (STATUS 100):
         // Dispara imediatamente o Modal/Visualizador do DANFE em PDF
         // e aciona a impressão automática / salvar como PDF do sistema
+        setShowPreDanfeModal(false);
         setShowDanfeOficialModal(true);
         setAutoPrintDanfe(true);
 
@@ -867,7 +866,7 @@ export default function EmissaoNfeModal({
                     <button
                       type="button"
                       onClick={handleConsultarStatusOuRecibo}
-                      disabled={isConsultingRecibo || isTransmitting || sefazBloqueada}
+                      disabled={isConsultingRecibo || isTransmitting}
                       className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-lg transition-colors flex items-center gap-2 cursor-pointer shadow-sm text-xs disabled:opacity-50"
                     >
                       {isConsultingRecibo ? (
@@ -987,14 +986,14 @@ export default function EmissaoNfeModal({
             );
           })()}
 
-          {/* Erro Banner */}
+          {/* Aviso Informativo 656 */}
           {sefazBloqueada && (
             <div className="p-4 rounded-xl bg-amber-950/70 border border-amber-500/50 text-amber-200 flex items-start gap-3">
               <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
               <div className="space-y-1">
-                <h4 className="font-bold text-sm">Bloqueio temporário da SEFAZ (656 - Consumo Indevido)</h4>
+                <h4 className="font-bold text-sm">Aviso de Espera Recomendada da SEFAZ (656 - Consumo Indevido)</h4>
                 <p className="text-xs leading-relaxed">
-                  A SEFAZ bloqueou esta nota por excesso de tentativas. Os botões de transmitir e consultar ficam travados por mais {minutosBloqueio} min (liberação às {horaLiberacao}). Não é preciso fazer nada: após esse horário, clique uma única vez em "Confirmar & Transmitir SEFAZ".
+                  A SEFAZ reportou consumo indevido recentemente para esta consulta/recibo. Recomenda-se aguardar cerca de {minutosBloqueio} min (até {horaLiberacao}) para evitar rejeição repetida, ou clicar diretamente em "Confirmar & Transmitir SEFAZ" para reprocessar a emissão.
                 </p>
               </div>
             </div>
@@ -1375,7 +1374,7 @@ export default function EmissaoNfeModal({
                 <button
                   type="button"
                   onClick={() => setShowPreDanfeModal(true)}
-                  disabled={isTransmitting || loadingCompany || sefazBloqueada}
+                  disabled={isTransmitting}
                   className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-indigo-300 hover:text-indigo-200 border border-indigo-500/40 hover:border-indigo-400 font-bold text-xs rounded-xl transition-all shadow-sm flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                   title="Visualizar modelo de conferência (Pré-DANFE) antes de transmitir para a SEFAZ"
                 >
@@ -1387,7 +1386,7 @@ export default function EmissaoNfeModal({
                   <button
                     type="button"
                     onClick={handleConsultarStatusOuRecibo}
-                    disabled={isConsultingRecibo || isTransmitting || sefazBloqueada}
+                    disabled={isConsultingRecibo || isTransmitting}
                     className="px-4 py-2.5 bg-amber-600 hover:bg-amber-500 active:bg-amber-700 text-white font-bold text-xs rounded-xl transition-all shadow-md shadow-amber-600/30 flex items-center gap-2 cursor-pointer disabled:opacity-50"
                     title="Consultar processamento do recibo ou situação da chave na SEFAZ sem retransmitir"
                   >
@@ -1409,18 +1408,18 @@ export default function EmissaoNfeModal({
                 <button
                   type="button"
                   onClick={handleTransmitirSefaz}
-                  disabled={isTransmitting || loadingCompany || sefazBloqueada}
+                  disabled={isTransmitting}
                   className="px-5 py-2.5 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-bold text-xs rounded-xl transition-all shadow-lg shadow-indigo-600/30 flex items-center gap-2 cursor-pointer disabled:opacity-50"
                 >
                   {isTransmitting ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin text-white" />
-                      <span>Transmitindo para SEFAZ...</span>
+                      <span>Transmitindo...</span>
                     </>
                   ) : (
                     <>
                       <Send className="w-4 h-4" />
-                      <span>{sefazBloqueada ? `Bloqueado pela SEFAZ - liberado às ${horaLiberacao}` : 'Confirmar & Transmitir SEFAZ'}</span>
+                      <span>Confirmar & Transmitir SEFAZ</span>
                     </>
                   )}
                 </button>
@@ -1491,6 +1490,37 @@ export default function EmissaoNfeModal({
                 Cotação nº {quote.quoteNumber}
               </span>
             </div>
+
+            {/* Banner de Feedback e Retorno da SEFAZ na Prévia */}
+            {isTransmitting && (
+              <div className="px-5 py-3 bg-indigo-950/90 border-b border-indigo-500/60 text-indigo-200 flex items-center gap-3 text-xs shrink-0 animate-in fade-in">
+                <Loader2 className="w-5 h-5 text-indigo-400 animate-spin shrink-0" />
+                <div>
+                  <h4 className="font-bold text-sm text-indigo-100">Transmitindo NF-e para a SEFAZ...</h4>
+                  <p className="text-xs text-indigo-300">Conectando ao WebService oficial da SEFAZ via proxy para autorização fiscal.</p>
+                </div>
+              </div>
+            )}
+            {errorMessage && (
+              <div className="px-5 py-3 bg-rose-950/90 border-b border-rose-500/60 text-rose-200 flex items-start gap-3 text-xs shrink-0 animate-in fade-in">
+                <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <h4 className="font-bold text-sm text-rose-200">Retorno da SEFAZ: Rejeição na Transmissão</h4>
+                  <p className="text-xs text-rose-300 font-mono leading-relaxed">{errorMessage}</p>
+                </div>
+              </div>
+            )}
+            {transmissionResult?.sucesso && (
+              <div className="px-5 py-3 bg-emerald-950/90 border-b border-emerald-500/60 text-emerald-200 flex items-start gap-3 text-xs shrink-0 animate-in fade-in">
+                <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <h4 className="font-bold text-sm text-emerald-200">Retorno da SEFAZ: NF-e Autorizada com Sucesso!</h4>
+                  <p className="text-xs text-emerald-300 font-mono">
+                    Protocolo: <strong>{transmissionResult.protocolo || 'Confirmado'}</strong> | Chave: <strong>{transmissionResult.nfeChave || currentQuoteState.nfe_chave}</strong>
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* Corpo Espelho da DANFE (Layout Fiscal em Papel Branco A4) */}
             <div className="p-6 overflow-y-auto flex-1 bg-slate-950/60 flex justify-center">
@@ -1729,15 +1759,21 @@ export default function EmissaoNfeModal({
 
                 <button
                   type="button"
-                  onClick={() => {
-                    setShowPreDanfeModal(false);
-                    handleTransmitirSefaz();
-                  }}
-                  disabled={isTransmitting || loadingCompany || sefazBloqueada}
+                  onClick={handleTransmitirSefaz}
+                  disabled={isTransmitting}
                   className="px-5 py-2.5 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-bold text-xs rounded-xl transition-all shadow-lg shadow-indigo-600/30 flex items-center gap-2 cursor-pointer disabled:opacity-50"
                 >
-                  <Send className="w-4 h-4" />
-                  <span>{sefazBloqueada ? `Bloqueado pela SEFAZ - liberado às ${horaLiberacao}` : 'Confirmar & Transmitir SEFAZ'}</span>
+                  {isTransmitting ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-white" />
+                      <span>Transmitindo...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Send className="w-4 h-4" />
+                      <span>Confirmar & Transmitir SEFAZ</span>
+                    </>
+                  )}
                 </button>
               </div>
             </div>

@@ -17,7 +17,8 @@ import {
   isNfeAutorizada,
   isNfeCancelada,
   downloadXmlCancelamento,
-  obterNomePadraoDanfePdf
+  obterNomePadraoDanfePdf,
+  transmitirNfeSefaz
 } from '../services/nfeService';
 import CancelarNfeModal from './CancelarNfeModal';
 import { formatCurrency, formatSafeDate } from '../utils/calculator';
@@ -26,6 +27,7 @@ import {
   Printer, 
   ExternalLink, 
   Send, 
+  Loader2,
   FileText, 
   CheckCircle2, 
   AlertTriangle,
@@ -233,18 +235,76 @@ export default function DanfeEspelhoA4Modal({
 
   const diferencaDuplicatas = Number((valorTotalNota - somaDuplicatas).toFixed(2));
 
-  if (!isOpen || !quote) return null;
-
   const [currentQuoteState, setCurrentQuoteState] = useState<Quote>(quote);
   const [showCancelarModal, setShowCancelarModal] = useState<boolean>(false);
+  const [isTransmittingLocal, setIsTransmittingLocal] = useState<boolean>(false);
+  const [sefazFeedback, setSefazFeedback] = useState<{
+    tipo: 'sucesso' | 'erro';
+    mensagem: string;
+    chave?: string;
+    protocolo?: string;
+  } | null>(null);
+
+  const isSending = Boolean(isTransmittingLocal || isTransmitting);
 
   useEffect(() => {
     setCurrentQuoteState(quote);
   }, [quote]);
 
-  const isCancelada = isNfeCancelada(currentQuoteState.status_nfe);
-  const isAutorizada = isNfeAutorizada(currentQuoteState.status_nfe);
+  const isCancelada = isNfeCancelada(currentQuoteState?.status_nfe);
+  const isAutorizada = isNfeAutorizada(currentQuoteState?.status_nfe);
   const isPrevia = isPreviaProp !== undefined ? isPreviaProp : (!isAutorizada && !isCancelada);
+
+  const handleTransmitirSefaz = async () => {
+    if (isSending) return;
+    setIsTransmittingLocal(true);
+    setSefazFeedback(null);
+
+    try {
+      if (onTransmit) {
+        await onTransmit();
+        return;
+      }
+
+      // Transmissão direta para a API da SEFAZ (via proxy Vercel)
+      const res = await transmitirNfeSefaz(currentQuoteState, client);
+      if (res.sucesso && res.statusNfe === 'Emitida') {
+        const updatedQuote: Quote = {
+          ...currentQuoteState,
+          status_nfe: 'Emitida',
+          nfe_chave: res.nfeChave,
+          nfe_numero: res.nfeNumero,
+          serie_nfe: res.serie,
+          danfe_url: res.danfeUrl,
+          xml_url: res.xmlUrl,
+          xml_conteudo: res.xmlConteudo,
+          mensagem_erro_nfe: undefined,
+          nfe_emitida_em: res.dataEmissao
+        };
+        setCurrentQuoteState(updatedQuote);
+        if (onQuoteUpdated) onQuoteUpdated(updatedQuote);
+        setSefazFeedback({
+          tipo: 'sucesso',
+          mensagem: `NF-e emitida e autorizada com sucesso pela SEFAZ!`,
+          chave: res.nfeChave,
+          protocolo: res.protocolo
+        });
+      } else {
+        const msg = res.mensagemErro || res.xMotivo || 'Rejeição na emissão pela SEFAZ.';
+        setSefazFeedback({
+          tipo: 'erro',
+          mensagem: msg
+        });
+      }
+    } catch (err: any) {
+      setSefazFeedback({
+        tipo: 'erro',
+        mensagem: err?.message || 'Falha na comunicação com o servidor da SEFAZ.'
+      });
+    } finally {
+      setIsTransmittingLocal(false);
+    }
+  };
 
   // Captura antes e depois da impressão (inclusive via Ctrl+P) para isolamento do DANFE
   useEffect(() => {
@@ -463,6 +523,41 @@ export default function DanfeEspelhoA4Modal({
             </button>
           </div>
         </div>
+
+        {/* Banner de Feedback e Retorno da SEFAZ */}
+        {isSending && (
+          <div className="px-5 py-3 bg-blue-950/90 border-b border-blue-500/60 text-blue-200 flex items-center gap-3 text-xs shrink-0 animate-in fade-in no-print">
+            <Loader2 className="w-5 h-5 text-blue-400 animate-spin shrink-0" />
+            <div>
+              <h4 className="font-bold text-sm text-blue-100">Transmitindo NF-e para a SEFAZ...</h4>
+              <p className="text-xs text-blue-300">Conectando ao WebService da SEFAZ via proxy para autorização fiscal.</p>
+            </div>
+          </div>
+        )}
+        {sefazFeedback && (
+          <div className={`px-5 py-3 border-b text-xs flex items-start gap-3 shrink-0 animate-in fade-in no-print ${
+            sefazFeedback.tipo === 'sucesso' 
+              ? 'bg-emerald-950/90 border-emerald-500/60 text-emerald-200' 
+              : 'bg-rose-950/90 border-rose-500/60 text-rose-200'
+          }`}>
+            {sefazFeedback.tipo === 'sucesso' ? (
+              <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+            ) : (
+              <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+            )}
+            <div className="space-y-1">
+              <h4 className="font-bold text-sm">
+                {sefazFeedback.tipo === 'sucesso' ? 'Retorno SEFAZ: NF-e Autorizada com Sucesso!' : 'Retorno SEFAZ: Rejeição na Transmissão'}
+              </h4>
+              <p className="text-xs font-mono leading-relaxed">{sefazFeedback.mensagem}</p>
+              {sefazFeedback.chave && (
+                <p className="text-[11px] text-emerald-300 font-mono mt-0.5">
+                  Chave: <strong>{sefazFeedback.chave}</strong> {sefazFeedback.protocolo ? `| Protocolo: ${sefazFeedback.protocolo}` : ''}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* 1. Barra de Confirmação do Destinatário Real Carregado do Supabase */}
         <div className="px-5 py-2 bg-slate-950/80 border-b border-slate-800 text-xs flex items-center justify-between flex-wrap gap-2 text-slate-300 shrink-0 no-print">
@@ -978,17 +1073,6 @@ export default function DanfeEspelhoA4Modal({
 
                 <button
                   type="button"
-                  onClick={handleDownloadXml}
-                  disabled={isDownloadingXml}
-                  className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-sm disabled:opacity-50"
-                  title="Baixar arquivo XML da NF-e autorizado pela SEFAZ"
-                >
-                  <Download className="w-4 h-4 text-emerald-400" />
-                  <span>{isDownloadingXml ? 'Baixando...' : 'Baixar XML'}</span>
-                </button>
-
-                <button
-                  type="button"
                   onClick={handleEnviarEmail}
                   className="px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-indigo-500/30 font-semibold text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
                   title="Enviar DANFE e chave da NF-e por e-mail para o cliente"
@@ -1010,18 +1094,24 @@ export default function DanfeEspelhoA4Modal({
               <span>Imprimir DANFE</span>
             </button>
 
-            {isPrevia && onTransmit && (
+            {isPrevia && (
               <button
                 type="button"
-                onClick={() => {
-                  onClose();
-                  onTransmit();
-                }}
-                disabled={isTransmitting}
+                onClick={handleTransmitirSefaz}
+                disabled={isSending}
                 className="px-5 py-2.5 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-bold text-xs rounded-xl transition-all shadow-lg shadow-indigo-600/30 flex items-center gap-2 cursor-pointer disabled:opacity-50"
               >
-                <Send className="w-4 h-4" />
-                <span>Confirmar & Transmitir SEFAZ</span>
+                {isSending ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-white" />
+                    <span>Transmitindo...</span>
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-4 h-4" />
+                    <span>Confirmar & Transmitir SEFAZ</span>
+                  </>
+                )}
               </button>
             )}
           </div>

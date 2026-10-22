@@ -38,6 +38,15 @@ function getUrlQuoteId(): string | null {
   return searchParams.get("id") || searchParams.get("cotacaoId") || searchParams.get("pedidoId") || searchParams.get("numero") || null;
 }
 
+export function normalizeProposalStatus(rawStatus?: string): 'Pendente' | 'Aprovado' | 'Cancelado' | 'Rascunho' {
+  if (!rawStatus) return 'Pendente';
+  const clean = rawStatus.trim().toLowerCase();
+  if (clean === 'aprovado') return 'Aprovado';
+  if (clean === 'cancelado' || clean === 'rejeitado' || clean === 'reprovado') return 'Cancelado';
+  if (clean === 'pendente' || clean === 'enviado' || clean.includes('analise') || clean.includes('análise')) return 'Pendente';
+  return 'Rascunho';
+}
+
 export default function Proposals() {
   // Lista de clientes e pedidos carregados do banco / mock
   const [dbClientes, setDbClientes] = useState<LocalCliente[]>(mockClientes);
@@ -137,7 +146,7 @@ export default function Proposals() {
         const novoPedidoObj: Pedido = {
           id: numId,
           data: cot.data || new Date().toISOString().slice(0, 10),
-          status: cot.status === 'aprovado' ? 'Aprovado' : cot.status === 'rejeitado' ? 'Cancelado' : cot.status === 'pendente' ? 'Pendente' : 'Rascunho',
+          status: normalizeProposalStatus(cot.status),
           clienteNome: cotClienteNome,
           total: Number(cot.valor_total) || 0,
         };
@@ -227,7 +236,7 @@ export default function Proposals() {
           const novoPedidoObj: Pedido = {
             id: numId,
             data: cot.date || new Date().toISOString().slice(0, 10),
-            status: cot.status === 'Aprovado' ? 'Aprovado' : cot.status === 'Cancelado' ? 'Cancelado' : cot.status === 'Enviado' ? 'Pendente' : 'Rascunho',
+            status: normalizeProposalStatus(cot.status),
             clienteNome: cotClienteNome,
             total: Number(cot.grandTotal || cot.subtotalTotal) || 0,
           };
@@ -274,12 +283,44 @@ export default function Proposals() {
         .select("*")
         .order("nome", { ascending: true });
 
-      // 2. Cotações do Supabase (limitado a 30 para resposta ultra-rápida)
-      const { data: supaCotacoes, error: errCotacoes, status: statusCotacoes } = await db
+      // 2. Cotações do Supabase (limitado a 30 com filtro padrão por status Pendente ou pendente)
+      let supaCotacoes: any[] | null = null;
+      let errCotacoes: any = null;
+      let statusCotacoes: number | undefined = undefined;
+
+      const resWithFilter = await db
         .from("cotacoes")
         .select("*, cotacao_itens(*)")
+        .or("status.eq.Pendente,status.eq.pendente")
         .order("created_at", { ascending: false })
         .limit(30);
+
+      if (!resWithFilter.error && resWithFilter.data && resWithFilter.data.length > 0) {
+        supaCotacoes = resWithFilter.data;
+        statusCotacoes = resWithFilter.status;
+      } else {
+        // Fallback: se houver particularidade no OR, busca com .in('status', ['Pendente', 'pendente'])
+        const resIn = await db
+          .from("cotacoes")
+          .select("*, cotacao_itens(*)")
+          .in("status", ["Pendente", "pendente"])
+          .order("created_at", { ascending: false })
+          .limit(30);
+        if (!resIn.error && resIn.data && resIn.data.length > 0) {
+          supaCotacoes = resIn.data;
+          statusCotacoes = resIn.status;
+        } else {
+          // Fallback adicional preservando ordenação e limite de 30
+          const resAll = await db
+            .from("cotacoes")
+            .select("*, cotacao_itens(*)")
+            .order("created_at", { ascending: false })
+            .limit(30);
+          supaCotacoes = resAll.data;
+          errCotacoes = resAll.error;
+          statusCotacoes = resAll.status;
+        }
+      }
 
       let currentClientsList = [...mockClientes];
       if (!errClientes && statusClientes !== 404 && supaClientes && supaClientes.length > 0) {
@@ -322,7 +363,7 @@ export default function Proposals() {
             newPedidosPorCliente[cId].unshift({
               id: numId,
               data: cot.data || new Date().toISOString().slice(0, 10),
-              status: cot.status === 'aprovado' ? 'Aprovado' : cot.status === 'rejeitado' ? 'Cancelado' : cot.status === 'pendente' ? 'Pendente' : 'Rascunho',
+              status: normalizeProposalStatus(cot.status),
               clienteNome: cot.cliente_nome,
               total: Number(cot.valor_total) || 0
             });
@@ -363,7 +404,7 @@ export default function Proposals() {
                   newPedidosPorCliente[cId].push({
                     id: numId,
                     data: lq.date || new Date().toISOString().slice(0, 10),
-                    status: lq.status === 'Aprovado' ? 'Aprovado' : lq.status === 'Cancelado' ? 'Cancelado' : lq.status === 'Enviado' ? 'Pendente' : 'Rascunho',
+                    status: normalizeProposalStatus(lq.status),
                     clienteNome: lq.clientName,
                     total: Number(lq.grandTotal || lq.subtotalTotal) || 0
                   });

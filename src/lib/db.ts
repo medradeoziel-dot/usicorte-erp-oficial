@@ -1766,16 +1766,16 @@ export async function fetchCotacoesDb(
       }
     }
 
-    // 2. Filtro inicial por status Pendente: .eq('status', 'Pendente') para garantir busca rápida
+    // 2. Filtro inicial por status Pendente: aceita "Pendente" ou "pendente" (Case Sensitivity)
     const statusNormalizado = (filtroStatus || '').trim().toLowerCase();
     if (!filtroStatus || statusNormalizado === 'pendente') {
-      // Filtro inicial por status Pendente
-      q = q.eq('status', 'Pendente');
+      // Filtro inicial por status Pendente: aceita ambas as variações (Pendente ou pendente)
+      q = q.or('status.eq.Pendente,status.eq.pendente');
     } else if (statusNormalizado !== 'todas' && statusNormalizado !== 'todos' && statusNormalizado !== 'all' && statusNormalizado !== 'todas as cotações') {
       if (statusNormalizado === 'ativas') {
-        q = q.in('status', ['pendente', 'aprovado', 'rascunho', 'Pendente', 'Aprovado', 'Rascunho']);
+        q = q.in('status', ['Pendente', 'pendente', 'Aprovado', 'aprovado', 'Rascunho', 'rascunho']);
       } else {
-        q = q.ilike('status', statusNormalizado);
+        q = q.or(`status.eq.${filtroStatus},status.ilike.%${statusNormalizado}%`);
       }
     }
 
@@ -1855,12 +1855,12 @@ export async function fetchCotacoesDb(
         }
       }
       if (!filtroStatus || statusNormalizado === 'pendente') {
-        retryQ = retryQ.eq('status', 'Pendente');
+        retryQ = retryQ.or('status.eq.Pendente,status.eq.pendente');
       } else if (statusNormalizado !== 'todas' && statusNormalizado !== 'todos' && statusNormalizado !== 'all') {
         if (statusNormalizado === 'ativas') {
-          retryQ = retryQ.in('status', ['pendente', 'aprovado', 'rascunho', 'Pendente', 'Aprovado', 'Rascunho']);
+          retryQ = retryQ.in('status', ['Pendente', 'pendente', 'Aprovado', 'aprovado', 'Rascunho', 'rascunho']);
         } else {
-          retryQ = retryQ.ilike('status', statusNormalizado);
+          retryQ = retryQ.or(`status.eq.${filtroStatus},status.ilike.%${statusNormalizado}%`);
         }
       }
       if (options?.search && options.search.trim()) {
@@ -1917,7 +1917,7 @@ export async function fetchCotacoesDb(
           .select('*, cotacao_itens(*)')
           .order('created_at', { ascending: false });
         if (!filtroStatus || statusNormalizado === 'pendente') {
-          safeQ = safeQ.eq('status', 'Pendente');
+          safeQ = safeQ.or('status.eq.Pendente,status.eq.pendente');
         }
         if (options?.limit && options.limit > 0) {
           safeQ = safeQ.limit(options.limit);
