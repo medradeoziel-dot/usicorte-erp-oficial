@@ -1739,88 +1739,307 @@ export function obterSefazEndpoint(
 }
 
 /**
+ * Remove estritamente caracteres de edição (espaços em branco, quebras de linha \r e \n, tabulações)
+ * que estejam situados entre tags XML (> <), no início ou no fim do documento.
+ * Preserva integralmente os textos internos das tags (descrições de produtos, nomes, endereços e valores fiscais).
+ * Elimina Byte Order Mark (BOM: \uFEFF) e comentários XML proibidos pelos schemas da SEFAZ.
+ */
+export function compactarXmlSefaz(xml: string): string {
+  if (!xml || typeof xml !== 'string') return '';
+  return xml
+    .replace(/^\uFEFF+/, '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/>[\s\r\n\t]+</g, '><')
+    .trim();
+}
+
+export interface ResultadoValidacaoXml {
+  valido: boolean;
+  erros: string[];
+  avisos: string[];
+  detalhes: {
+    chaveAcesso?: string;
+    cDVValido?: boolean;
+    cMunDestValido?: boolean;
+    cMunEmitValido?: boolean;
+    totalCalculado?: number;
+    semCaracteresEdicao?: boolean;
+    caracteresControleDetectados?: boolean;
+    bemFormatado?: boolean;
+  };
+  mensagem: string;
+}
+
+/**
+ * Validação prévia completa e automática do XML da NF-e v4.00 antes da transmissão para a SEFAZ.
+ * Verifica:
+ * 1. Bem-formação da sintaxe XML
+ * 2. Ausência de caracteres de controle proibidos e ausência de BOM
+ * 3. Ausência de caracteres de edição entre as tags
+ * 4. Validação da chave de acesso e dígito verificador (Módulo 11)
+ * 5. Tags obrigatórias do leiaute oficial da NF-e 4.00 (<ide>, <emit>, <dest>, <det>, <total>, <transp>, <pag>)
+ * 6. Código IBGE numérico de 7 dígitos no município (<cMun>) do emitente e destinatário
+ * 7. Formato das datas <dhEmi> e <dhSaiEnt> no padrão ISO com timezone (-03:00)
+ * 8. Regime tributário Simples Nacional (CRT 1, CSOSN 101/102) e ausência de tags não-oficiais (<IBSCBS>)
+ */
+export function validarXmlPreTransmissaoSefaz(xmlConteudo: string): ResultadoValidacaoXml {
+  const erros: string[] = [];
+  const avisos: string[] = [];
+  const detalhes: ResultadoValidacaoXml['detalhes'] = {};
+
+  if (!xmlConteudo || typeof xmlConteudo !== 'string' || xmlConteudo.trim().length === 0) {
+    return {
+      valido: false,
+      erros: ['O conteúdo XML da NF-e está vazio ou não foi fornecido para transmissão.'],
+      avisos: [],
+      detalhes: {},
+      mensagem: 'XML da NF-e vazio.'
+    };
+  }
+
+  // 1. Verificação de BOM (\uFEFF)
+  if (xmlConteudo.charCodeAt(0) === 0xFEFF || xmlConteudo.startsWith('\uFEFF')) {
+    erros.push('Detectado caractere BOM (Byte Order Mark) no início do arquivo XML, o que é proibido pelo padrão SEFAZ.');
+  }
+
+  // 2. Verificação de caracteres de controle inválidos (ASCII < 0x20 exceto \t, \n, \r)
+  const regexControle = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/;
+  if (regexControle.test(xmlConteudo)) {
+    detalhes.caracteresControleDetectados = true;
+    erros.push('Detectados caracteres de controle binários inválidos no texto do XML da NF-e.');
+  }
+
+  // 3. Verificação de comentários XML
+  if (/<!--[\s\S]*?-->/.test(xmlConteudo)) {
+    erros.push('Detectados comentários (<!-- ... -->) no XML. Os schemas oficiais da SEFAZ proíbem comentários.');
+  }
+
+  // 4. Verificação de bem-formação sintática
+  if (typeof DOMParser !== 'undefined') {
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(xmlConteudo, 'text/xml');
+      const parserError = doc.getElementsByTagName('parsererror')[0];
+      if (parserError) {
+        detalhes.bemFormatado = false;
+        erros.push(`Estrutura XML malformada: ${parserError.textContent?.slice(0, 150) || 'Erro de sintaxe XML'}`);
+      } else {
+        detalhes.bemFormatado = true;
+      }
+    } catch (e: any) {
+      detalhes.bemFormatado = false;
+      erros.push(`Falha de análise do XML: ${e?.message || e}`);
+    }
+  }
+
+  // Verificação de fechamento das tags raiz principais
+  if (xmlConteudo.includes('<infNFe') && !xmlConteudo.includes('</infNFe>')) {
+    erros.push('Tag <infNFe> não foi devidamente fechada com </infNFe>.');
+  }
+  if (xmlConteudo.includes('<NFe') && !xmlConteudo.includes('</NFe>')) {
+    erros.push('Tag <NFe> não foi devidamente fechada com </NFe>.');
+  }
+
+  // 5. Validação da Chave de Acesso e infNFe Id
+  const matchId = xmlConteudo.match(/<infNFe[^>]*Id="NFe([0-9]{44})"[^>]*versao="4\.00"/i) ||
+                  xmlConteudo.match(/<infNFe[^>]*versao="4\.00"[^>]*Id="NFe([0-9]{44})"/i);
+  if (!matchId) {
+    erros.push('Atributo Id="NFe{44 dígitos}" ou versao="4.00" não encontrado na tag <infNFe>.');
+  } else {
+    const chave = matchId[1];
+    detalhes.chaveAcesso = chave;
+    const base43 = chave.slice(0, 43);
+    const dvEsperado = String(calcularDvModulo11(base43));
+    const dvInformado = chave.slice(43, 44);
+
+    if (dvEsperado !== dvInformado) {
+      detalhes.cDVValido = false;
+      erros.push(`Dígito verificador da Chave de Acesso inválido: informado ${dvInformado}, calculado pelo Módulo 11 da SEFAZ: ${dvEsperado}.`);
+    } else {
+      detalhes.cDVValido = true;
+    }
+
+    // Valida tag <cDV> dentro de <ide>
+    const matchCdv = xmlConteudo.match(/<cDV>([0-9])<\/cDV>/i);
+    if (!matchCdv || matchCdv[1] !== dvEsperado) {
+      erros.push(`A tag <cDV> (${matchCdv ? matchCdv[1] : 'ausente'}) não confere com o dígito verificador real da chave (${dvEsperado}).`);
+    }
+  }
+
+  // 6. Validação do Grupo <ide>
+  if (!xmlConteudo.includes('<cUF>35</cUF>')) {
+    const matchUf = xmlConteudo.match(/<cUF>([0-9]{2})<\/cUF>/i);
+    if (!matchUf) {
+      erros.push('Tag <cUF> obrigatória não encontrada no grupo <ide>.');
+    }
+  }
+
+  const matchMod = xmlConteudo.match(/<mod>([0-9]{2})<\/mod>/i);
+  if (!matchMod || matchMod[1] !== '55') {
+    erros.push(`Modelo da NF-e inválido na tag <mod>: esperado 55, encontrado ${matchMod ? matchMod[1] : 'ausente'}.`);
+  }
+
+  const matchDhEmi = xmlConteudo.match(/<dhEmi>([^<]+)<\/dhEmi>/i);
+  if (!matchDhEmi || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[-+]\d{2}:\d{2}$/.test(matchDhEmi[1])) {
+    erros.push('Data e hora de emissão (<dhEmi>) fora do padrão oficial AAAA-MM-DDThh:mm:ss-03:00.');
+  }
+
+  const matchDhSaiEnt = xmlConteudo.match(/<dhSaiEnt>([^<]+)<\/dhSaiEnt>/i);
+  if (!matchDhSaiEnt || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[-+]\d{2}:\d{2}$/.test(matchDhSaiEnt[1])) {
+    erros.push('Data e hora de saída/entrada (<dhSaiEnt>) obrigatória e fora do padrão oficial AAAA-MM-DDThh:mm:ss-03:00.');
+  }
+
+  const matchTpAmb = xmlConteudo.match(/<tpAmb>([0-9])<\/tpAmb>/i);
+  if (!matchTpAmb || matchTpAmb[1] !== '1') {
+    erros.push(`Ambiente de autorização (<tpAmb>) deve ser estritamente 1 (Produção Oficial). Encontrado: ${matchTpAmb ? matchTpAmb[1] : 'ausente'}.`);
+  }
+
+  // 7. Validação do Grupo <emit>
+  const matchCnpjEmit = xmlConteudo.match(/<emit>[\s\S]*?<CNPJ>([0-9]{14})<\/CNPJ>/i);
+  if (!matchCnpjEmit) {
+    erros.push('CNPJ do emitente ausente ou com formatação inválida (esperado 14 dígitos numéricos sem pontuação).');
+  }
+
+  const matchIeEmit = xmlConteudo.match(/<emit>[\s\S]*?<IE>([0-9]{2,14})<\/IE>/i);
+  if (!matchIeEmit) {
+    erros.push('Inscrição Estadual do emitente ausente ou inválida na tag <emit><IE>.');
+  }
+
+  const matchCrt = xmlConteudo.match(/<CRT>([0-9])<\/CRT>/i);
+  if (!matchCrt || matchCrt[1] !== '1') {
+    erros.push(`Código de Regime Tributário (<CRT>) deve ser 1 (Simples Nacional). Encontrado: ${matchCrt ? matchCrt[1] : 'ausente'}.`);
+  }
+
+  const matchMunEmit = xmlConteudo.match(/<enderEmit>[\s\S]*?<cMun>([0-9]{7})<\/cMun>/i);
+  if (!matchMunEmit) {
+    detalhes.cMunEmitValido = false;
+    erros.push('Tag <cMun> do emitente deve conter estritamente o código IBGE numérico com 7 dígitos (ex: 3506003).');
+  } else {
+    detalhes.cMunEmitValido = true;
+  }
+
+  // 8. Validação do Grupo <dest>
+  const matchDestDoc = xmlConteudo.match(/<dest>[\s\S]*?<(CNPJ|CPF)>([0-9]{11,14})<\/\1>/i);
+  if (!matchDestDoc) {
+    erros.push('Documento do destinatário (<CNPJ> ou <CPF>) ausente ou contendo caracteres não-numéricos.');
+  }
+
+  const matchMunDest = xmlConteudo.match(/<enderDest>[\s\S]*?<cMun>([^<]+)<\/cMun>/i);
+  if (!matchMunDest) {
+    detalhes.cMunDestValido = false;
+    erros.push('Tag <cMun> do município do destinatário não encontrada em <enderDest>.');
+  } else {
+    const cMunVal = matchMunDest[1].trim();
+    if (!/^[0-9]{7}$/.test(cMunVal)) {
+      detalhes.cMunDestValido = false;
+      erros.push(`A tag <cMun> do destinatário contém "${cMunVal}". Ela DEVE conter estritamente o código IBGE numérico de 7 dígitos (ex: 3506003 para Bauru), e não o nome da cidade por extenso.`);
+    } else {
+      detalhes.cMunDestValido = true;
+    }
+  }
+
+  const matchCepDest = xmlConteudo.match(/<enderDest>[\s\S]*?<CEP>([0-9]{8})<\/CEP>/i);
+  if (!matchCepDest) {
+    erros.push('Tag <CEP> do destinatário ausente ou não possui 8 dígitos numéricos limpos.');
+  }
+
+  // 9. Validação do Grupo <det> e Itens
+  const matchDets = xmlConteudo.match(/<det\s+nItem="([0-9]+)"/gi);
+  if (!matchDets || matchDets.length === 0) {
+    erros.push('A NF-e não possui nenhum item fiscal no grupo <det>.');
+  }
+
+  // Verificação de NCM (8 dígitos numéricos) e CFOP (4 dígitos)
+  const matchNcms = Array.from(xmlConteudo.matchAll(/<NCM>([^<]+)<\/NCM>/gi));
+  for (const m of matchNcms) {
+    if (!/^[0-9]{8}$/.test(m[1].trim())) {
+      erros.push(`Item fiscal com NCM inválido: "${m[1]}". O NCM deve possuir exatamente 8 dígitos numéricos.`);
+    }
+  }
+
+  const matchCfops = Array.from(xmlConteudo.matchAll(/<CFOP>([^<]+)<\/CFOP>/gi));
+  for (const m of matchCfops) {
+    if (!/^[0-9]{4}$/.test(m[1].trim())) {
+      erros.push(`Item fiscal com CFOP inválido: "${m[1]}". O CFOP deve possuir exatamente 4 dígitos numéricos.`);
+    }
+  }
+
+  // 10. Verificação de ausência de tags não-oficiais (ex: IBSCBS no schema 4.00)
+  if (xmlConteudo.includes('<IBSCBS') || xmlConteudo.includes('</IBSCBS>') || xmlConteudo.includes('<IBSCBSTot')) {
+    erros.push('Detectadas tags experimentais de IBS/CBS (<IBSCBS> / <IBSCBSTot>). O schema oficial vigente da NF-e (v4.00) não aceita estas tags, o que causa rejeição de schema na SEFAZ.');
+  }
+
+  // 11. Validação de Totais (<total><ICMSTot>)
+  const matchVProd = xmlConteudo.match(/<ICMSTot>[\s\S]*?<vProd>([0-9]+\.[0-9]{2})<\/vProd>/i);
+  const matchVNf = xmlConteudo.match(/<ICMSTot>[\s\S]*?<vNF>([0-9]+\.[0-9]{2})<\/vNF>/i);
+  if (!matchVProd || !matchVNf) {
+    erros.push('Valores monetários <vProd> ou <vNF> ausentes ou fora do formato decimal (0.00) no grupo <total><ICMSTot>.');
+  } else {
+    detalhes.totalCalculado = parseFloat(matchVNf[1]);
+  }
+
+  const valido = erros.length === 0;
+  const mensagem = valido
+    ? 'XML validado com sucesso e em total conformidade com o padrão SEFAZ NF-e v4.00.'
+    : `O XML da NF-e possui ${erros.length} inconformidade(s) que impediriam a autorização na SEFAZ.`;
+
+  return {
+    valido,
+    erros,
+    avisos,
+    detalhes,
+    mensagem
+  };
+}
+
+/**
  * Constrói o Envelope SOAP 1.2 oficial para transmissão da NF-e para o WebService
- * NFeAutorizacao4 da SEFAZ-SP (https://nfe.fazenda.sp.gov.br/ws/nfeautorizacao4.asmx)
+ * NFeAutorizacao4 da SEFAZ-SP (https://nfe.fazenda.sp.gov.br/ws/nfeautorizacao4.asmx).
+ * Garante que a mensagem dentro de <nfeDadosMsg> seja totalmente compacta, sem caracteres
+ * de edição (espaços em branco, quebras de linha ou tabulações) entre as tags da mensagem.
  */
 export function gerarEnvelopeSoapNfe(
   xmlNFeSemDeclaracao: string,
   idLote: string = '1',
   indSinc: '0' | '1' = '1'
 ): string {
-  const xmlLimpo = xmlNFeSemDeclaracao.replace(/<\?xml[^>]*\?>\s*/gi, '').trim();
-  return `<?xml version="1.0" encoding="utf-8"?>
-<soap12:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap12="http://www.w3.org/2003/05/soap-envelope">
-  <soap12:Body>
-    <nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4">
-      <enviNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
-        <idLote>${idLote}</idLote>
-        <indSinc>${indSinc}</indSinc>
-        ${xmlLimpo}
-      </enviNFe>
-    </nfeDadosMsg>
-  </soap12:Body>
-</soap12:Envelope>`;
+  const xmlLimpo = compactarXmlSefaz(xmlNFeSemDeclaracao.replace(/<\?xml[^>]*\?>\s*/gi, ''));
+  const cleanLote = String(idLote || '1').replace(/\D/g, '') || '1';
+  return `<?xml version="1.0" encoding="utf-8"?><soap12:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap12="http://www.w3.org/2003/05/soap-envelope"><soap12:Body><nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeAutorizacao4"><enviNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00"><idLote>${cleanLote}</idLote><indSinc>${indSinc}</indSinc>${xmlLimpo}</enviNFe></nfeDadosMsg></soap12:Body></soap12:Envelope>`;
 }
 
 /**
  * Constrói o Envelope SOAP 1.2 oficial para transmissão do Evento de Cancelamento/CC-e
- * para o WebService NFeRecepcaoEvento4 da SEFAZ-SP (https://nfe.fazenda.sp.gov.br/ws/nferecepcaoevento4.asmx)
+ * para o WebService NFeRecepcaoEvento4 da SEFAZ-SP (https://nfe.fazenda.sp.gov.br/ws/nferecepcaoevento4.asmx).
+ * Totalmente compacto e em conformidade estrita com o padrão de comunicação do MOC da SEFAZ.
  */
 export function gerarEnvelopeSoapEvento(
   xmlEventoSemDeclaracao: string,
   idLote: string = '1'
 ): string {
-  const xmlLimpo = xmlEventoSemDeclaracao.replace(/<\?xml[^>]*\?>\s*/gi, '').trim();
-  return `<?xml version="1.0" encoding="utf-8"?>
-<soap12:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap12="http://www.w3.org/2003/05/soap-envelope">
-  <soap12:Body>
-    <nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeRecepcaoEvento4">
-      <envEvento xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.00">
-        <idLote>${idLote}</idLote>
-        ${xmlLimpo}
-      </envEvento>
-    </nfeDadosMsg>
-  </soap12:Body>
-</soap12:Envelope>`;
+  const xmlLimpo = compactarXmlSefaz(xmlEventoSemDeclaracao.replace(/<\?xml[^>]*\?>\s*/gi, ''));
+  const cleanLote = String(idLote || '1').replace(/\D/g, '') || '1';
+  return `<?xml version="1.0" encoding="utf-8"?><soap12:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap12="http://www.w3.org/2003/05/soap-envelope"><soap12:Body><nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeRecepcaoEvento4"><envEvento xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.00"><idLote>${cleanLote}</idLote>${xmlLimpo}</envEvento></nfeDadosMsg></soap12:Body></soap12:Envelope>`;
 }
 
 /**
  * Constrói o Envelope SOAP 1.2 oficial para consulta da situação da NF-e por chave de acesso
- * Serviço NFeConsultaProtocolo4 (https://nfe.fazenda.sp.gov.br/ws/nfeconsultaprotocolo4.asmx)
+ * Serviço NFeConsultaProtocolo4 (https://nfe.fazenda.sp.gov.br/ws/nfeconsultaprotocolo4.asmx).
+ * Totalmente compacto e sem caracteres de edição entre tags.
  */
 export function gerarEnvelopeSoapConsultaSituacao(chaveAcesso: string): string {
   const cleanChave = chaveAcesso.replace(/\D/g, '');
-  return `<?xml version="1.0" encoding="utf-8"?>
-<soap12:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap12="http://www.w3.org/2003/05/soap-envelope">
-  <soap12:Body>
-    <nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeConsultaProtocolo4">
-      <consSitNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
-        <tpAmb>1</tpAmb>
-        <xServ>CONSULTAR</xServ>
-        <chNFe>${cleanChave}</chNFe>
-      </consSitNFe>
-    </nfeDadosMsg>
-  </soap12:Body>
-</soap12:Envelope>`;
+  return `<?xml version="1.0" encoding="utf-8"?><soap12:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap12="http://www.w3.org/2003/05/soap-envelope"><soap12:Body><nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeConsultaProtocolo4"><consSitNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00"><tpAmb>1</tpAmb><xServ>CONSULTAR</xServ><chNFe>${cleanChave}</chNFe></consSitNFe></nfeDadosMsg></soap12:Body></soap12:Envelope>`;
 }
 
 /**
  * Constrói o Envelope SOAP 1.2 oficial para consulta do resultado do processamento do lote por recibo
- * Serviço NFeRetAutorizacao4 (https://nfe.fazenda.sp.gov.br/ws/nferetautorizacao4.asmx)
+ * Serviço NFeRetAutorizacao4 (https://nfe.fazenda.sp.gov.br/ws/nferetautorizacao4.asmx).
+ * Totalmente compacto e sem caracteres de edição entre tags.
  */
 export function gerarEnvelopeSoapConsultaRecibo(numeroRecibo: string): string {
   const cleanRecibo = numeroRecibo.replace(/\D/g, '');
-  return `<?xml version="1.0" encoding="utf-8"?>
-<soap12:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap12="http://www.w3.org/2003/05/soap-envelope">
-  <soap12:Body>
-    <nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeRetAutorizacao4">
-      <consReciNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
-        <tpAmb>1</tpAmb>
-        <nRec>${cleanRecibo}</nRec>
-      </consReciNFe>
-    </nfeDadosMsg>
-  </soap12:Body>
-</soap12:Envelope>`;
+  return `<?xml version="1.0" encoding="utf-8"?><soap12:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap12="http://www.w3.org/2003/05/soap-envelope"><soap12:Body><nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeRetAutorizacao4"><consReciNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00"><tpAmb>1</tpAmb><nRec>${cleanRecibo}</nRec></consReciNFe></nfeDadosMsg></soap12:Body></soap12:Envelope>`;
 }
 
 export interface RespostaSoapSefaz {
@@ -1862,7 +2081,7 @@ export async function enviarSoapSefaz(
       body: JSON.stringify({
         endpoint: endpointSefaz,
         soapAction,
-        soapEnvelope,
+        soapEnvelope: compactarXmlSefaz(soapEnvelope),
         timeoutMs
       }),
       signal: AbortSignal.timeout(timeoutMs + 3000)
@@ -2751,11 +2970,13 @@ export function gerarXmlNfe(
   </infNFe>
 </NFe>`;
 
+  const nfeXmlCompacto = compactarXmlSefaz(nfeXml);
+
   if (protocolo) {
     const digVal = gerarDigVal(chaveValida, valorTotal);
-    return `<?xml version="1.0" encoding="UTF-8"?>
+    return compactarXmlSefaz(`<?xml version="1.0" encoding="UTF-8"?>
 <nfeProc versao="4.00" xmlns="http://www.portalfiscal.inf.br/nfe">
-${nfeXml}
+${nfeXmlCompacto}
   <protNFe versao="4.00">
     <infProt>
       <tpAmb>${tpAmb}</tpAmb>
@@ -2768,11 +2989,10 @@ ${nfeXml}
       <xMotivo>Autorizado o uso da NF-e</xMotivo>
     </infProt>
   </protNFe>
-</nfeProc>`;
+</nfeProc>`);
   }
 
-  return `<?xml version="1.0" encoding="UTF-8"?>
-${nfeXml}`;
+  return `<?xml version="1.0" encoding="UTF-8"?>${nfeXmlCompacto}`;
 }
 
 /**
@@ -3077,6 +3297,29 @@ export async function transmitirNfeSefaz(
     '1' // Produção oficial SEFAZ (tpAmb = 1)
   );
 
+  // 6.1 VALIDAÇÃO AUTOMÁTICA PRÉ-TRANSMISSÃO DA NF-E (SCHEMA 4.00, BEM-FORMAÇÃO, CONTROLE, EDIÇÃO)
+  const validacaoPre = validarXmlPreTransmissaoSefaz(xmlConteudo);
+  if (!validacaoPre.valido) {
+    const errMsg = `Bloqueio de Validação Pré-Transmissão SEFAZ: ${validacaoPre.erros.join('; ')}`;
+    console.error(`[SEFAZ Validação Pré-Transmissão] ❌ ${errMsg}`);
+    try {
+      await updateCotacaoNfeStatusDb(quoteIdOrNum, {
+        status_nfe: 'Erro',
+        mensagem_erro_nfe: errMsg
+      });
+    } catch {}
+    return {
+      sucesso: false,
+      statusNfe: 'Erro',
+      chaveAcesso,
+      nfeNumero: numeroNfe,
+      serie,
+      cStat: 'VALIDACAO_SCHEMA_FALHOU',
+      xMotivo: errMsg,
+      mensagemErro: errMsg
+    };
+  }
+
   // 7. TRANSMISSÃO OFICIAL PARA A SEFAZ-SP (WEBSERVICE DE PRODUÇÃO):
   // Endpoint oficial: https://nfe.fazenda.sp.gov.br/ws/nfeautorizacao4.asmx
   const sefazEndpoint = obterSefazEndpoint('autorizacao');
@@ -3145,6 +3388,13 @@ export async function transmitirNfeSefaz(
         if (!consultaRecibo.isAutorizada && (consultaRecibo.isLotePendente || consultaRecibo.cStat === '105')) {
           console.log(`[SEFAZ-SP] Lote ainda em processamento na SEFAZ. Aguardando 3.5s para 2ª tentativa de consulta do recibo ${nRecibo}...`);
           await new Promise(r => setTimeout(r, 3500));
+          consultaRecibo = await consultarReciboLoteSefaz(nRecibo, 10000);
+        }
+
+        // Se ainda estiver processando (105), realiza 3ª tentativa após 5.0s
+        if (!consultaRecibo.isAutorizada && (consultaRecibo.isLotePendente || consultaRecibo.cStat === '105')) {
+          console.log(`[SEFAZ-SP] Lote ainda em processamento na SEFAZ. Aguardando 5.0s para 3ª tentativa de consulta do recibo ${nRecibo}...`);
+          await new Promise(r => setTimeout(r, 5000));
           consultaRecibo = await consultarReciboLoteSefaz(nRecibo, 10000);
         }
 

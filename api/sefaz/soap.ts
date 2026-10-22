@@ -501,8 +501,24 @@ export function criarAgenteHttpsSefaz(certOverride?: {
 }
 
 /**
+ * Remove estritamente caracteres de edição (espaços em branco, quebras de linha \r e \n, tabulações)
+ * que estejam situados entre tags XML (> <), no início ou no fim do documento.
+ * Preserva integralmente os textos internos das tags (descrições de produtos, nomes, endereços e valores fiscais).
+ * Elimina Byte Order Mark (BOM: \uFEFF) e comentários XML proibidos pelos schemas da SEFAZ.
+ */
+export function compactarXmlSefaz(xml: string): string {
+  if (!xml || typeof xml !== 'string') return '';
+  return xml
+    .replace(/^\uFEFF+/, '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/>[\s\r\n\t]+</g, '><')
+    .trim();
+}
+
+/**
  * Assina digitalmente o bloco <infNFe> ou <infEvento> com padrão XMLDSig ICP-Brasil (RSA-SHA1)
- * Conforme Manual de Orientação do Contribuinte (MOC) da SEFAZ
+ * Conforme Manual de Orientação do Contribuinte (MOC) da SEFAZ.
+ * Gera o bloco <Signature> compacto, sem espaços ou quebras de linha entre as tags.
  */
 export function assinarXmlSefazServer(xmlString: string, certOverride?: any): string {
   if (!xmlString) return xmlString;
@@ -518,7 +534,7 @@ export function assinarXmlSefazServer(xmlString: string, certOverride?: any): st
 
   const [tagCompleta, tagConteudo, tagNome, idRef] = matchInf;
 
-  let c14nInf = tagConteudo;
+  let c14nInf = compactarXmlSefaz(tagConteudo);
   if (!c14nInf.includes('xmlns=')) {
     c14nInf = c14nInf.replace(
       new RegExp(`^<${tagNome}`, 'i'),
@@ -568,11 +584,11 @@ export function assinarXmlSefazServer(xmlString: string, certOverride?: any): st
     signatureValue = crypto.createHash('sha1').update(signedInfo + (idRef || '')).digest('base64');
   }
 
-  const signatureXml = `\n  <Signature xmlns="http://www.w3.org/2000/09/xmldsig#">` +
-    `\n    ${signedInfo}` +
-    `\n    <SignatureValue>${signatureValue}</SignatureValue>` +
-    (x509Cert ? `\n    <KeyInfo><X509Data><X509Certificate>${x509Cert}</X509Certificate></X509Data></KeyInfo>` : '') +
-  `\n  </Signature>`;
+  const signatureXml = `<Signature xmlns="http://www.w3.org/2000/09/xmldsig#">` +
+    `${signedInfo}` +
+    `<SignatureValue>${signatureValue}</SignatureValue>` +
+    (x509Cert ? `<KeyInfo><X509Data><X509Certificate>${x509Cert}</X509Certificate></X509Data></KeyInfo>` : '') +
+  `</Signature>`;
 
   return xmlString.replace(tagCompleta, `${tagCompleta}${signatureXml}`);
 }
@@ -755,11 +771,11 @@ export function enveloparXmlSoapSefaz(
   indSinc: string = '1',
   certOverride?: any
 ): { envelope: string; action: string } {
-  let cleanXml = xmlLimpo.replace(/<\?xml[^>]*\?>\s*/gi, '').trim();
+  let cleanXml = compactarXmlSefaz(xmlLimpo.replace(/<\?xml[^>]*\?>\s*/gi, ''));
 
   if (cleanXml.includes(':Envelope') || cleanXml.includes('<soap') || cleanXml.includes('soap:Envelope') || cleanXml.includes('soap12:Envelope')) {
     const action = SOAP_ACTIONS_SEFAZ[servico] || SOAP_ACTIONS_SEFAZ.autorizacao;
-    return { envelope: cleanXml, action };
+    return { envelope: compactarXmlSefaz(cleanXml), action };
   }
 
   if (cleanXml.includes('<infNFe') || cleanXml.includes('<infEvento')) {
@@ -794,12 +810,7 @@ export function enveloparXmlSoapSefaz(
     bodyContent = `<nfeDadosMsg xmlns="${action}">${cleanXml}</nfeDadosMsg>`;
   }
 
-  const envelope = `<?xml version="1.0" encoding="utf-8"?>
-<soap12:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap12="http://www.w3.org/2003/05/soap-envelope">
-  <soap12:Body>
-    ${bodyContent}
-  </soap12:Body>
-</soap12:Envelope>`;
+  const envelope = compactarXmlSefaz(`<?xml version="1.0" encoding="utf-8"?><soap12:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap12="http://www.w3.org/2003/05/soap-envelope"><soap12:Body>${bodyContent}</soap12:Body></soap12:Envelope>`);
 
   return { envelope, action };
 }
@@ -1398,7 +1409,8 @@ export function executarRequisicaoSoapNode(
         ? criarAgenteHttpsSefaz(certOverride) 
         : { agent: undefined, hasCert: false, certType: 'HTTP', variavelCertOrigem: undefined, validacaoStatus: 'nao_configurado' as const, detalheValidacao: undefined };
 
-      const bodyBuffer = Buffer.from(soapEnvelope, 'utf-8');
+      const envelopeCompacto = compactarXmlSefaz(soapEnvelope);
+      const bodyBuffer = Buffer.from(envelopeCompacto, 'utf-8');
 
       const headers: Record<string, string | number> = {
         'Content-Type': `application/soap+xml; charset=utf-8; action="${soapAction}"`,
