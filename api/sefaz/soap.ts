@@ -64,7 +64,8 @@ export function sanitizarMensagemErro(msg: string): string {
  */
 export function limparCertificadoBase64(raw: string | undefined): string {
   if (!raw || typeof raw !== 'string') return '';
-  let str = raw.trim();
+  // Limpeza explícita com .replace(/\s+/g, '') para remover qualquer quebra de linha ou espaço indesejado
+  let str = raw.replace(/\s+/g, '').trim();
 
   // Remove aspas ou barras de escape no início e no final (ex: "..." ou \"...\")
   str = str.replace(/^["'\\]+|["'\\]+$/g, '');
@@ -78,7 +79,7 @@ export function limparCertificadoBase64(raw: string | undefined): string {
 
   // Remove quebras de linha literais (\n, \r) e espaços/tabs
   str = str.replace(/\\r/g, '').replace(/\\n/g, '');
-  str = str.replace(/[\r\n\s\t]/g, '');
+  str = str.replace(/\s+/g, '');
 
   // Se houver codificação URL (%2B -> +, %2F -> /, %3D -> =), decodifica
   if (str.includes('%2B') || str.includes('%2F') || str.includes('%3D')) {
@@ -88,6 +89,9 @@ export function limparCertificadoBase64(raw: string | undefined): string {
       // continua com a string original
     }
   }
+
+  // Limpeza final com .replace(/\s+/g, '') para remover qualquer espaço ou quebra remanescente antes da decodificação
+  str = str.replace(/\s+/g, '');
 
   // Mantém estritamente caracteres válidos da base64
   return str.replace(/[^A-Za-z0-9+/=]/g, '');
@@ -121,11 +125,12 @@ export interface CertificadoAmbienteResolvido {
  * 
  * Ordem de verificação:
  * 1. Overrides diretos passados no payload ou parâmetros
- * 2. Variáveis de ambiente oficiais do projeto (NFE_CERT_BASE64, CERTIFICADO_A1_BASE64, SEFAZ_CERT_BASE64)
- * 3. Variáveis de ambiente com prefixo VITE_ (comuns em projetos Vite no Vercel) e aliases
- * 4. Varredura insensível a maiúsculas/minúsculas no process.env (compatível com Linux no Vercel)
- * 5. Senhas associadas (NFE_CERT_PASSWORD, CERTIFICADO_A1_SENHA, SEFAZ_CERT_PASSWORD e aliases)
- * 6. Caminho local (com diagnóstico de incompatibilidade para Vercel Serverless)
+ * 2. Variável oficial solicitada: process.env.SEFAZ_CERTIFICATE_BASE64
+ * 3. Variáveis de ambiente oficiais do projeto (NFE_CERT_BASE64, CERTIFICADO_A1_BASE64, SEFAZ_CERT_BASE64)
+ * 4. Variáveis de ambiente com prefixo VITE_ e aliases
+ * 5. Varredura insensível a maiúsculas/minúsculas no process.env
+ * 6. Senhas associadas (process.env.SEFAZ_CERT_PASS, NFE_CERT_PASSWORD, CERTIFICADO_A1_SENHA, SEFAZ_CERT_PASSWORD e aliases)
+ * 7. Caminho local (com diagnóstico de incompatibilidade para Vercel Serverless)
  */
 export function resolverVariavelAmbienteCertificado(override?: {
   pfxBase64?: string;
@@ -140,7 +145,7 @@ export function resolverVariavelAmbienteCertificado(override?: {
 }): CertificadoAmbienteResolvido {
   // 1. Overrides diretos
   if (override?.pfxBase64 || override?.certificadoBase64) {
-    const rawB64 = override.pfxBase64 || override.certificadoBase64;
+    const rawB64 = (override.pfxBase64 || override.certificadoBase64 || '').replace(/\s+/g, '');
     const rawPass = override.pfxPassword || override.senhaCertificado || override.senha || override.password || override.passphrase || '';
     return {
       pfxBase64: rawB64,
@@ -152,44 +157,55 @@ export function resolverVariavelAmbienteCertificado(override?: {
     };
   }
 
-  // 2. Busca pelas variáveis prioritárias do projeto
-  const nomesBase64Prioritarios = [
-    'NFE_CERT_BASE64',
-    'CERTIFICADO_A1_BASE64',
-    'SEFAZ_CERT_BASE64',
-    'VITE_NFE_CERT_BASE64',
-    'VITE_CERTIFICADO_A1_BASE64',
-    'VITE_SEFAZ_CERT_BASE64',
-    'CERTIFICADO_BASE64',
-    'CERT_BASE64',
-    'PFX_BASE64',
-    'CERTIFICADO_A1_PFX',
-    'CERTIFICADO_A1',
-    'NFE_CERT'
-  ];
-
+  // 2. Busca pelas variáveis prioritárias do projeto (prioridade máxima para SEFAZ_CERTIFICATE_BASE64 e SEFAZ_CERT_PASS)
   let pfxBase64: string | undefined;
   let variavelBase64Nome: string | undefined;
 
-  for (const nome of nomesBase64Prioritarios) {
-    const val = process.env[nome];
-    if (val && typeof val === 'string' && val.trim().length > 20 && val.trim() !== 'undefined' && val.trim() !== 'null') {
-      pfxBase64 = val;
-      variavelBase64Nome = nome;
-      break;
+  if (
+    process.env.SEFAZ_CERTIFICATE_BASE64 &&
+    typeof process.env.SEFAZ_CERTIFICATE_BASE64 === 'string' &&
+    process.env.SEFAZ_CERTIFICATE_BASE64.replace(/\s+/g, '').length > 20
+  ) {
+    pfxBase64 = process.env.SEFAZ_CERTIFICATE_BASE64.replace(/\s+/g, '');
+    variavelBase64Nome = 'SEFAZ_CERTIFICATE_BASE64';
+  } else {
+    const nomesBase64Prioritarios = [
+      'SEFAZ_CERTIFICATE_BASE64',
+      'NFE_CERT_BASE64',
+      'CERTIFICADO_A1_BASE64',
+      'SEFAZ_CERT_BASE64',
+      'VITE_SEFAZ_CERTIFICATE_BASE64',
+      'VITE_NFE_CERT_BASE64',
+      'VITE_CERTIFICADO_A1_BASE64',
+      'VITE_SEFAZ_CERT_BASE64',
+      'CERTIFICADO_BASE64',
+      'CERT_BASE64',
+      'PFX_BASE64',
+      'CERTIFICADO_A1_PFX',
+      'CERTIFICADO_A1',
+      'NFE_CERT'
+    ];
+
+    for (const nome of nomesBase64Prioritarios) {
+      const val = process.env[nome];
+      if (val && typeof val === 'string' && val.replace(/\s+/g, '').length > 20 && val.trim() !== 'undefined' && val.trim() !== 'null') {
+        pfxBase64 = val.replace(/\s+/g, '');
+        variavelBase64Nome = nome;
+        break;
+      }
     }
   }
 
   // 3. Varredura insensível a maiúsculas/minúsculas no process.env
   if (!pfxBase64) {
     for (const [key, val] of Object.entries(process.env)) {
-      if (val && typeof val === 'string' && val.trim().length > 20 && val.trim() !== 'undefined' && val.trim() !== 'null') {
+      if (val && typeof val === 'string' && val.replace(/\s+/g, '').length > 20 && val.trim() !== 'undefined' && val.trim() !== 'null') {
         const lowerKey = key.toLowerCase();
         if (
           (lowerKey.includes('cert') || lowerKey.includes('pfx') || lowerKey.includes('a1')) &&
           (lowerKey.includes('base64') || lowerKey.includes('b64'))
         ) {
-          pfxBase64 = val;
+          pfxBase64 = val.replace(/\s+/g, '');
           variavelBase64Nome = key;
           break;
         }
@@ -197,33 +213,46 @@ export function resolverVariavelAmbienteCertificado(override?: {
     }
   }
 
-  // 4. Busca da senha do certificado
-  const nomesSenhaPrioritarios = [
-    'NFE_CERT_PASSWORD',
-    'CERTIFICADO_A1_SENHA',
-    'SEFAZ_CERT_PASSWORD',
-    'VITE_NFE_CERT_PASSWORD',
-    'VITE_CERTIFICADO_A1_SENHA',
-    'VITE_SEFAZ_CERT_PASSWORD',
-    'NFE_CERT_PASS',
-    'NFE_SENHA',
-    'SEFAZ_SENHA',
-    'CERTIFICADO_SENHA',
-    'CERTIFICADO_PASSWORD',
-    'CERT_PASSWORD',
-    'CERT_PASS',
-    'PFX_PASSWORD'
-  ];
-
+  // 4. Busca da senha do certificado (prioridade máxima para SEFAZ_CERT_PASS)
   let pfxPassword: string | undefined;
   let variavelSenhaNome: string | undefined;
 
-  for (const nome of nomesSenhaPrioritarios) {
-    const val = process.env[nome];
-    if (val !== undefined && val !== null && typeof val === 'string' && val.trim() !== 'undefined' && val.trim() !== 'null') {
-      pfxPassword = val;
-      variavelSenhaNome = nome;
-      break;
+  if (
+    process.env.SEFAZ_CERT_PASS !== undefined &&
+    process.env.SEFAZ_CERT_PASS !== null &&
+    typeof process.env.SEFAZ_CERT_PASS === 'string' &&
+    process.env.SEFAZ_CERT_PASS.trim() !== 'undefined' &&
+    process.env.SEFAZ_CERT_PASS.trim() !== 'null'
+  ) {
+    pfxPassword = process.env.SEFAZ_CERT_PASS;
+    variavelSenhaNome = 'SEFAZ_CERT_PASS';
+  } else {
+    const nomesSenhaPrioritarios = [
+      'SEFAZ_CERT_PASS',
+      'NFE_CERT_PASSWORD',
+      'CERTIFICADO_A1_SENHA',
+      'SEFAZ_CERT_PASSWORD',
+      'VITE_SEFAZ_CERT_PASS',
+      'VITE_NFE_CERT_PASSWORD',
+      'VITE_CERTIFICADO_A1_SENHA',
+      'VITE_SEFAZ_CERT_PASSWORD',
+      'NFE_CERT_PASS',
+      'NFE_SENHA',
+      'SEFAZ_SENHA',
+      'CERTIFICADO_SENHA',
+      'CERTIFICADO_PASSWORD',
+      'CERT_PASSWORD',
+      'CERT_PASS',
+      'PFX_PASSWORD'
+    ];
+
+    for (const nome of nomesSenhaPrioritarios) {
+      const val = process.env[nome];
+      if (val !== undefined && val !== null && typeof val === 'string' && val.trim() !== 'undefined' && val.trim() !== 'null') {
+        pfxPassword = val;
+        variavelSenhaNome = nome;
+        break;
+      }
     }
   }
 
