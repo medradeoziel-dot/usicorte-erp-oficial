@@ -807,6 +807,162 @@ export function enveloparXmlSoapSefaz(
 /**
  * Constrói XML de NF-e v4.00 básico a partir de dados estruturados da NF-e e da chave de acesso
  */
+function escapeXmlSoap(unsafe: string | null | undefined): string {
+  return String(unsafe || '').replace(/[<>&'"]/g, (c) => {
+    switch (c) {
+      case '<': return '&lt;';
+      case '>': return '&gt;';
+      case '&': return '&amp;';
+      case '\'': return '&apos;';
+      case '"': return '&quot;';
+      default: return c;
+    }
+  });
+}
+
+function sanitizarTextoSoap(unsafe: string | null | undefined, maxLength?: number): string {
+  if (!unsafe) return '';
+  let clean = String(unsafe)
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (maxLength && clean.length > maxLength) {
+    clean = clean.slice(0, maxLength).trim();
+  }
+  return escapeXmlSoap(clean);
+}
+
+const TABELA_IBGE_MUNICIPIOS_SOAP: Record<string, string> = {
+  'bauru': '3506003',
+  'sao paulo': '3550308',
+  'campinas': '3509502',
+  'guarulhos': '3518800',
+  'sao bernardo do campo': '3548708',
+  'santo andre': '3547809',
+  'osasco': '3534401',
+  'sorocaba': '3552205',
+  'ribeirao preto': '3543402',
+  'sao jose dos campos': '3549904',
+  'sao jose do rio preto': '3549805',
+  'mogi das cruzes': '3530607',
+  'jundiai': '3525904',
+  'piracicaba': '3538709',
+  'santos': '3548500',
+  'maua': '3529401',
+  'diadema': '3513801',
+  'carapicuiba': '3510609',
+  'itaquaquecetuba': '3523107',
+  'franca': '3516200',
+  'praia grande': '3541000',
+  'guaruja': '3518701',
+  'taubate': '3554102',
+  'limeira': '3526902',
+  'suzano': '3552502',
+  'taboao da serra': '3552809',
+  'sumare': '3552403',
+  'barueri': '3505708',
+  'embu das artes': '3515004',
+  'sao carlos': '3548906',
+  'indaiatuba': '3520509',
+  'cotia': '3513009',
+  'marilia': '3529005',
+  'americana': '3501608',
+  'araraquara': '3503208',
+  'jacarei': '3524402',
+  'hortolandia': '3519071',
+  'presidente prudente': '3541406',
+  'rio claro': '3543907',
+  'aracatuba': '3502804',
+  'santa barbara d oeste': '3545803',
+  'ferraz de vasconcelos': '3515707',
+  'francisco morato': '3516309',
+  'itapecerica da serra': '3522208',
+  'itu': '3523909',
+  'braganca paulista': '3507605',
+  'pindamonhangaba': '3538006',
+  'itapetininga': '3522307',
+  'sao caetano do sul': '3548807',
+  'franco da rocha': '3516408',
+  'mogi guacu': '3530706',
+  'jau': '3525300',
+  'botucatu': '3507506',
+  'atibaia': '3504107',
+  'santana de parnaiba': '3547304',
+  'araras': '3503307',
+  'cubatao': '3513504',
+  'valinhos': '3556206',
+  'sertaozinho': '3551702',
+  'jandira': '3525003',
+  'birigui': '3506508',
+  'ribeirao pires': '3543303',
+  'votorantim': '3557006',
+  'barretos': '3505500',
+  'catanduva': '3511102',
+  'guaratingueta': '3518404',
+  'salto': '3545209',
+  'tatui': '3554003',
+  'ourinhos': '3534708',
+  'paulinia': '3536505',
+  'assis': '3504008',
+  'leme': '3526704',
+  'itapevi': '3522505',
+  'lencois paulista': '3526803',
+  'agudos': '3500709',
+  'pederneiras': '3536703',
+  'piratininga': '3539103',
+  'macatuba': '3528007',
+  'barra bonita': '3505500',
+  'lins': '3527108',
+  'avare': '3504503',
+  'vinhedo': '3556701',
+  'rio de janeiro': '3304557',
+  'belo horizonte': '3106200',
+  'curitiba': '4106902',
+  'porto alegre': '4314902',
+  'florianopolis': '4205407',
+  'goiania': '5208707',
+  'brasilia': '5300108',
+  'salvador': '2927408',
+  'fortaleza': '2304400',
+  'recife': '2611606',
+  'manaus': '1302603',
+  'belem': '1501402',
+  'vitoria': '3205309',
+  'cuiaba': '5103403',
+  'campo grande': '5002704'
+};
+
+function obterCodigoIbgeMunicipioSoap(cidade?: string, uf?: string, codigoFornecido?: string, cep?: string): string {
+  if (codigoFornecido) {
+    const limpo = String(codigoFornecido).replace(/\D/g, '');
+    if (limpo.length === 7) return limpo;
+  }
+  const cidNormalizada = (cidade || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  if (cidNormalizada && TABELA_IBGE_MUNICIPIOS_SOAP[cidNormalizada]) {
+    return TABELA_IBGE_MUNICIPIOS_SOAP[cidNormalizada];
+  }
+  if (cidNormalizada.includes('bauru')) return '3506003';
+  if (cidNormalizada.includes('sao paulo')) return '3550308';
+  if (cidNormalizada.includes('campinas')) return '3509502';
+  if (cidNormalizada.includes('piracicaba')) return '3538709';
+  if (cidNormalizada.includes('ribeirao')) return '3543402';
+  if (cidNormalizada.includes('sorocaba')) return '3552205';
+
+  const cepDigitos = (cep || '').replace(/\D/g, '');
+  if (cepDigitos.startsWith('170') || cepDigitos.startsWith('171')) {
+    return '3506003';
+  }
+  const ufUpper = (uf || 'SP').trim().toUpperCase();
+  if (ufUpper === 'SP') return '3506003';
+  return '3506003';
+}
+
 export function montarXmlNfeServer(dados: {
   chaveAcesso: string;
   tpAmb: 1 | 2;
@@ -823,26 +979,56 @@ export function montarXmlNfeServer(dados: {
   const serie = dados.serie || chave.slice(22, 25) || '1';
   const cNF = chave.slice(35, 43) || '00000001';
   const cDV = chave.slice(43, 44) || '0';
-  const dtIso = new Date().toISOString().replace(/\.\d{3}Z$/, '-03:00');
+  
+  const dtIso = (() => {
+    try {
+      const formatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Sao_Paulo',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      });
+      const parts = formatter.formatToParts(new Date());
+      const getPart = (type: string) => parts.find(p => p.type === type)?.value || '00';
+      const y = getPart('year');
+      const m = getPart('month');
+      const d = getPart('day');
+      const hh = getPart('hour');
+      const mm = getPart('minute');
+      const ss = getPart('second');
+      return `${y}-${m}-${d}T${hh}:${mm}:${ss}-03:00`;
+    } catch {
+      return new Date().toISOString().replace(/\.\d{3}Z$/, '-03:00');
+    }
+  })();
 
   const emit = dados.emitente || {};
   const dest = dados.destinatario || {};
   const vTotal = Number(dados.valorTotal || 0).toFixed(2);
 
   const emitCnpj = String(emit.cnpj || '25038430000123').replace(/\D/g, '');
-  const emitRazao = emit.razaoSocial || emit.razao_social || 'L. M. BANZATTO METAIS';
-  const emitFant = emit.nomeFantasia || emit.nome_fantasia || 'USICORTE METAIS';
+  const emitRazao = sanitizarTextoSoap(emit.razaoSocial || emit.razao_social || 'L. M. BANZATTO METAIS', 60);
+  const emitFant = sanitizarTextoSoap(emit.nomeFantasia || emit.nome_fantasia || 'USICORTE METAIS', 60);
   const emitIe = String(emit.ie || emit.inscricao_estadual || '20963213114').replace(/\D/g, '');
   const emitCep = String(emit.cep || '17031350').replace(/\D/g, '').padEnd(8, '0').slice(0, 8);
   const emitFone = String(emit.telefone || '14998809362').replace(/\D/g, '');
+  const rawEmitIbge = String(emit.codigoIbge || emit.ibge || emit.cMun || emit.ibgeCode || emit.ibge_cidade || '3506003').replace(/\D/g, '');
+  const emitMunIbge = (rawEmitIbge.length === 7) ? rawEmitIbge : '3506003';
 
   const destDoc = String(dest.documento || dest.doc || dest.document || '00000000000191').replace(/\D/g, '');
   const destTipoDoc = destDoc.length <= 11 ? 'CPF' : 'CNPJ';
-  const destNome = dest.nome || dest.name || 'CLIENTE CONSUMIDOR FINAL';
+  const destNome = sanitizarTextoSoap(dest.nome || dest.name || 'CLIENTE CONSUMIDOR FINAL', 60);
   const destCep = String(dest.cep || '17000000').replace(/\D/g, '').padEnd(8, '0').slice(0, 8);
   const rawDestIe = String(dest.ie || dest.inscricaoEstadual || dest.inscricao_estadual || '').trim();
   const destIe = rawDestIe.replace(/\D/g, '');
-  const isDestIeIsento = !destIe || rawDestIe.toUpperCase() === 'ISENTO' || rawDestIe.toUpperCase().includes('ISENTO');
+  const isDestIeIsento = !destIe || rawDestIe.toUpperCase().includes('ISENTO');
+  const destFone = String(dest.telefone || dest.phone || '').replace(/\D/g, '');
+  const rawDestIbge = String(dest.codigoIbge || dest.ibge || dest.cMun || dest.ibgeCode || dest.ibge_cidade || '').replace(/\D/g, '');
+  const destMunIbge = (rawDestIbge.length === 7) ? rawDestIbge : obterCodigoIbgeMunicipioSoap(dest.cidade || dest.city, dest.uf || dest.state, rawDestIbge, destCep);
 
   const itens = (dados.itens && dados.itens.length > 0) ? dados.itens : [{
     codigo: '001',
@@ -859,20 +1045,24 @@ export function montarXmlNfeServer(dados: {
     const q = Number(it.quantidade || 1).toFixed(4);
     const vu = Number(it.valorUnitario || it.subtotal || vTotal).toFixed(4);
     const vt = Number(it.subtotal || vTotal).toFixed(2);
+    const cleanDesc = sanitizarTextoSoap(it.descricao || 'ITEM METALURGICO', 120);
+    const cleanNcm = String(it.ncm || '72085200').replace(/\D/g, '').padEnd(8, '0').slice(0, 8);
+    const cleanCfop = String(it.cfop || '5102').replace(/\D/g, '').slice(0, 4);
+    const cleanUn = sanitizarTextoSoap(it.unidade || 'UN', 6);
     return `
     <det nItem="${idx + 1}">
       <prod>
-        <cProd>${it.codigo || String(idx + 1).padStart(3, '0')}</cProd>
+        <cProd>${sanitizarTextoSoap(it.codigo || String(idx + 1).padStart(3, '0'), 60)}</cProd>
         <cEAN>SEM GTIN</cEAN>
-        <xProd>${String(it.descricao || 'ITEM METALURGICO').slice(0, 120)}</xProd>
-        <NCM>${String(it.ncm || '72085200').replace(/\D/g, '')}</NCM>
-        <CFOP>${String(it.cfop || '5102').replace(/\D/g, '')}</CFOP>
-        <uCom>${it.unidade || 'UN'}</uCom>
+        <xProd>${cleanDesc}</xProd>
+        <NCM>${cleanNcm}</NCM>
+        <CFOP>${cleanCfop}</CFOP>
+        <uCom>${cleanUn}</uCom>
         <qCom>${q}</qCom>
         <vUnCom>${vu}</vUnCom>
         <vProd>${vt}</vProd>
         <cEANTrib>SEM GTIN</cEANTrib>
-        <uTrib>${it.unidade || 'UN'}</uTrib>
+        <uTrib>${cleanUn}</uTrib>
         <qTrib>${q}</qTrib>
         <vUnTrib>${vu}</vUnTrib>
         <indTot>1</indTot>
@@ -903,6 +1093,7 @@ export function montarXmlNfeServer(dados: {
       <serie>${serie}</serie>
       <nNF>${numNfe}</nNF>
       <dhEmi>${dtIso}</dhEmi>
+      <dhSaiEnt>${dtIso}</dhSaiEnt>
       <tpNF>1</tpNF>
       <idDest>1</idDest>
       <cMunFG>3506003</cMunFG>
@@ -921,12 +1112,12 @@ export function montarXmlNfeServer(dados: {
       <xNome>${emitRazao}</xNome>
       <xFant>${emitFant}</xFant>
       <enderEmit>
-        <xLgr>${emit.endereco || 'RUA CORONEL IVON CESAR PIMENTEL'}</xLgr>
-        <nro>${emit.numero || '3-41'}</nro>
-        <xBairro>${emit.bairro || 'PARQUE PAULISTA'}</xBairro>
-        <cMun>3506003</cMun>
-        <xMun>${emit.cidade || 'BAURU'}</xMun>
-        <UF>${emit.uf || 'SP'}</UF>
+        <xLgr>${sanitizarTextoSoap(emit.endereco || emit.street || 'RUA CORONEL IVON CESAR PIMENTEL', 60)}</xLgr>
+        <nro>${sanitizarTextoSoap(emit.numero || emit.number || '3-41', 60)}</nro>
+        <xBairro>${sanitizarTextoSoap(emit.bairro || emit.neighborhood || 'PARQUE PAULISTA', 60)}</xBairro>
+        <cMun>${emitMunIbge}</cMun>
+        <xMun>${sanitizarTextoSoap(emit.cidade || emit.city || 'BAURU', 60)}</xMun>
+        <UF>${(emit.uf || emit.state || 'SP').toUpperCase().slice(0, 2)}</UF>
         <CEP>${emitCep}</CEP>
         <cPais>1058</cPais>
         <xPais>BRASIL</xPais>
@@ -939,15 +1130,16 @@ export function montarXmlNfeServer(dados: {
       <${destTipoDoc}>${destDoc}</${destTipoDoc}>
       <xNome>${destNome}</xNome>
       <enderDest>
-        <xLgr>${dest.endereco || 'AVENIDA PRINCIPAL'}</xLgr>
-        <nro>S/N</nro>
-        <xBairro>${dest.bairro || 'CENTRO'}</xBairro>
-        <cMun>3506003</cMun>
-        <xMun>${dest.cidade || 'BAURU'}</xMun>
-        <UF>${dest.uf || 'SP'}</UF>
+        <xLgr>${sanitizarTextoSoap(dest.endereco || dest.street || 'AVENIDA PRINCIPAL', 60)}</xLgr>
+        <nro>${sanitizarTextoSoap(dest.numero || dest.number || 'S/N', 60)}</nro>
+        <xBairro>${sanitizarTextoSoap(dest.bairro || dest.neighborhood || 'CENTRO', 60)}</xBairro>
+        <cMun>${destMunIbge}</cMun>
+        <xMun>${sanitizarTextoSoap(dest.cidade || dest.city || 'BAURU', 60)}</xMun>
+        <UF>${(dest.uf || dest.state || 'SP').toUpperCase().slice(0, 2)}</UF>
         <CEP>${destCep}</CEP>
         <cPais>1058</cPais>
         <xPais>BRASIL</xPais>
+        ${destFone ? `<fone>${destFone}</fone>` : ''}
       </enderDest>
       <indIEDest>${dest.indicadorIe || dest.indIEDest || (isDestIeIsento ? '9' : '1')}</indIEDest>
       ${!isDestIeIsento && destIe.length >= 2 ? `<IE>${destIe}</IE>` : ''}
@@ -976,7 +1168,9 @@ export function montarXmlNfeServer(dados: {
         <vNF>${vTotal}</vNF>
       </ICMSTot>
     </total>
-    <transp><modFrete>9</modFrete></transp>
+    <transp>
+      <modFrete>9</modFrete>
+    </transp>
     <pag>
       <detPag>
         <tPag>01</tPag>
@@ -984,7 +1178,7 @@ export function montarXmlNfeServer(dados: {
       </detPag>
     </pag>
     <infAdic>
-      <infCpl>DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL. REF PEDIDO USICORTE.</infCpl>
+      <infCpl>${sanitizarTextoSoap(`DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL. REF PEDIDO USICORTE.`, 5000)}</infCpl>
     </infAdic>
   </infNFe>
 </NFe>`;

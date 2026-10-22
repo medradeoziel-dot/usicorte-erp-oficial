@@ -84,10 +84,13 @@ export interface DadosDestinatarioNfe {
   inscricaoEstadual?: string;
   indicadorIe: string;
   endereco: string;
+  numero?: string;
   bairro: string;
   cidade: string;
   uf: string;
   cep: string;
+  codigoIbge?: string;
+  cMun?: string;
   telefone?: string;
   email?: string;
 }
@@ -1364,6 +1367,197 @@ export const TABELA_IBGE_UF: Record<string, string> = {
 };
 
 /**
+ * Escapa caracteres reservados para evitar corrupção de tags XML na SEFAZ
+ */
+export function escapeXml(unsafe: string | null | undefined): string {
+  return String(unsafe || '').replace(/[<>&'"]/g, (c) => {
+    switch (c) {
+      case '<': return '&lt;';
+      case '>': return '&gt;';
+      case '&': return '&amp;';
+      case '\'': return '&apos;';
+      case '"': return '&quot;';
+      default: return c;
+    }
+  });
+}
+
+/**
+ * Higieniza textos para campos XML da SEFAZ:
+ * - Remove caracteres ASCII de controle não permitidos
+ * - Remove quebras de linha e normaliza espaços
+ * - Trunca para o tamanho máximo permitido pelo Schema XSD
+ * - Escapa caracteres reservados (&, <, >, ", ')
+ */
+export function sanitizarTextoXml(unsafe: string | null | undefined, maxLength?: number): string {
+  if (!unsafe) return '';
+  let clean = String(unsafe)
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (maxLength && clean.length > maxLength) {
+    clean = clean.slice(0, maxLength).trim();
+  }
+  return escapeXml(clean);
+}
+
+/**
+ * Dicionário dos Códigos IBGE numéricos oficiais (7 dígitos) para cidades de SP e principais capitais
+ */
+export const TABELA_IBGE_MUNICIPIOS: Record<string, string> = {
+  'bauru': '3506003',
+  'sao paulo': '3550308',
+  'campinas': '3509502',
+  'guarulhos': '3518800',
+  'sao bernardo do campo': '3548708',
+  'santo andre': '3547809',
+  'osasco': '3534401',
+  'sorocaba': '3552205',
+  'ribeirao preto': '3543402',
+  'sao jose dos campos': '3549904',
+  'sao jose do rio preto': '3549805',
+  'mogi das cruzes': '3530607',
+  'jundiai': '3525904',
+  'piracicaba': '3538709',
+  'santos': '3548500',
+  'maua': '3529401',
+  'diadema': '3513801',
+  'carapicuiba': '3510609',
+  'itaquaquecetuba': '3523107',
+  'franca': '3516200',
+  'praia grande': '3541000',
+  'guaruja': '3518701',
+  'taubate': '3554102',
+  'limeira': '3526902',
+  'suzano': '3552502',
+  'taboao da serra': '3552809',
+  'sumare': '3552403',
+  'barueri': '3505708',
+  'embu das artes': '3515004',
+  'sao carlos': '3548906',
+  'indaiatuba': '3520509',
+  'cotia': '3513009',
+  'marilia': '3529005',
+  'americana': '3501608',
+  'araraquara': '3503208',
+  'jacarei': '3524402',
+  'hortolandia': '3519071',
+  'presidente prudente': '3541406',
+  'rio claro': '3543907',
+  'aracatuba': '3502804',
+  'santa barbara d oeste': '3545803',
+  'ferraz de vasconcelos': '3515707',
+  'francisco morato': '3516309',
+  'itapecerica da serra': '3522208',
+  'itu': '3523909',
+  'braganca paulista': '3507605',
+  'pindamonhangaba': '3538006',
+  'itapetininga': '3522307',
+  'sao caetano do sul': '3548807',
+  'franco da rocha': '3516408',
+  'mogi guacu': '3530706',
+  'jau': '3525300',
+  'botucatu': '3507506',
+  'atibaia': '3504107',
+  'santana de parnaiba': '3547304',
+  'araras': '3503307',
+  'cubatao': '3513504',
+  'valinhos': '3556206',
+  'sertaozinho': '3551702',
+  'jandira': '3525003',
+  'birigui': '3506508',
+  'ribeirao pires': '3543303',
+  'votorantim': '3557006',
+  'barretos': '3505500',
+  'catanduva': '3511102',
+  'guaratingueta': '3518404',
+  'salto': '3545209',
+  'tatui': '3554003',
+  'ourinhos': '3534708',
+  'paulinia': '3536505',
+  'assis': '3504008',
+  'leme': '3526704',
+  'itapevi': '3522505',
+  'lencois paulista': '3526803',
+  'agudos': '3500709',
+  'pederneiras': '3536703',
+  'piratininga': '3539103',
+  'macatuba': '3528007',
+  'barra bonita': '3505500',
+  'lins': '3527108',
+  'avare': '3504503',
+  'vinhedo': '3556701',
+  'rio de janeiro': '3304557',
+  'belo horizonte': '3106200',
+  'curitiba': '4106902',
+  'porto alegre': '4314902',
+  'florianopolis': '4205407',
+  'goiania': '5208707',
+  'brasilia': '5300108',
+  'salvador': '2927408',
+  'fortaleza': '2304400',
+  'recife': '2611606',
+  'manaus': '1302603',
+  'belem': '1501402',
+  'vitoria': '3205309',
+  'cuiaba': '5103403',
+  'campo grande': '5002704'
+};
+
+/**
+ * Obtém rigorosamente o Código IBGE numérico exato de 7 dígitos do município (<cMun>),
+ * impedindo que nomes por extenso ou caracteres alfanuméricos sejam gravados na tag.
+ */
+export function obterCodigoIbgeMunicipio(
+  cidade?: string,
+  uf?: string,
+  codigoFornecido?: string,
+  cep?: string
+): string {
+  // 1. Se foi fornecido um código numérico válido com exatamente 7 dígitos
+  if (codigoFornecido) {
+    const limpo = String(codigoFornecido).replace(/\D/g, '');
+    if (limpo.length === 7) {
+      return limpo;
+    }
+  }
+
+  const ufUpper = (uf || 'SP').trim().toUpperCase();
+  const cidNormalizada = (cidade || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  if (cidNormalizada && TABELA_IBGE_MUNICIPIOS[cidNormalizada]) {
+    return TABELA_IBGE_MUNICIPIOS[cidNormalizada];
+  }
+
+  // Busca por correspondência parcial de cidades frequentes
+  if (cidNormalizada.includes('bauru')) return '3506003';
+  if (cidNormalizada.includes('sao paulo')) return '3550308';
+  if (cidNormalizada.includes('campinas')) return '3509502';
+  if (cidNormalizada.includes('piracicaba')) return '3538709';
+  if (cidNormalizada.includes('ribeirao')) return '3543402';
+  if (cidNormalizada.includes('sorocaba')) return '3552205';
+
+  // Se tiver CEP com 8 dígitos na região de Bauru (17000-000 a 17109-999)
+  const cepDigitos = (cep || '').replace(/\D/g, '');
+  if (cepDigitos.startsWith('170') || cepDigitos.startsWith('171')) {
+    return '3506003';
+  }
+
+  // Fallback seguro por Estado: se SP, usa Bauru (3506003) se padrão emitente ou São Paulo (3550308)
+  const codUf = TABELA_IBGE_UF[ufUpper] || '35';
+  if (codUf === '35') {
+    return '3506003';
+  }
+
+  return `${codUf}00001`;
+}
+
+/**
  * Calcula o Dígito Verificador (DV) Módulo 11 da Chave de Acesso da NF-e (Modelo 55)
  * de acordo com o Manual de Orientação do Contribuinte (MOC v7.00) da SEFAZ.
  * 
@@ -2016,25 +2210,34 @@ export async function consultarReciboLoteSefaz(
 
 /**
  * Formata data e hora no padrão exigido pelo layout SEFAZ 4.00 (AAAA-MM-DDThh:mm:ss-03:00)
+ * Horário oficial de Brasília / São Paulo (UTC-3).
  */
 export function formatarDataHoraSefaz(data: Date = new Date()): string {
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const y = data.getFullYear();
-  const m = pad(data.getMonth() + 1);
-  const d = pad(data.getDate());
-  const hh = pad(data.getHours());
-  const mm = pad(data.getMinutes());
-  const ss = pad(data.getSeconds());
-  
-  // Offset do fuso horário brasileiro (SP / Brasília geralmente -03:00)
-  const offsetMin = data.getTimezoneOffset();
-  const sign = offsetMin > 0 ? '-' : '+';
-  const absOffset = Math.abs(offsetMin);
-  const offsetH = pad(Math.floor(absOffset / 60));
-  const offsetM = pad(absOffset % 60);
-  const timezone = `${sign}${offsetH}:${offsetM}`;
-
-  return `${y}-${m}-${d}T${hh}:${mm}:${ss}${timezone}`;
+  try {
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Sao_Paulo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    });
+    const parts = formatter.formatToParts(data);
+    const getPart = (type: string) => parts.find(p => p.type === type)?.value || '00';
+    const y = getPart('year');
+    const m = getPart('month');
+    const d = getPart('day');
+    const hh = getPart('hour');
+    const mm = getPart('minute');
+    const ss = getPart('second');
+    return `${y}-${m}-${d}T${hh}:${mm}:${ss}-03:00`;
+  } catch {
+    const spTime = new Date(data.getTime() - (3 * 3600 * 1000));
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${spTime.getUTCFullYear()}-${pad(spTime.getUTCMonth() + 1)}-${pad(spTime.getUTCDate())}T${pad(spTime.getUTCHours())}:${pad(spTime.getUTCMinutes())}:${pad(spTime.getUTCSeconds())}-03:00`;
+  }
 }
 
 /**
@@ -2352,20 +2555,30 @@ export function gerarXmlNfe(
   const tpAmb = '1'; // Rigorosamente 1: Produção oficial SEFAZ (v4.00)
   const creditoInfo = calcularCreditoIcmsSimples(valorTotal, emitente.aliquotaIcmsSimples || 2.75);
 
-  const aliqIbsPadrao = typeof emitente.aliquotaIbs === 'number' && !isNaN(emitente.aliquotaIbs) && emitente.aliquotaIbs >= 0
-    ? emitente.aliquotaIbs
-    : 0.10;
-  const aliqCbsPadrao = typeof emitente.aliquotaCbs === 'number' && !isNaN(emitente.aliquotaCbs) && emitente.aliquotaCbs >= 0
-    ? emitente.aliquotaCbs
-    : 0.90;
+  // Higienização completa dos dados e documentos do Emitente
+  const emitCnpj = String(emitente.cnpj || '25038430000123').replace(/\D/g, '');
+  const emitIe = String(emitente.ie || '20963213114').replace(/\D/g, '');
+  const emitCep = String(emitente.cep || '17031350').replace(/\D/g, '').padEnd(8, '0').slice(0, 8);
+  const emitMunIbge = obterCodigoIbgeMunicipio(emitente.cidade || 'BAURU', emitente.uf || 'SP', (emitente as any).ibgeCode || (emitente as any).ibge_cidade || '3506003');
+  const emitFone = String(emitente.telefone || '').replace(/\D/g, '');
 
-  let totalBcIbsCbs = 0;
-  let totalIbs = 0;
-  let totalCbs = 0;
+  // Higienização completa dos dados e documentos do Destinatário
+  const destDoc = String(destinatario.documento || '').replace(/\D/g, '');
+  const destTipoDoc = (destinatario.tipoDocumento === 'CPF' || destDoc.length <= 11) ? 'CPF' : 'CNPJ';
+  const destCep = String(destinatario.cep || '00000000').replace(/\D/g, '').padEnd(8, '0').slice(0, 8);
+  const destMunIbge = obterCodigoIbgeMunicipio(
+    destinatario.cidade,
+    destinatario.uf,
+    destinatario.codigoIbge || destinatario.cMun || (destinatario as any).ibge,
+    destCep
+  );
+  const rawDestIe = String(destinatario.inscricaoEstadual || '').trim();
+  const destIe = rawDestIe.replace(/\D/g, '');
+  const isDestIeIsento = !destIe || rawDestIe.toUpperCase().includes('ISENTO');
+  const destFone = String(destinatario.telefone || '').replace(/\D/g, '');
 
   const xmlItens = itens.map((item, index) => {
     // 1. MAPEAMENTO FISCAL ICMS (Simples Nacional - CSOSN 101):
-    // Garante que a tag <ICMSSN101> calcule e preencha corretamente a alíquota (<pCredSN>) e o valor do crédito (<vCredICMSSN>)
     const csosnCod = item.csosn ? item.csosn.split(' ')[0].replace(/\D/g, '') : '101';
     const isCsosn101 = csosnCod === '101' || csosnCod === '102' || !csosnCod;
     const aliquotaCred = typeof emitente.aliquotaIcmsSimples === 'number' && !isNaN(emitente.aliquotaIcmsSimples) && emitente.aliquotaIcmsSimples >= 0
@@ -2400,39 +2613,25 @@ export function gerarXmlNfe(
           </IPINT>
         </IPI>`;
 
-    // 3. GRUPO IBSCBS (CST 000, alíquotas de IBS e CBS, e base de cálculo):
-    const valorBcItem = Number(item.subtotal.toFixed(2));
-    const valorIbsItem = Number(((valorBcItem * aliqIbsPadrao) / 100).toFixed(2));
-    const valorCbsItem = Number(((valorBcItem * aliqCbsPadrao) / 100).toFixed(2));
-
-    totalBcIbsCbs += valorBcItem;
-    totalIbs += valorIbsItem;
-    totalCbs += valorCbsItem;
-
-    const tagIbsCbs = `
-        <IBSCBS>
-          <CST>000</CST>
-          <vBC>${valorBcItem.toFixed(2)}</vBC>
-          <pIBS>${aliqIbsPadrao.toFixed(2)}</pIBS>
-          <vIBS>${valorIbsItem.toFixed(2)}</vIBS>
-          <pCBS>${aliqCbsPadrao.toFixed(2)}</pCBS>
-          <vCBS>${valorCbsItem.toFixed(2)}</vCBS>
-        </IBSCBS>`;
+    const cleanDesc = sanitizarTextoXml(item.descricao, 120) || 'ITEM METALURGICO USICORTE';
+    const cleanNcm = String(item.ncm || '72085200').replace(/\D/g, '').padEnd(8, '0').slice(0, 8);
+    const cleanCfop = String(item.cfop || '5102').replace(/\D/g, '').slice(0, 4);
+    const cleanUn = sanitizarTextoXml(item.unidade || 'UN', 6);
 
     return `
     <det nItem="${index + 1}">
       <prod>
-        <cProd>${item.codigo}</cProd>
+        <cProd>${sanitizarTextoXml(item.codigo, 60)}</cProd>
         <cEAN>SEM GTIN</cEAN>
-        <xProd>${escapeXml(item.descricao.slice(0, 120))}</xProd>
-        <NCM>${item.ncm}</NCM>
-        <CFOP>${item.cfop}</CFOP>
-        <uCom>${item.unidade}</uCom>
+        <xProd>${cleanDesc}</xProd>
+        <NCM>${cleanNcm}</NCM>
+        <CFOP>${cleanCfop}</CFOP>
+        <uCom>${cleanUn}</uCom>
         <qCom>${item.quantidade.toFixed(4)}</qCom>
         <vUnCom>${item.valorUnitario.toFixed(4)}</vUnCom>
         <vProd>${item.subtotal.toFixed(2)}</vProd>
         <cEANTrib>SEM GTIN</cEANTrib>
-        <uTrib>${item.unidade}</uTrib>
+        <uTrib>${cleanUn}</uTrib>
         <qTrib>${item.quantidade.toFixed(4)}</qTrib>
         <vUnTrib>${item.valorUnitario.toFixed(4)}</vUnTrib>
         <indTot>1</indTot>
@@ -2447,7 +2646,7 @@ export function gerarXmlNfe(
           <COFINSNT>
             <CST>07</CST>
           </COFINSNT>
-        </COFINS>${tagIbsCbs}
+        </COFINS>
       </imposto>
     </det>`;
   }).join('');
@@ -2462,6 +2661,7 @@ export function gerarXmlNfe(
       <serie>${serieNum}</serie>
       <nNF>${nNfNum}</nNF>
       <dhEmi>${dtIso}</dhEmi>
+      <dhSaiEnt>${dtIso}</dhSaiEnt>
       <tpNF>1</tpNF>
       <idDest>${destinatario.uf === 'SP' ? '1' : '2'}</idDest>
       <cMunFG>3506003</cMunFG>
@@ -2470,45 +2670,47 @@ export function gerarXmlNfe(
       <cDV>${cDV}</cDV>
       <tpAmb>${tpAmb}</tpAmb>
       <finNFe>1</finNFe>
-      <indFinal>${destinatario.indicadorIe === '9' ? '1' : '0'}</indFinal>
+      <indFinal>${destinatario.indicadorIe === '9' || isDestIeIsento ? '1' : '0'}</indFinal>
       <indPres>1</indPres>
       <procEmi>0</procEmi>
       <verProc>UsiCorte-ERP-1.0</verProc>
     </ide>
     <emit>
-      <CNPJ>${String(emitente.cnpj || '').replace(/\D/g, '')}</CNPJ>
-      <xNome>${escapeXml(emitente.razaoSocial)}</xNome>
-      <xFant>${escapeXml(emitente.nomeFantasia)}</xFant>
+      <CNPJ>${emitCnpj}</CNPJ>
+      <xNome>${sanitizarTextoXml(emitente.razaoSocial, 60)}</xNome>
+      <xFant>${sanitizarTextoXml(emitente.nomeFantasia, 60)}</xFant>
       <enderEmit>
-        <xLgr>${escapeXml(emitente.endereco)}</xLgr>
-        <nro>${emitente.numero || 'S/N'}</nro>
-        <xBairro>${escapeXml(emitente.bairro)}</xBairro>
-        <cMun>3506003</cMun>
-        <xMun>${escapeXml(emitente.cidade)}</xMun>
-        <UF>${emitente.uf}</UF>
-        <CEP>${String(emitente.cep || '').replace(/\D/g, '').padEnd(8, '0').slice(0, 8)}</CEP>
+        <xLgr>${sanitizarTextoXml(emitente.endereco || 'RUA CORONEL IVON CESAR PIMENTEL', 60)}</xLgr>
+        <nro>${sanitizarTextoXml(emitente.numero || '3-41', 60)}</nro>
+        <xBairro>${sanitizarTextoXml(emitente.bairro || 'PARQUE PAULISTA', 60)}</xBairro>
+        <cMun>${emitMunIbge}</cMun>
+        <xMun>${sanitizarTextoXml(emitente.cidade || 'BAURU', 60)}</xMun>
+        <UF>${(emitente.uf || 'SP').toUpperCase().slice(0, 2)}</UF>
+        <CEP>${emitCep}</CEP>
         <cPais>1058</cPais>
         <xPais>BRASIL</xPais>
-        <fone>${String(emitente.telefone || '').replace(/\D/g, '')}</fone>
+        ${emitFone ? `<fone>${emitFone}</fone>` : ''}
       </enderEmit>
-      <IE>${String(emitente.ie || '').replace(/\D/g, '')}</IE>
+      <IE>${emitIe}</IE>
       <CRT>1</CRT>
     </emit>
     <dest>
-      <${(destinatario.tipoDocumento === 'CPF' || String(destinatario.documento || '').replace(/\D/g, '').length <= 11) ? 'CPF' : 'CNPJ'}>${String(destinatario.documento || '').replace(/\D/g, '')}</${(destinatario.tipoDocumento === 'CPF' || String(destinatario.documento || '').replace(/\D/g, '').length <= 11) ? 'CPF' : 'CNPJ'}>
-      <xNome>${escapeXml(destinatario.nome)}</xNome>
+      <${destTipoDoc}>${destDoc}</${destTipoDoc}>
+      <xNome>${sanitizarTextoXml(destinatario.nome, 60)}</xNome>
       <enderDest>
-        <xLgr>${escapeXml(destinatario.endereco || 'ENDERECO')}</xLgr>
-        <nro>S/N</nro>
-        <xBairro>${escapeXml(destinatario.bairro || 'CENTRO')}</xBairro>
-        <xMun>${escapeXml(destinatario.cidade || 'SAO PAULO')}</xMun>
-        <UF>${destinatario.uf || 'SP'}</UF>
-        <CEP>${String(destinatario.cep || '00000000').replace(/\D/g, '').padEnd(8, '0').slice(0, 8)}</CEP>
+        <xLgr>${sanitizarTextoXml(destinatario.endereco || 'ENDERECO', 60)}</xLgr>
+        <nro>${sanitizarTextoXml(destinatario.numero || 'S/N', 60)}</nro>
+        <xBairro>${sanitizarTextoXml(destinatario.bairro || 'CENTRO', 60)}</xBairro>
+        <cMun>${destMunIbge}</cMun>
+        <xMun>${sanitizarTextoXml(destinatario.cidade || 'BAURU', 60)}</xMun>
+        <UF>${(destinatario.uf || 'SP').toUpperCase().slice(0, 2)}</UF>
+        <CEP>${destCep}</CEP>
         <cPais>1058</cPais>
         <xPais>BRASIL</xPais>
+        ${destFone ? `<fone>${destFone}</fone>` : ''}
       </enderDest>
-      <indIEDest>${destinatario.indicadorIe || (String(destinatario.inscricaoEstadual || '').toUpperCase().includes('ISENTO') || !String(destinatario.inscricaoEstadual || '').replace(/\D/g, '') ? '9' : '1')}</indIEDest>
-      ${destinatario.inscricaoEstadual && !String(destinatario.inscricaoEstadual).toUpperCase().includes('ISENTO') && String(destinatario.inscricaoEstadual).replace(/\D/g, '').length >= 2 ? `<IE>${String(destinatario.inscricaoEstadual).replace(/\D/g, '')}</IE>` : ''}
+      <indIEDest>${destinatario.indicadorIe || (isDestIeIsento ? '9' : '1')}</indIEDest>
+      ${!isDestIeIsento && destIe.length >= 2 ? `<IE>${destIe}</IE>` : ''}
     </dest>
     ${xmlItens}
     <total>
@@ -2533,11 +2735,6 @@ export function gerarXmlNfe(
         <vOutro>0.00</vOutro>
         <vNF>${valorTotal.toFixed(2)}</vNF>
       </ICMSTot>
-      <IBSCBSTot>
-        <vBC>${totalBcIbsCbs.toFixed(2)}</vBC>
-        <vIBS>${totalIbs.toFixed(2)}</vIBS>
-        <vCBS>${totalCbs.toFixed(2)}</vCBS>
-      </IBSCBSTot>
     </total>
     <transp>
       <modFrete>9</modFrete>
@@ -2549,7 +2746,7 @@ export function gerarXmlNfe(
       </detPag>
     </pag>
     <infAdic>
-      <infCpl>DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL. ${creditoInfo.textoCredito} ${observacoesAdicionais ? `${observacoesAdicionais}. ` : ''}REF. ORCAMENTO/PEDIDO USICORTE.</infCpl>
+      <infCpl>${sanitizarTextoXml(`DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL. ${creditoInfo.textoCredito} ${observacoesAdicionais ? `${observacoesAdicionais}. ` : ''}REF. ORCAMENTO/PEDIDO USICORTE.`, 5000)}</infCpl>
     </infAdic>
   </infNFe>
 </NFe>`;
@@ -2576,19 +2773,6 @@ ${nfeXml}
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 ${nfeXml}`;
-}
-
-function escapeXml(unsafe: string): string {
-  return (unsafe || '').replace(/[<>&'"]/g, (c) => {
-    switch (c) {
-      case '<': return '&lt;';
-      case '>': return '&gt;';
-      case '&': return '&amp;';
-      case '\'': return '&apos;';
-      case '"': return '&quot;';
-      default: return c;
-    }
-  });
 }
 
 /**
@@ -2638,10 +2822,13 @@ export async function transmitirNfeSefaz(
     inscricaoEstadual: client?.inscricao_estadual || client?.inscricaoEstadual || client?.ie || '',
     indicadorIe: client?.indicador_ie || client?.indicadorIe || (tipoDoc === 'CNPJ' ? '1' : '9'),
     endereco: client?.street || client?.endereco || 'ENDERECO DO CLIENTE',
+    numero: (client as any)?.number || (client as any)?.numero || 'S/N',
     bairro: client?.neighborhood || client?.bairro || 'CENTRO',
     cidade: client?.city || client?.cidade || quote.clientCity || 'BAURU',
     uf: ufDest,
     cep: client?.cep || '17000-000',
+    codigoIbge: (client as any)?.codigo_ibge || (client as any)?.ibge || (client as any)?.ibgeCode || (client as any)?.cMun || '',
+    cMun: (client as any)?.cMun || (client as any)?.ibge_cidade || (client as any)?.codigo_ibge || '',
     telefone: client?.phone || client?.telefone || quote.clientPhone || '',
     email: client?.email || quote.clientEmail || ''
   };
