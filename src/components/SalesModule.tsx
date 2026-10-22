@@ -10,7 +10,8 @@ import {
 } from '../lib/db';
 import { 
   reservarNovaCotacaoNoSupabase, 
-  cancelarOuDescartarRascunho 
+  cancelarOuDescartarRascunho,
+  limparRascunhosVaziosDb
 } from '../services/cotacaoReservaService';
 import { executarMigracaoEmergenciaOrcamentos } from '../services/emergencyMigrationService';
 import { 
@@ -274,14 +275,31 @@ export default function SalesModule({
     const prefix = config.prefix || `COT-${new Date().getFullYear()}-`;
     let targetSeq = typeof config.nextSequential === 'number' && !isNaN(config.nextSequential)
       ? config.nextSequential
-      : 140;
+      : 990;
 
     const listToScan = quotesList && Array.isArray(quotesList) ? quotesList : savedQuotes;
     const existingSet = new Set<string>();
+    const validSeqs: number[] = [];
     listToScan.forEach((q: any) => {
-      const numStr = String(q.quoteNumber || q.numero || q.id || "").trim().toLowerCase();
-      if (numStr) existingSet.add(numStr);
+      const isDraftVazio = q.clientName === 'Rascunho em Edição' || q.cliente_nome === 'Rascunho em Edição';
+      const numStr = String(q.quoteNumber || q.numero || q.id || "").trim();
+      const isCorrupted = numStr.includes('202600') || numStr.includes('202620');
+      if (!isDraftVazio && !isCorrupted) {
+        existingSet.add(numStr.toLowerCase());
+        const match = numStr.match(/(\d+)$/);
+        if (match) {
+          const val = parseInt(match[1], 10);
+          if (val > 0 && val < 50000 && !String(val).startsWith('2026')) {
+            validSeqs.push(val);
+          }
+        }
+      }
     });
+
+    const maxReal = validSeqs.length > 0 ? Math.max(...validSeqs) : 0;
+    if (maxReal >= targetSeq) {
+      targetSeq = maxReal + 1;
+    }
 
     // Procura o próximo número sequencial livre a partir de targetSeq
     while (existingSet.has(`${prefix}${String(targetSeq).padStart(6, "0")}`.toLowerCase())) {
@@ -356,36 +374,26 @@ export default function SalesModule({
     };
   };
 
-  // 1. GERAR E RESERVAR NO BANCO NA ABERTURA (useEffect):
-  // Assim que a tela/modal de "Nova Cotação" for ABERTO:
-  // a) Chama supabase.rpc('gerar_proximo_numero_cotacao') para obter o número oficial atualizado
-  // b) Faz IMEDIATAMENTE um INSERT na tabela cotacoes com esse número gerado e status RASCUNHO
-  // c) Guarda o id da cotação recém-criada no estado local da aplicação (cotacaoId / editingQuoteId)
+  // 1. OBTENÇÃO DA SUGESTÃO SEQUENCIAL NA ABERTURA (SEM CRIAR RASCUNHO NO BANCO):
+  // Ao carregar a tela, apenas consulta a sequência oficial e preenche visualmente
+  // o número sugerido (ex: COT-2026-000990), SEM efetuar nenhum INSERT ou reserva no Supabase.
+  // Um rascunho só é gerado no banco quando o usuário clicar em "Nova Cotação" ou preencher dados na tela.
   useEffect(() => {
-    if (!quoteToEdit && !quoteToDuplicate && !editingQuoteId && !isReservingRef.current) {
-      isReservingRef.current = true;
-      setIsReservingQuote(true);
-      reservarNovaCotacaoNoSupabase()
+    if (!quoteToEdit && !quoteToDuplicate && !editingQuoteId) {
+      resolveNextUniqueQuoteNumber(savedQuotes)
         .then(res => {
-          if (res?.numero && res?.id) {
-            setNumeroCotacao(res.numero);
-            setAutoSuggestedNumber(res.numero);
-            setEditingQuoteId(res.id);
-            setEditingOriginalQuoteNumber(res.numero);
-            editingQuoteIdRef.current = res.id;
-            editingQuoteNumberRef.current = res.numero;
+          if (res?.quoteNumber) {
+            setNumeroCotacao(res.quoteNumber);
+            setAutoSuggestedNumber(res.quoteNumber);
+            setAutoSuggestedSeq(res.sequential);
             setQuoteStatus('Rascunho');
             quoteStatusRef.current = 'Rascunho';
             isSavedRef.current = false;
-            console.log(`[SalesModule] Nova Cotação aberta: Nº ${res.numero} (ID: ${res.id}) reservada como RASCUNHO no Supabase`);
+            console.log(`[SalesModule] Sugestão sequencial oficial pronta na tela: Nº ${res.quoteNumber} (sem criação de rascunho no banco)`);
           }
         })
         .catch(err => {
-          console.warn('[SalesModule] Falha ao reservar cotação na abertura:', err);
-        })
-        .finally(() => {
-          setIsReservingQuote(false);
-          isReservingRef.current = false;
+          console.warn('[SalesModule] Erro ao sugerir numeração sequencial na abertura:', err);
         });
     }
   }, []);
@@ -708,10 +716,9 @@ export default function SalesModule({
   }, []);
 
   // Load saved quotes on mount (Supabase primário e desvinculação do s_orcamentos do localStorage)
-  useEffect(() => {
-    async function loadQuotes() {
-      try {
-        const dbQuotes = await fetchCotacoesDb();
+  const loadQuotesFromDb = async () => {
+    try {
+      const dbQuotes = await fetchCotacoesDb();
         const mappedDbQuotes: Quote[] = (dbQuotes || [])
           .filter(q => {
             const num = String(q.numero || q.id || '');
@@ -907,12 +914,13 @@ export default function SalesModule({
       } catch (err) {
         console.warn('Erro ao consultar cotações do Supabase:', err);
       }
-    }
+  };
 
-    loadQuotes();
+  useEffect(() => {
+    loadQuotesFromDb();
 
     const handleMigrated = () => {
-      loadQuotes();
+      loadQuotesFromDb();
     };
     window.addEventListener('cotacoes_migradas_emergencia', handleMigrated);
     return () => {
@@ -2635,6 +2643,35 @@ export default function SalesModule({
     }
   };
 
+  const [isPurgingDrafts, setIsPurgingDrafts] = useState<boolean>(false);
+
+  const handlePurgeEmptyDrafts = async () => {
+    if (!confirm('Deseja realmente limpar todos os rascunhos vazios acumulados no banco de dados e recalcular a numeração sequencial correta?')) {
+      return;
+    }
+    setIsPurgingDrafts(true);
+    try {
+      const res = await limparRascunhosVaziosDb();
+      if (res.success) {
+        setSuccessMessage(`🧹 Limpeza concluída: ${res.purgedCount} rascunhos vazios limpos do Supabase! Próxima cotação: ${res.nextQuoteNumber || 'recalculada'}.`);
+        if (res.nextQuoteNumber) {
+          setNumeroCotacao(res.nextQuoteNumber);
+          setAutoSuggestedNumber(res.nextQuoteNumber);
+        }
+        await loadQuotesFromDb();
+        setTimeout(() => setSuccessMessage(null), 5000);
+      } else {
+        setErrorMessage('Aviso na limpeza de rascunhos: ' + (res.error?.message || 'Falha'));
+        setTimeout(() => setErrorMessage(null), 5000);
+      }
+    } catch (err: any) {
+      setErrorMessage('Erro ao limpar rascunhos: ' + (err?.message || 'Erro'));
+      setTimeout(() => setErrorMessage(null), 5000);
+    } finally {
+      setIsPurgingDrafts(false);
+    }
+  };
+
   // Mantém a referência sincronizada para o listener onafterprint
   useEffect(() => {
     handleAdvanceToNextQuoteRef.current = () => handleAdvanceToNextQuote(true);
@@ -2972,12 +3009,27 @@ export default function SalesModule({
           )}
 
           <button
+            type="button"
+            onClick={handlePurgeEmptyDrafts}
+            disabled={isPurgingDrafts}
+            className="px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+            title="Limpa rascunhos vazios acumulados no banco de dados e recalcula a sequência oficial (ex: COT-2026-000990)"
+          >
+            {isPurgingDrafts ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-700" />
+            ) : (
+              <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+            )}
+            Limpar Rascunhos Vazios
+          </button>
+
+          <button
             onClick={() => handleAdvanceToNextQuote(true)}
             className="px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
             title="Limpa todos os campos, gera a nova numeração sequencial e posiciona o foco no primeiro campo"
           >
             <RotateCcw className="w-3.5 h-3.5 text-indigo-600" />
-            Próxima Cotação (Novo)
+            Nova Cotação
           </button>
 
           <button

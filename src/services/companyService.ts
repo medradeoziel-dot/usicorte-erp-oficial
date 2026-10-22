@@ -822,24 +822,44 @@ export async function fetchEmitenteNumberingConfig(): Promise<{ nextSequential: 
  * - Se já existir, busca o maior número sequencial cadastrado no banco, soma +1 e usa esse novo número
  */
 export async function resolveNextUniqueQuoteNumber(
-  existingLocalQuotes?: { quoteNumber?: string; numero?: string; id?: string }[]
+  existingLocalQuotes?: { quoteNumber?: string; numero?: string; id?: string; clientName?: string; cliente_nome?: string }[]
 ): Promise<{ quoteNumber: string; sequential: number; prefix: string; wasAdjustedDueToDuplicate: boolean }> {
   // 1. Busca configurações da tabela emitente
   const config = await fetchEmitenteNumberingConfig();
   const prefix = config.prefix || 'COT-2026-';
-  const targetSeq = config.nextSequential || 140;
+  let targetSeq = config.nextSequential || 140;
 
   // 2. Coleta todos os números existentes em 'cotacoes' no Supabase
   const existingSet = new Set<string>();
   const allDbRows: { numero?: string }[] = [];
+  const validSeqs: number[] = [];
 
   try {
-    const { data: cotacoesData } = await db.from('cotacoes').select('numero');
+    const { data: cotacoesData } = await db
+      .from('cotacoes')
+      .select('numero, cliente_nome, deletado_em, status, situacao');
+
     if (cotacoesData && Array.isArray(cotacoesData)) {
       cotacoesData.forEach(r => {
-        allDbRows.push(r);
-        const s = (r.numero || '').trim().toLowerCase();
-        if (s) existingSet.add(s);
+        const isDeleted = !!r.deletado_em || r.situacao === 'CANCELADO' || r.status === 'rejeitado';
+        const isDraftVazio = r.cliente_nome === 'Rascunho em Edição' || (r.cliente_nome && String(r.cliente_nome).toLowerCase().includes('rascunho'));
+        const numStr = (r.numero || '').trim();
+        // Ignora numerações corrompidas com 2026 duplicado (ex: 202600, 202620)
+        const isCorrupted = numStr.includes('202600') || numStr.includes('202620');
+
+        if (!isDeleted && !isDraftVazio && !isCorrupted) {
+          allDbRows.push(r);
+          const s = numStr.toLowerCase();
+          if (s) existingSet.add(s);
+
+          const match = numStr.match(/(\d+)$/);
+          if (match) {
+            const val = parseInt(match[1], 10);
+            if (val > 0 && val < 50000 && !String(val).startsWith('2026')) {
+              validSeqs.push(val);
+            }
+          }
+        }
       });
     }
   } catch (e) {
@@ -849,80 +869,43 @@ export async function resolveNextUniqueQuoteNumber(
   // Mescla com cotações locais em memória caso passadas
   if (existingLocalQuotes && Array.isArray(existingLocalQuotes)) {
     existingLocalQuotes.forEach(q => {
-      const s = (q.quoteNumber || q.numero || q.id || '').trim().toLowerCase();
-      if (s) existingSet.add(s);
+      const isDraftVazio = q.cliente_nome === 'Rascunho em Edição' || q.clientName === 'Rascunho em Edição';
+      const numStr = String(q.quoteNumber || q.numero || q.id || '').trim();
+      const isCorrupted = numStr.includes('202600') || numStr.includes('202620');
+      if (!isDraftVazio && !isCorrupted) {
+        const s = numStr.toLowerCase();
+        if (s) existingSet.add(s);
+
+        const match = numStr.match(/(\d+)$/);
+        if (match) {
+          const val = parseInt(match[1], 10);
+          if (val > 0 && val < 50000 && !String(val).startsWith('2026')) {
+            validSeqs.push(val);
+          }
+        }
+      }
     });
   }
 
-  const initialCandidate = `${prefix}${String(targetSeq).padStart(6, '0')}`;
-
-  // Se o número gerado ainda não existe, pode ser usado com segurança
-  if (!existingSet.has(initialCandidate.toLowerCase())) {
-    return {
-      quoteNumber: initialCandidate,
-      sequential: targetSeq,
-      prefix,
-      wasAdjustedDueToDuplicate: false
-    };
+  // Se targetSeq estiver em um patamar absurdo (> 5000) por erro anterior, restaura para 990
+  if (targetSeq > 5000) {
+    targetSeq = 990;
   }
 
-  // 2. Se já existir, busca o maior número sequencial cadastrado no banco, soma +1
-  const seqs: number[] = [];
-  for (const row of allDbRows) {
-    const numStr = (row.numero || '').trim();
-    const match = numStr.match(/(\d+)$/);
-    if (match) {
-      seqs.push(parseInt(match[1], 10));
-    }
-  }
-  if (existingLocalQuotes && Array.isArray(existingLocalQuotes)) {
-    for (const q of existingLocalQuotes) {
-      const numStr = String(q.quoteNumber || q.numero || q.id || '').trim();
-      const match = numStr.match(/(\d+)$/);
-      if (match) {
-        seqs.push(parseInt(match[1], 10));
-      }
-    }
+  // Se o número alvo já estiver ocupado no banco, avança sequencialmente (+1) até encontrar o próximo livre
+  let wasAdjusted = false;
+  while (existingSet.has(`${prefix}${String(targetSeq).padStart(6, '0')}`.toLowerCase())) {
+    targetSeq++;
+    wasAdjusted = true;
   }
 
-  seqs.sort((a, b) => a - b);
-
-  // Identifica a sequência ativa a partir de targetSeq (filtrando pedidos específicos de clientes com salto grande > 100)
-  const higherOrEqual = seqs.filter(s => s >= targetSeq);
-  let topInSequence = targetSeq;
-
-  if (higherOrEqual.length > 0) {
-    for (let i = 0; i < higherOrEqual.length; i++) {
-      const curr = higherOrEqual[i];
-      if (i === 0) {
-        topInSequence = curr;
-      } else {
-        const prev = higherOrEqual[i - 1];
-        if (curr - prev > 100) {
-          // Salto brusco (ex: de 171 para 3574 de cliente externo)
-          break;
-        }
-        topInSequence = curr;
-      }
-    }
-  } else if (seqs.length > 0) {
-    topInSequence = seqs[seqs.length - 1];
-  }
-
-  let resolvedSeq = topInSequence + 1;
-
-  // Garante que o número final é absolutamente único (avança caso haja colisão)
-  while (existingSet.has(`${prefix}${String(resolvedSeq).padStart(6, '0')}`.toLowerCase())) {
-    resolvedSeq++;
-  }
-
-  const resolvedNumber = `${prefix}${String(resolvedSeq).padStart(6, '0')}`;
+  const resolvedNumber = `${prefix}${String(targetSeq).padStart(6, '0')}`;
 
   return {
     quoteNumber: resolvedNumber,
-    sequential: resolvedSeq,
+    sequential: targetSeq,
     prefix,
-    wasAdjustedDueToDuplicate: true
+    wasAdjustedDueToDuplicate: wasAdjusted
   };
 }
 
@@ -962,7 +945,9 @@ export async function updateEmitenteNextSequential(nextSequential: number): Prom
       localStorage.setItem(STORAGE_KEY, JSON.stringify(local));
     } catch {}
 
-    window.dispatchEvent(new CustomEvent('company-data-updated', { detail: local }));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('company-data-updated', { detail: local }));
+    }
     return true;
   } catch (err) {
     console.warn('Falha ao atualizar proximo_numero_sequencial:', err);

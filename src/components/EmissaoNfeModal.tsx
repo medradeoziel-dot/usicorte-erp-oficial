@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Quote, Client, QuoteItem } from '../types';
 import { 
   transmitirNfeSefaz, 
@@ -71,6 +71,69 @@ export default function EmissaoNfeModal({
   const [isTransmitting, setIsTransmitting] = useState<boolean>(false);
   const [transmissionResult, setTransmissionResult] = useState<NfeTransmissionResult | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // TRAVA DE BLOQUEIO SEFAZ (Rejeição 656 - Consumo Indevido)
+  // Quando a SEFAZ bloqueia a nota por excesso de tentativas, travamos os botões
+  // até o fim do bloqueio para não reiniciar a contagem de 1 hora.
+  const chaveBloqueioSefaz = `sefaz_bloqueio_656_${quote.id || quote.quoteNumber || ''}`;
+  const [bloqueioSefazAte, setBloqueioSefazAte] = useState<number | null>(null);
+  const [agoraTick, setAgoraTick] = useState<number>(Date.now());
+  const errorBannerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    try {
+      const salvo = Number(localStorage.getItem(chaveBloqueioSefaz) || 0);
+      if (salvo > Date.now()) setBloqueioSefazAte(salvo);
+      else localStorage.removeItem(chaveBloqueioSefaz);
+    } catch {}
+  }, [chaveBloqueioSefaz]);
+
+  useEffect(() => {
+    if (!bloqueioSefazAte) return;
+    const t = setInterval(() => {
+      const now = Date.now();
+      setAgoraTick(now);
+      if (now >= bloqueioSefazAte) {
+        setBloqueioSefazAte(null);
+        try { localStorage.removeItem(chaveBloqueioSefaz); } catch {}
+      }
+    }, 15000);
+    return () => clearInterval(t);
+  }, [bloqueioSefazAte, chaveBloqueioSefaz]);
+
+  // Rola até o aviso vermelho sempre que surgir uma mensagem (antes ficava escondida no topo)
+  useEffect(() => {
+    if (errorMessage && errorBannerRef.current) {
+      try { errorBannerRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch {}
+    }
+  }, [errorMessage]);
+
+  const sefazBloqueada = !!bloqueioSefazAte && bloqueioSefazAte > agoraTick;
+  const minutosBloqueio = sefazBloqueada ? Math.max(1, Math.ceil((bloqueioSefazAte! - agoraTick) / 60000)) : 0;
+  const horaLiberacao = sefazBloqueada
+    ? new Date(bloqueioSefazAte!).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+    : '';
+
+  const msgBloqueio = (ate: number) =>
+    `A SEFAZ bloqueou temporariamente esta nota por excesso de tentativas (Rejeição 656 - Consumo Indevido). Não clique em transmitir nem consultar até às ${new Date(ate).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}. Cada nova tentativa reinicia o bloqueio.`;
+
+  // Detecta a rejeição 656 em qualquer resposta ou erro e registra o bloqueio
+  const registrarBloqueioSeHouver = (obj: any): boolean => {
+    if (!obj) return false;
+    const texto = [obj.cStat, obj.codigo, obj.codigoErro, obj.xMotivo, obj.mensagemErro, obj.mensagem, obj.message, obj.tipoResposta]
+      .filter(Boolean).join(' ').toLowerCase();
+    const is656 = obj.isConsumoIndevido === true || String(obj.cStat || '') === '656' || String(obj.statusHttp || '') === '429' ||
+      String(obj.codigoErro || '').includes('656') ||
+      texto.includes('656') || texto.includes('consumo indevido') || texto.includes('consumo_indevido') ||
+      texto.includes('excesso de tentativas');
+    if (!is656) return false;
+    const ate = Number(obj.bloqueadoAte) > Date.now() ? Number(obj.bloqueadoAte) : Date.now() + 60 * 60 * 1000;
+    setBloqueioSefazAte(ate);
+    setAgoraTick(Date.now());
+    try { localStorage.setItem(chaveBloqueioSefaz, String(ate)); } catch {}
+    setErrorMessage(msgBloqueio(ate));
+    return true;
+  };
   const [showPreDanfeModal, setShowPreDanfeModal] = useState<boolean>(false);
   const [openingNewTab, setOpeningNewTab] = useState<boolean>(false);
   const [emailFeedback, setEmailFeedback] = useState<string | null>(null);
@@ -371,6 +434,10 @@ export default function EmissaoNfeModal({
 
   // 4. Confirmar & Transmitir SEFAZ com travas anti-duplicidade
   const handleTransmitirSefaz = async () => {
+    if (bloqueioSefazAte && bloqueioSefazAte > Date.now()) {
+      setErrorMessage(msgBloqueio(bloqueioSefazAte));
+      return;
+    }
     setIsTransmitting(true);
     setErrorMessage(null);
 
@@ -380,6 +447,10 @@ export default function EmissaoNfeModal({
       console.log('[SEFAZ Anti-Duplicidade UI] Documento em estado Pendente detectado na UI. Consultando situação na SEFAZ antes de qualquer retransmissão...');
       try {
         const resConsulta = await consultarStatusOuReciboNfe(currentQuoteState, client);
+        if (registrarBloqueioSeHouver(resConsulta)) {
+          setIsTransmitting(false);
+          return;
+        }
         if (resConsulta.sucesso && resConsulta.statusNfe === 'Emitida') {
           setTransmissionResult(resConsulta);
           const updatedQuote: Quote = {
@@ -402,6 +473,10 @@ export default function EmissaoNfeModal({
           return;
         }
       } catch (ePre) {
+        if (registrarBloqueioSeHouver(ePre)) {
+          setIsTransmitting(false);
+          return;
+        }
         console.warn('Aviso na verificação prévia de status na UI:', ePre);
       }
     }
@@ -431,6 +506,17 @@ export default function EmissaoNfeModal({
     try {
       // 2. Envia a solicitação para a API fiscal / SEFAZ com todos os itens da cotação
       const res = await transmitirNfeSefaz(currentQuoteState, client);
+
+      if (registrarBloqueioSeHouver(res)) {
+        // Bloqueio 656: a nota NÃO foi recebida; mantém como Pendente para nova tentativa após o prazo
+        try {
+          await updateCotacaoNfeStatusDb(currentQuoteState.id || currentQuoteState.quoteNumber, {
+            status_nfe: 'Pendente',
+            mensagem_erro_nfe: 'Bloqueio temporário SEFAZ (656 - Consumo Indevido). Aguarde 1 hora.'
+          });
+        } catch {}
+        return;
+      }
 
       if (res.sucesso && res.statusNfe === 'Emitida') {
         // 3. Sucesso: Grava a nfe_chave, nfe_numero, danfe_url, xml_url e muda o status para "Emitida"
@@ -513,6 +599,7 @@ export default function EmissaoNfeModal({
         onSuccess(errorQuote);
       }
     } catch (err: any) {
+      if (registrarBloqueioSeHouver(err)) return;
       const isNetOrTimeout = err?.name === 'TimeoutError' || 
                              err?.message?.toLowerCase().includes('timeout') || 
                              err?.message?.toLowerCase().includes('abort') ||
@@ -546,10 +633,15 @@ export default function EmissaoNfeModal({
   };
 
   const handleConsultarStatusOuRecibo = async () => {
+    if (bloqueioSefazAte && bloqueioSefazAte > Date.now()) {
+      setErrorMessage(msgBloqueio(bloqueioSefazAte));
+      return;
+    }
     setIsConsultingRecibo(true);
     setErrorMessage(null);
     try {
       const res = await consultarStatusOuReciboNfe(currentQuoteState, client);
+      if (registrarBloqueioSeHouver(res)) return;
       if (res.sucesso && res.statusNfe === 'Emitida') {
         setTransmissionResult(res);
         const updatedQuote: Quote = {
@@ -593,6 +685,7 @@ export default function EmissaoNfeModal({
         setErrorMessage(msg);
       }
     } catch (err: any) {
+      if (registrarBloqueioSeHouver(err)) return;
       setErrorMessage(err?.message || 'Falha ao consultar recibo/situação na SEFAZ.');
     } finally {
       setIsConsultingRecibo(false);
@@ -751,7 +844,7 @@ export default function EmissaoNfeModal({
                     <button
                       type="button"
                       onClick={handleConsultarStatusOuRecibo}
-                      disabled={isConsultingRecibo || isTransmitting}
+                      disabled={isConsultingRecibo || isTransmitting || sefazBloqueada}
                       className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-lg transition-colors flex items-center gap-2 cursor-pointer shadow-sm text-xs disabled:opacity-50"
                     >
                       {isConsultingRecibo ? (
@@ -872,8 +965,19 @@ export default function EmissaoNfeModal({
           })()}
 
           {/* Erro Banner */}
+          {sefazBloqueada && (
+            <div className="p-4 rounded-xl bg-amber-950/70 border border-amber-500/50 text-amber-200 flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <h4 className="font-bold text-sm">Bloqueio temporário da SEFAZ (656 - Consumo Indevido)</h4>
+                <p className="text-xs leading-relaxed">
+                  A SEFAZ bloqueou esta nota por excesso de tentativas. Os botões de transmitir e consultar ficam travados por mais {minutosBloqueio} min (liberação às {horaLiberacao}). Não é preciso fazer nada: após esse horário, clique uma única vez em "Confirmar & Transmitir SEFAZ".
+                </p>
+              </div>
+            </div>
+          )}
           {errorMessage && (
-            <div className="p-4 rounded-xl bg-rose-950/70 border border-rose-500/50 text-rose-200 flex items-start gap-3 animate-in fade-in duration-200">
+            <div ref={errorBannerRef} className="p-4 rounded-xl bg-rose-950/70 border border-rose-500/50 text-rose-200 flex items-start gap-3 animate-in fade-in duration-200">
               <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
               <div className="space-y-1">
                 <h4 className="font-bold text-sm text-rose-200">Rejeição na Transmissão Fiscal</h4>
@@ -1248,7 +1352,7 @@ export default function EmissaoNfeModal({
                 <button
                   type="button"
                   onClick={() => setShowPreDanfeModal(true)}
-                  disabled={isTransmitting || loadingCompany}
+                  disabled={isTransmitting || loadingCompany || sefazBloqueada}
                   className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-indigo-300 hover:text-indigo-200 border border-indigo-500/40 hover:border-indigo-400 font-bold text-xs rounded-xl transition-all shadow-sm flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                   title="Visualizar modelo de conferência (Pré-DANFE) antes de transmitir para a SEFAZ"
                 >
@@ -1260,7 +1364,7 @@ export default function EmissaoNfeModal({
                   <button
                     type="button"
                     onClick={handleConsultarStatusOuRecibo}
-                    disabled={isConsultingRecibo || isTransmitting}
+                    disabled={isConsultingRecibo || isTransmitting || sefazBloqueada}
                     className="px-4 py-2.5 bg-amber-600 hover:bg-amber-500 active:bg-amber-700 text-white font-bold text-xs rounded-xl transition-all shadow-md shadow-amber-600/30 flex items-center gap-2 cursor-pointer disabled:opacity-50"
                     title="Consultar processamento do recibo ou situação da chave na SEFAZ sem retransmitir"
                   >
@@ -1282,7 +1386,7 @@ export default function EmissaoNfeModal({
                 <button
                   type="button"
                   onClick={handleTransmitirSefaz}
-                  disabled={isTransmitting || loadingCompany}
+                  disabled={isTransmitting || loadingCompany || sefazBloqueada}
                   className="px-5 py-2.5 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-bold text-xs rounded-xl transition-all shadow-lg shadow-indigo-600/30 flex items-center gap-2 cursor-pointer disabled:opacity-50"
                 >
                   {isTransmitting ? (
@@ -1293,7 +1397,7 @@ export default function EmissaoNfeModal({
                   ) : (
                     <>
                       <Send className="w-4 h-4" />
-                      <span>Confirmar & Transmitir SEFAZ</span>
+                      <span>{sefazBloqueada ? `Bloqueado pela SEFAZ - liberado às ${horaLiberacao}` : 'Confirmar & Transmitir SEFAZ'}</span>
                     </>
                   )}
                 </button>
@@ -1606,11 +1710,11 @@ export default function EmissaoNfeModal({
                     setShowPreDanfeModal(false);
                     handleTransmitirSefaz();
                   }}
-                  disabled={isTransmitting || loadingCompany}
+                  disabled={isTransmitting || loadingCompany || sefazBloqueada}
                   className="px-5 py-2.5 bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white font-bold text-xs rounded-xl transition-all shadow-lg shadow-indigo-600/30 flex items-center gap-2 cursor-pointer disabled:opacity-50"
                 >
                   <Send className="w-4 h-4" />
-                  <span>Confirmar & Transmitir SEFAZ</span>
+                  <span>{sefazBloqueada ? `Bloqueado pela SEFAZ - liberado às ${horaLiberacao}` : 'Confirmar & Transmitir SEFAZ'}</span>
                 </button>
               </div>
             </div>

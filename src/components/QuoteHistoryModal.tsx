@@ -163,6 +163,11 @@ export default function QuoteHistoryModal({
       // Ignora registros deletados (soft delete)
       if (q.deletado_em || (q as any).deleted_at) return;
 
+      // Ignora rascunhos vazios acumulados
+      const isDraftVazio = (q.clientName === 'Rascunho em Edição' || String(q.clientName || '').toLowerCase().includes('rascunho machine')) &&
+        (!q.items || q.items.length === 0);
+      if (isDraftVazio) return;
+
       const key = (q.quoteNumber || q.id || '').trim().toLowerCase();
       if (key && !seen.has(key)) {
         seen.add(key);

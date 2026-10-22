@@ -1677,6 +1677,7 @@ export interface FetchCotacoesOptions {
   dataFim?: string;
   situacao?: string;
   forceRefresh?: boolean;
+  includeDrafts?: boolean;
 }
 
 // Cache em memória de curta duração para aceleração da navegação e troca de abas
@@ -1813,6 +1814,18 @@ export async function fetchCotacoesDb(
     let result: SupabaseCotacao[] = [];
     if (data && Array.isArray(data)) {
       result = (data as SupabaseCotacao[])
+        .filter((c: any) => {
+          // Ignora cotações deletadas
+          if (c.deletado_em) return false;
+          // Ignora rascunhos vazios acumulados
+          if (!options?.includeDrafts) {
+            const isRascunhoVazio = (c.cliente_nome === 'Rascunho em Edição' || String(c.cliente_nome || '').toLowerCase().includes('rascunho machine')) &&
+              (!c.cotacao_itens || c.cotacao_itens.length === 0);
+            if (isRascunhoVazio) return false;
+            if (c.status === 'rejeitado' && c.situacao === 'CANCELADO' && (!c.cotacao_itens || c.cotacao_itens.length === 0)) return false;
+          }
+          return true;
+        })
         .map((c: any) => {
           const clienteRelacionado = c.clientes;
           const clienteNomeResolvido = c.cliente_nome || clienteRelacionado?.nome || clienteRelacionado?.razao_social || clienteRelacionado?.empresa || 'Cliente Balcão';

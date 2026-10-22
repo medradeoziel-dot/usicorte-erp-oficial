@@ -35,6 +35,7 @@ import {
   formatarEnderecoEmitenteLimpo,
   DEFAULT_COMPANY_DATA 
 } from '../services/companyService';
+import { limparRascunhosVaziosDb } from '../services/cotacaoReservaService';
 import { formatCNPJ, formatCPF, formatCEP, formatPhone } from '../utils/validators';
 import { SEFAZ_SP_URLS, obterAmbienteSefaz, obterSefazEndpoint } from '../services/nfeService';
 
@@ -118,6 +119,29 @@ export default function CompanySettingsModule({ onBackToDashboard }: CompanySett
       showStatus(`Erro ao atualizar número da NF-e: ${e?.message || 'Falha de conexão'}`, 'error');
     } finally {
       setIsSavingNfeNumber(false);
+    }
+  };
+
+  const [isCleaningDrafts, setIsCleaningDrafts] = useState<boolean>(false);
+
+  const handleCleanDrafts = async () => {
+    if (!confirm('Deseja limpar todos os rascunhos vazios acumulados no banco de dados e recalcular a numeração sequencial correta?')) {
+      return;
+    }
+    setIsCleaningDrafts(true);
+    try {
+      const res = await limparRascunhosVaziosDb();
+      if (res.success) {
+        showStatus(`🧹 Limpeza concluída: ${res.purgedCount} rascunhos vazios limpos do Supabase! Próxima cotação: ${res.nextQuoteNumber || 'recalculada'}.`, 'success');
+        const updated = await fetchCompanyData();
+        setFormData(updated);
+      } else {
+        showStatus('Aviso ao limpar rascunhos: ' + (res.error?.message || 'Falha'), 'error');
+      }
+    } catch (err: any) {
+      showStatus('Erro ao executar limpeza: ' + (err?.message || 'Erro'), 'error');
+    } finally {
+      setIsCleaningDrafts(false);
     }
   };
 
@@ -934,7 +958,7 @@ export default function CompanySettingsModule({ onBackToDashboard }: CompanySett
                 const next2 = `${rawPrefix}${String(currentSeq + 1).padStart(6, '0')}`;
 
                 return (
-                  <div className="flex flex-wrap items-center gap-2 font-mono text-xs">
+                  <div className="flex flex-wrap items-center gap-3 font-mono text-xs">
                     <div className="px-3 py-1.5 bg-indigo-950/70 border border-indigo-600/40 text-indigo-300 rounded-lg font-black flex flex-col">
                       <span className="text-[9px] font-sans text-indigo-400 uppercase font-semibold">Próximo Orçamento</span>
                       <span>{next1}</span>
@@ -946,6 +970,21 @@ export default function CompanySettingsModule({ onBackToDashboard }: CompanySett
                       <span className="text-[9px] font-sans text-slate-500 uppercase font-semibold">Orçamento Seguinte</span>
                       <span>{next2}</span>
                     </div>
+
+                    <button
+                      type="button"
+                      onClick={handleCleanDrafts}
+                      disabled={isCleaningDrafts}
+                      className="px-3 py-2 bg-amber-950/60 hover:bg-amber-900/80 active:bg-amber-800 text-amber-300 border border-amber-600/40 text-xs font-sans font-bold rounded-xl transition-all shadow-sm flex items-center gap-1.5 cursor-pointer disabled:opacity-50 ml-auto"
+                      title="Apaga os rascunhos vazios acumulados no banco de dados e recalcula o sequencial correto oficial"
+                    >
+                      {isCleaningDrafts ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-300" />
+                      ) : (
+                        <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                      )}
+                      <span>Limpar Rascunhos Vazios</span>
+                    </button>
                   </div>
                 );
               })()}
