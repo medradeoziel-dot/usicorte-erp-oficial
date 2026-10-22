@@ -4105,6 +4105,27 @@ export async function consultarStatusOuReciboNfe(
         situacao: 'FATURADO'
       });
 
+      try {
+        const numSeq = parseInt(String(numeroNfe).replace(/\D/g, ''), 10) || 1;
+        const serieSeq = parseInt(String(serie).replace(/\D/g, ''), 10) || 1;
+        const chaveLimpa = finalChave.replace(/\D/g, '') || finalChave;
+
+        await inserirNotaFiscalDb({
+          cotacao_id: quote.id || quote.quoteNumber || null,
+          cliente_id: client?.id || quote.clientId || null,
+          numero_nfe: numSeq,
+          serie_nfe: serieSeq,
+          chave_acesso: chaveLimpa,
+          protocolo: resRecibo.nProt,
+          status: 'AUTORIZADA',
+          xml_conteudo: xmlConteudo,
+          valor_total: Number(valorTotal) || 0
+        });
+        await incrementEmitenteUltimoNumeroNfe(numSeq);
+      } catch (nfErr) {
+        console.warn('Aviso ao sincronizar notas_fiscais via consulta recibo:', nfErr);
+      }
+
       return {
         sucesso: true,
         statusNfe: 'Emitida',
@@ -4232,6 +4253,27 @@ export async function consultarStatusOuReciboNfe(
         nfe_emitida_em: dtEmissao.toISOString(),
         situacao: 'FATURADO'
       });
+
+      try {
+        const numSeq = parseInt(String(numeroNfe).replace(/\D/g, ''), 10) || 1;
+        const serieSeq = parseInt(String(serie).replace(/\D/g, ''), 10) || 1;
+        const chaveLimpa = chaveAcesso.replace(/\D/g, '') || chaveAcesso;
+
+        await inserirNotaFiscalDb({
+          cotacao_id: quote.id || quote.quoteNumber || null,
+          cliente_id: client?.id || quote.clientId || null,
+          numero_nfe: numSeq,
+          serie_nfe: serieSeq,
+          chave_acesso: chaveLimpa,
+          protocolo: resChave.nProt,
+          status: 'AUTORIZADA',
+          xml_conteudo: xmlConteudo,
+          valor_total: Number(valorTotal) || 0
+        });
+        await incrementEmitenteUltimoNumeroNfe(numSeq);
+      } catch (nfErr) {
+        console.warn('Aviso ao sincronizar notas_fiscais via consulta situacao:', nfErr);
+      }
 
       return {
         sucesso: true,
