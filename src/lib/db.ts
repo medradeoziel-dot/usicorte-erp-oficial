@@ -1283,6 +1283,7 @@ export async function updateCotacaoNfeStatusDb(
     serie_nfe?: string;
     protocolo_autorizacao?: string;
     protocolo_nfe?: string;
+    nfe_recibo?: string;
     danfe_url?: string;
     xml_url?: string;
     xml_conteudo?: string;
@@ -1412,6 +1413,26 @@ export async function updateCotacaoNfeStatusDb(
           error = retry.error;
         }
       }
+    }
+
+    // Persistência do número de recibo do lote (coluna opcional nfe_recibo).
+    // Executada isoladamente para não comprometer a atualização principal caso a coluna não exista no schema.
+    if (!error && payload.nfe_recibo) {
+      try {
+        const recLimpo = String(payload.nfe_recibo).replace(/\D/g, '');
+        if (recLimpo) {
+          if (isIdUuid) {
+            await db.from('cotacoes').update({ nfe_recibo: recLimpo }).eq('id', cotacaoIdOrNumber);
+          } else {
+            const resolvedUuidRec = await resolveCotacaoUuid(cotacaoIdOrNumber);
+            if (resolvedUuidRec) {
+              await db.from('cotacoes').update({ nfe_recibo: recLimpo }).eq('id', resolvedUuidRec);
+            } else {
+              await db.from('cotacoes').update({ nfe_recibo: recLimpo }).eq('numero', cotacaoIdOrNumber);
+            }
+          }
+        }
+      } catch {}
     }
 
     // 2. Se não deu erro mas queremos garantir sincronia em duplicatas por chave de acesso

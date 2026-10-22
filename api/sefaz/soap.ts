@@ -1719,6 +1719,15 @@ export default async function handler(req: any, res: any): Promise<void> {
     const { endpoint, soapAction, soapEnvelope, timeoutMs, certificado, tpAmb, servico, chaveAcesso } = dadosReq;
 
     let envelopeParaTransmissao = dadosReq.soapEnvelope || '';
+    // Se o cliente enviou um nfeProc (NF-e + protNFe), extrai apenas a <NFe> para transmissão:
+    // a SEFAZ rejeita enviNFe contendo nfeProc/protNFe com erro de schema.
+    if (envelopeParaTransmissao.includes('<nfeProc')) {
+      const mNfe = envelopeParaTransmissao.match(/<NFe xmlns="http:\/\/www\.portalfiscal\.inf\.br\/nfe"[\s\S]*?<\/NFe>/);
+      if (mNfe) {
+        console.warn('[SEFAZ Proxy Vercel] Envelope continha nfeProc/protNFe. Extraindo apenas a <NFe> para transmissão.');
+        envelopeParaTransmissao = envelopeParaTransmissao.replace(/<nfeProc[\s\S]*?<\/nfeProc>/, mNfe[0]);
+      }
+    }
     if (envelopeParaTransmissao && 
         (envelopeParaTransmissao.includes('<infNFe') || envelopeParaTransmissao.includes('<infEvento')) && 
         !envelopeParaTransmissao.includes('<Signature')) {

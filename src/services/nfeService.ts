@@ -563,19 +563,8 @@ export interface NfeTransmissionResult {
   mensagemErro?: string;
 }
 
-/**
- * Gera o digest value (Base64) da NF-e para validação do protocolo SEFAZ
- */
-export function gerarDigVal(chave: string, valor: number): string {
-  const seed = `${chave}:${valor.toFixed(2)}`;
-  let hash = 0;
-  for (let i = 0; i < seed.length; i++) {
-    hash = ((hash << 5) - hash) + seed.charCodeAt(i);
-    hash |= 0;
-  }
-  const str = Math.abs(hash).toString(16).padStart(8, '0') + chave.slice(0, 12);
-  return btoa(str).slice(0, 28);
-}
+// REMOVIDO: gerarDigVal() fabricava um digest falso para o protNFe.
+// O digest value (digVal) e o número de protocolo (nProt) só podem vir da resposta oficial da SEFAZ.
 
 /**
  * Aciona o download do arquivo XML no navegador com a nomenclatura oficial da SEFAZ:
@@ -3054,7 +3043,14 @@ export function gerarXmlNfe(
   const nfeXmlCompacto = compactarXmlSefaz(nfeXml);
 
   if (protocolo) {
-    const digVal = gerarDigVal(chaveValida, valorTotal);
+    const protocoloLimpo = String(protocolo).replace(/\D/g, '');
+    // Proteção: o protNFe SÓ pode ser embutido no XML quando o protocolo for real da SEFAZ
+    // (15 dígitos). Qualquer outro valor indica protocolo fabricado localmente — nesse caso,
+    // o XML é devolvido sem protNFe para nunca simular uma autorização inexistente.
+    if (protocoloLimpo.length !== 15) {
+      console.warn('[NF-e] Protocolo não oficial da SEFAZ detectado. XML gerado SEM protNFe (nota não autorizada).');
+      return `<?xml version="1.0" encoding="UTF-8"?>${nfeXmlCompacto}`;
+    }
     return compactarXmlSefaz(`<?xml version="1.0" encoding="UTF-8"?>
 <nfeProc versao="4.00" xmlns="http://www.portalfiscal.inf.br/nfe">
 ${nfeXmlCompacto}
@@ -3064,8 +3060,7 @@ ${nfeXmlCompacto}
       <verAplic>SP_NFE_PL_009_V4</verAplic>
       <chNFe>${chaveValida}</chNFe>
       <dhRecbto>${dtIso}</dhRecbto>
-      <nProt>${protocolo}</nProt>
-      <digVal>${digVal}</digVal>
+      <nProt>${protocoloLimpo}</nProt>
       <cStat>100</cStat>
       <xMotivo>Autorizado o uso da NF-e</xMotivo>
     </infProt>
@@ -3356,7 +3351,8 @@ export async function transmitirNfeSefaz(
     }
   } catch {}
 
-  let protocolo = `135${anoMesDia(dataEmissao)}${String(Math.floor(100000000 + Math.random() * 900000000))}`;
+  // O número de protocolo (nProt) NUNCA é gerado localmente: ele só pode vir da resposta oficial da SEFAZ.
+  let protocolo = '';
   let origemRecuperacao: 'consulta_previa' | 'timeout_consulta' | 'consulta_recibo' | undefined;
 
   // 6. Geração do XML e DANFE (Status 100 - Autorizado o uso da NF-e)
@@ -3373,7 +3369,7 @@ export async function transmitirNfeSefaz(
     chaveAcesso,
     valorTotal,
     dataEmissao,
-    protocolo,
+    undefined, // Protocolo: somente após autorização real da SEFAZ (nunca antes da transmissão)
     refOrigemXml,
     '1' // Produção oficial SEFAZ (tpAmb = 1)
   );
@@ -3546,6 +3542,7 @@ export async function transmitirNfeSefaz(
               chave_acesso: chaveAcesso,
               nfe_numero: numeroNfe,
               serie_nfe: serie,
+              nfe_recibo: nRecibo,
               mensagem_erro_nfe: msgPendente
             });
           } catch {}
@@ -3706,6 +3703,7 @@ export async function transmitirNfeSefaz(
               chave_acesso: chaveAcesso,
               nfe_numero: numeroNfe,
               serie_nfe: serie,
+              nfe_recibo: nRec,
               mensagem_erro_nfe: msgPendente
             });
           } catch {}
@@ -3845,6 +3843,7 @@ export async function transmitirNfeSefaz(
               chave_acesso: chaveAcesso,
               nfe_numero: numeroNfe,
               serie_nfe: serie,
+              nfe_recibo: nRec,
               mensagem_erro_nfe: msgPendente
             });
           } catch {}
@@ -3951,6 +3950,7 @@ export async function transmitirNfeSefaz(
               chave_acesso: chaveAcesso,
               nfe_numero: numeroNfe,
               serie_nfe: serie,
+              nfe_recibo: nRec,
               mensagem_erro_nfe: msgPendente
             });
           } catch {}
@@ -4004,6 +4004,24 @@ export async function transmitirNfeSefaz(
       statusNfe: 'Erro',
       mensagemErro: errMsg
     };
+  }
+
+  // Garante que o XML final (salvo/baixado) contenha SOMENTE o protocolo real retornado pela SEFAZ.
+  // Se a resposta da SEFAZ não trouxe o nfeProc completo, reconstrói o XML com o nProt oficial.
+  if (protocolo && !xmlConteudo.includes(`<nProt>${protocolo}</nProt>`)) {
+    xmlConteudo = gerarXmlNfe(
+      emitente,
+      destinatario,
+      itensFiscais,
+      numeroNfe,
+      serie,
+      chaveAcesso,
+      valorTotal,
+      dataEmissao,
+      protocolo,
+      refOrigemXml,
+      '1'
+    );
   }
 
   const xmlBlob = new Blob([xmlConteudo], { type: 'application/xml;charset=utf-8' });
@@ -4143,6 +4161,11 @@ export async function consultarStatusOuReciboNfe(
   const quoteIdOrNum = quote.id || quote.quoteNumber;
   let chaveAcesso = recalcularChaveAcessoComDvCorreto(quote.nfe_chave || quote.chave_acesso || '');
   let nRec = obterReciboLocal(quoteIdOrNum, chaveAcesso);
+
+  // Fallback: recibo persistido no banco de dados (sobrevive a troca de navegador/computador)
+  if (!nRec && (quote as any).nfe_recibo) {
+    nRec = String((quote as any).nfe_recibo).replace(/\D/g, '');
+  }
 
   if (!nRec && quote.mensagem_erro_nfe) {
     const matchRec = quote.mensagem_erro_nfe.match(/Recibo\s*(?:Nº|N|n°)?\s*(\d+)/i);
