@@ -21,7 +21,9 @@ import {
   recalcularChaveAcessoComDvCorreto,
   calcularDvModulo11,
   consultarStatusOuReciboNfe,
-  obterReciboLocal
+  obterReciboLocal,
+  fetchClienteCompletoParaDanfe,
+  ClienteDanfeDestinatario
 } from '../services/nfeService';
 import CancelarNfeModal from './CancelarNfeModal';
 import DanfeEspelhoA4Modal from './DanfeEspelhoA4Modal';
@@ -378,20 +380,41 @@ export default function EmissaoNfeModal({
     };
   }, []);
 
-  // 2. Dados do Destinatário / Cliente
+  // 2. Dados do Destinatário / Cliente: Busca dados completos de clientes no Supabase
+  const [clienteDanfeDest, setClienteDanfeDest] = useState<ClienteDanfeDestinatario | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    async function carregarClienteDestinatario() {
+      try {
+        const c = await fetchClienteCompletoParaDanfe(currentQuoteState, client);
+        if (isMounted && c) {
+          setClienteDanfeDest(c);
+        }
+      } catch (e) {
+        console.warn('Aviso ao carregar cliente completo em EmissaoNfeModal:', e);
+      }
+    }
+    carregarClienteDestinatario();
+    return () => { isMounted = false; };
+  }, [currentQuoteState, client]);
+
   const clienteInfo = useMemo(() => {
-    const nome = client?.name || client?.nome || currentQuoteState.clientName || 'Cliente Balcão';
-    const doc = client?.document || client?.documento || currentQuoteState.clientDocument || 'Não informado';
-    const ie = buscarInscricaoEstadual(client) !== 'ISENTO' 
-      ? buscarInscricaoEstadual(client) 
-      : buscarInscricaoEstadual(currentQuoteState);
-    const indicadorIe = client?.indicador_ie || client?.indicadorIe || (doc.replace(/\D/g, '').length > 11 ? '1' : '9');
-    const cidade = client?.city || client?.cidade || currentQuoteState.clientCity || 'BAURU';
-    const uf = (client?.state || client?.uf || currentQuoteState.clientState || 'SP').toUpperCase();
-    const endereco = client?.street || client?.endereco || 'Endereço Comercial';
+    const nome = clienteDanfeDest?.razao_social || clienteDanfeDest?.nome || client?.razao_social || client?.name || client?.nome || currentQuoteState.clientName || 'Cliente Balcão';
+    const doc = clienteDanfeDest?.doc || client?.document || client?.documento || currentQuoteState.clientDocument || 'Não informado';
+    const ie = (clienteDanfeDest?.ie && clienteDanfeDest.ie !== 'ISENTO')
+      ? clienteDanfeDest.ie
+      : (buscarInscricaoEstadual(client) !== 'ISENTO' 
+          ? buscarInscricaoEstadual(client) 
+          : buscarInscricaoEstadual(currentQuoteState));
+    const docLimpo = String(doc).replace(/\D/g, '');
+    const indicadorIe = client?.indicador_ie || client?.indicadorIe || (docLimpo.length > 11 ? '1' : '9');
+    const cidade = clienteDanfeDest?.cidade || client?.city || client?.cidade || currentQuoteState.clientCity || 'BAURU';
+    const uf = (clienteDanfeDest?.uf || client?.state || client?.uf || currentQuoteState.clientState || 'SP').toUpperCase();
+    const endereco = clienteDanfeDest?.endereco || client?.street || client?.endereco || 'Endereço Comercial';
 
     return { nome, doc, ie, indicadorIe, cidade, uf, endereco };
-  }, [client, currentQuoteState]);
+  }, [client, currentQuoteState, clienteDanfeDest]);
 
   // 3. Validação de CFOP Automática:
   // Se a UF do cliente for "SP" => cfop_interno (5102)

@@ -3106,26 +3106,79 @@ export async function transmitirNfeSefaz(
     aliquotaCbs: typeof (companyData as any).aliquota_cbs === 'number' ? (companyData as any).aliquota_cbs : 0.90
   };
 
-  // 2. Dados do Destinatário
-  const doc = (client?.document || client?.documento || quote.clientDocument || '').replace(/\D/g, '');
-  const tipoDoc = (client?.type || client?.tipo || (doc.length > 11 ? 'CNPJ' : 'CPF')) as 'CNPJ' | 'CPF';
-  const ufDest = (client?.state || client?.uf || quote.clientState || 'SP').toUpperCase().trim();
+  // 2. Dados do Destinatário: Obtém os dados completos do cliente diretamente do Supabase/Cache sem quebrar a requisição
+  const cliDanfe = await fetchClienteCompletoParaDanfe(quote, client);
+  const cliRaw = (cliDanfe as any).clienteRaw || {};
+
+  const cleanDoc = (
+    cliDanfe.doc ||
+    client?.document ||
+    client?.documento ||
+    quote.clientDocument ||
+    cliRaw.cnpj_cpf ||
+    cliRaw.documento ||
+    cliRaw.document ||
+    ''
+  ).replace(/\D/g, '');
+
+  const tipoDoc = (
+    client?.type ||
+    client?.tipo ||
+    cliRaw.tipo ||
+    (cleanDoc.length > 11 ? 'CNPJ' : 'CPF')
+  ) as 'CNPJ' | 'CPF';
+
+  const ufDest = (
+    cliDanfe.uf ||
+    client?.state ||
+    client?.uf ||
+    cliRaw.uf ||
+    quote.clientState ||
+    'SP'
+  ).toUpperCase().trim();
+
+  const razaoSocialDest = (
+    cliDanfe.razao_social ||
+    cliDanfe.nome ||
+    cliRaw.razao_social ||
+    cliRaw.nome ||
+    client?.name ||
+    client?.nome ||
+    quote.clientName ||
+    'CLIENTE BALCAO'
+  ).trim();
+
+  const ieDest = (
+    cliDanfe.ie ||
+    cliDanfe.inscricao_estadual ||
+    buscarInscricaoEstadual(client) ||
+    buscarInscricaoEstadual(cliRaw) ||
+    (quote as any)?.clientIe ||
+    ''
+  ).trim();
+
+  const rawEndereco = cliDanfe.endereco || client?.street || client?.endereco || cliRaw.endereco || cliRaw.logradouro || 'ENDERECO DO CLIENTE';
+  const { logradouro: destLogr, numero: destNum, bairro: destBair } = extrairComponentesEndereco(
+    rawEndereco,
+    (client as any)?.number || (client as any)?.numero || cliRaw.numero || 'S/N',
+    cliDanfe.bairro || client?.neighborhood || client?.bairro || cliRaw.bairro || 'CENTRO'
+  );
 
   const destinatario: DadosDestinatarioNfe = {
-    nome: client?.name || client?.nome || quote.clientName || 'CLIENTE BALCAO',
-    documento: doc || (tipoDoc === 'CNPJ' ? '00000000000191' : '00000000191'),
+    nome: razaoSocialDest,
+    documento: cleanDoc || (tipoDoc === 'CNPJ' ? '00000000000191' : '00000000191'),
     tipoDocumento: tipoDoc,
-    inscricaoEstadual: client?.inscricao_estadual || client?.inscricaoEstadual || client?.ie || '',
-    indicadorIe: client?.indicador_ie || client?.indicadorIe || (tipoDoc === 'CNPJ' ? '1' : '9'),
-    endereco: client?.street || client?.endereco || 'ENDERECO DO CLIENTE',
-    numero: (client as any)?.number || (client as any)?.numero || 'S/N',
-    bairro: client?.neighborhood || client?.bairro || 'CENTRO',
-    cidade: client?.city || client?.cidade || quote.clientCity || 'BAURU',
+    inscricaoEstadual: ieDest === 'ISENTO' ? '' : ieDest,
+    indicadorIe: client?.indicador_ie || client?.indicadorIe || cliRaw.indicador_ie || (ieDest && ieDest !== 'ISENTO' ? '1' : (tipoDoc === 'CNPJ' ? '9' : '9')),
+    endereco: destLogr,
+    numero: destNum || 'S/N',
+    bairro: destBair || 'CENTRO',
+    cidade: cliDanfe.cidade || client?.city || client?.cidade || cliRaw.cidade || quote.clientCity || 'BAURU',
     uf: ufDest,
-    cep: client?.cep || '17000-000',
-    codigoIbge: (client as any)?.codigo_ibge || (client as any)?.ibge || (client as any)?.ibgeCode || (client as any)?.cMun || '',
-    cMun: (client as any)?.cMun || (client as any)?.ibge_cidade || (client as any)?.codigo_ibge || '',
-    telefone: client?.phone || client?.telefone || quote.clientPhone || '',
+    cep: (cliDanfe.cep || client?.cep || cliRaw.cep || quote.clientCep || '17000-000').replace(/\D/g, '').padEnd(8, '0').slice(0, 8),
+    codigoIbge: (client as any)?.codigo_ibge || (client as any)?.ibge || cliRaw.codigo_ibge || '',
+    cMun: (client as any)?.cMun || (client as any)?.ibge_cidade || cliRaw.codigo_ibge || '',
+    telefone: cliDanfe.telefone || client?.phone || client?.telefone || quote.clientPhone || '',
     email: client?.email || quote.clientEmail || ''
   };
 

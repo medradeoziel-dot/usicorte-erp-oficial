@@ -1727,8 +1727,9 @@ export async function fetchCotacoesDb(
     }
 
     // Otimização da Query do Supabase: busca principal trazendo apenas os campos necessários
+    // Utiliza relacionamento padrão de clientes(razao_social, nome_fantasia) sem alias com sufixo clientes_1
     const defaultSelect = options?.columns || 
-      'id, numero, data, cliente_id, cliente_nome, contato, telefone, email, status, situacao, observacoes, valor_total, created_at, updated_at, status_nfe, nfe_numero, nfe_chave, danfe_url, clientes(id, nome, razao_social, empresa, contato), cotacao_itens(id, cotacao_id, produto, medida, descricao, quantidade, valor_unitario, valor_total, observacao, desenho_url)';
+      'id, numero, data, cliente_id, cliente_nome, contato, telefone, email, status, situacao, observacoes, valor_total, created_at, updated_at, status_nfe, nfe_numero, nfe_chave, danfe_url, clientes(razao_social, nome_fantasia), cotacao_itens(id, cotacao_id, produto, medida, descricao, quantidade, valor_unitario, valor_total, observacao, desenho_url)';
 
     let q: any = db
       .from('cotacoes')
@@ -1802,11 +1803,11 @@ export async function fetchCotacoesDb(
 
     let { data, error, status } = await q;
 
-    // Fallback: se houver erro no relacionamento com clientes(*) ou colunas específicas
+    // Fallback: se houver erro no relacionamento com clientes ou colunas específicas
     if (error) {
       console.warn("Aviso na consulta cotacoes otimizada, tentando fallback:", error.message);
-      const isClientesErr = error.message?.toLowerCase().includes('clientes') || error.code === 'PGRST200';
-      const selectQuery = isClientesErr ? '*, cotacao_itens(*)' : '*, clientes(*), cotacao_itens(*)';
+      const isClientesErr = error.message?.toLowerCase().includes('clientes') || error.code === 'PGRST200' || error.message?.includes('clientes_1');
+      const selectQuery = isClientesErr ? '*, cotacao_itens(*)' : '*, clientes(razao_social, nome_fantasia), cotacao_itens(*)';
 
       let retryQ: any = db
         .from('cotacoes')
@@ -1864,9 +1865,29 @@ export async function fetchCotacoesDb(
       }
 
       const retryRes = await retryQ;
-      data = retryRes.data;
-      error = retryRes.error;
-      status = retryRes.status;
+      if (retryRes.error) {
+        console.warn("Aviso no fallback de cotacoes com clientes, buscando cotacoes sem join:", retryRes.error.message);
+        let safeQ: any = db
+          .from('cotacoes')
+          .select('*, cotacao_itens(*)')
+          .order('created_at', { ascending: false });
+        if (statusNormalizado === 'pendente') {
+          safeQ = safeQ.or('status.eq.Pendente,status.eq.pendente');
+        }
+        if (options?.limit && options.limit > 0) {
+          safeQ = safeQ.limit(options.limit);
+        } else if (statusNormalizado === 'pendente' && !options?.search) {
+          safeQ = safeQ.limit(50);
+        }
+        const safeRes = await safeQ;
+        data = safeRes.data;
+        error = safeRes.error;
+        status = safeRes.status;
+      } else {
+        data = retryRes.data;
+        error = retryRes.error;
+        status = retryRes.status;
+      }
     }
 
     if (error) {
@@ -2462,27 +2483,41 @@ export async function fetchCotacaoById(idOrNumero: string): Promise<SupabaseCota
 
     // 1. Busca nativa pelo campo 'id' se for um UUID válido
     if (isUuid(clean)) {
-      const { data: dataById } = await db
+      const { data: dataById, error: errById } = await db
         .from('cotacoes')
-        .select('*, clientes(*)')
+        .select('*, clientes(razao_social, nome_fantasia)')
         .eq('id', clean)
         .maybeSingle();
 
-      if (dataById) {
+      if (dataById && !errById) {
         cotacao = dataById;
+      } else {
+        const { data: fbById } = await db
+          .from('cotacoes')
+          .select('*')
+          .eq('id', clean)
+          .maybeSingle();
+        if (fbById) cotacao = fbById;
       }
     }
 
     // 2. Busca pelo campo 'numero' (ex: COT-2026-0001)
     if (!cotacao) {
-      const { data: dataByNumero } = await db
+      const { data: dataByNumero, error: errByNumero } = await db
         .from('cotacoes')
-        .select('*, clientes(*)')
+        .select('*, clientes(razao_social, nome_fantasia)')
         .eq('numero', clean)
         .maybeSingle();
 
-      if (dataByNumero) {
+      if (dataByNumero && !errByNumero) {
         cotacao = dataByNumero;
+      } else {
+        const { data: fbByNum } = await db
+          .from('cotacoes')
+          .select('*')
+          .eq('numero', clean)
+          .maybeSingle();
+        if (fbByNum) cotacao = fbByNum;
       }
     }
 
@@ -2490,7 +2525,7 @@ export async function fetchCotacaoById(idOrNumero: string): Promise<SupabaseCota
     if (!cotacao && isUuid(clean)) {
       const { data: dataFallback } = await db
         .from('cotacoes')
-        .select('*, clientes(*)')
+        .select('*')
         .eq('id', clean)
         .maybeSingle();
 
@@ -2500,6 +2535,26 @@ export async function fetchCotacaoById(idOrNumero: string): Promise<SupabaseCota
     }
 
     if (!cotacao) return null;
+
+    // Se cliente_id existe, hidrata dados completos do cliente diretamente de clientes
+    if (cotacao.cliente_id) {
+      try {
+        const { data: cliData } = await db
+          .from('clientes')
+          .select('*')
+          .eq('id', cotacao.cliente_id)
+          .maybeSingle();
+        if (cliData) {
+          cotacao.clientes = {
+            ...cotacao.clientes,
+            ...cliData
+          };
+          if (!cotacao.cliente_nome || cotacao.cliente_nome === 'Cliente Balcão') {
+            cotacao.cliente_nome = cliData.razao_social || cliData.nome_fantasia || cliData.nome || cotacao.cliente_nome;
+          }
+        }
+      } catch {}
+    }
 
     // 4. CONSULTA INTEGRAL DE TODOS OS ITENS SEM LIMITE NA TABELA 'cotacao_itens'
     // Evita truncamento e garante que todos os 65+ itens sejam carregados
@@ -2538,7 +2593,7 @@ export async function fetchCotacaoById(idOrNumero: string): Promise<SupabaseCota
 
     cotacao.cotacao_itens = itensDaCotacao;
     if (cotacao.clientes && !cotacao.cliente_nome) {
-      cotacao.cliente_nome = cotacao.clientes.nome || cotacao.clientes.razao_social || cotacao.clientes.empresa || 'Cliente Balcão';
+      cotacao.cliente_nome = cotacao.clientes.razao_social || cotacao.clientes.nome_fantasia || cotacao.clientes.nome || cotacao.clientes.empresa || 'Cliente Balcão';
     }
     return cotacao as SupabaseCotacao;
   } catch (err) {
