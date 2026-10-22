@@ -173,6 +173,7 @@ export interface SupabaseCliente {
   tipo?: 'CNPJ' | 'CPF' | string;
   documento?: string;
   nome: string;
+  razao_social?: string;
   nome_fantasia?: string;
   situacao?: string;
   cep?: string;
@@ -216,6 +217,8 @@ export interface SupabaseCotacao {
   created_at?: string;
   updated_at?: string;
   cotacao_itens?: SupabaseCotacaoItem[];
+  // Relacionamento com cliente (clientes)
+  clientes?: SupabaseCliente | null;
   // Pagamento & Faturamento:
   status_pagamento?: string;
   data_pagamento?: string | null;
@@ -1677,33 +1680,34 @@ export async function fetchCotacoesDb(
       return cached.data;
     }
 
-    // Consulta otimizada ignorando registros com exclusão lógica (.is('deletado_em', null))
+    // Consulta oficial exatamente conforme especificação:
+    // await supabase.from('cotacoes').select('*, clientes(*), cotacao_itens(*)').order('created_at', { ascending: false });
     let q = db
       .from('cotacoes')
-      .select('*, cotacao_itens(*)')
-      .is('deletado_em', null)
-      .order('created_at', { ascending: false, nullsFirst: false });
+      .select('*, clientes(*), cotacao_itens(*)')
+      .order('created_at', { ascending: false });
 
-    // 1. Filtro server-side por cliente
+    // 1. Filtro opcional por cliente
     if (filtroCliente && filtroCliente.trim()) {
       q = q.ilike('cliente_nome', `%${filtroCliente.trim()}%`);
     }
 
-    // 2. Filtro server-side por status
-    if (filtroStatus && filtroStatus !== 'todas' && filtroStatus !== 'todos') {
-      if (filtroStatus === 'ativas') {
+    // 2. Filtro opcional por status:
+    const statusNormalizado = (filtroStatus || '').trim().toLowerCase();
+    if (statusNormalizado && statusNormalizado !== 'todas' && statusNormalizado !== 'todos' && statusNormalizado !== 'all' && statusNormalizado !== 'todas as cotações') {
+      if (statusNormalizado === 'ativas') {
         q = q.in('status', ['pendente', 'aprovado', 'rascunho']);
       } else {
-        q = q.eq('status', filtroStatus);
+        q = q.ilike('status', statusNormalizado);
       }
     }
 
-    // 3. Filtro server-side por situação (ex: FATURADO)
+    // 3. Filtro opcional por situação (ex: FATURADO)
     if (options?.situacao) {
       q = q.eq('situacao', options.situacao);
     }
 
-    // 4. Filtros server-side por intervalo de datas
+    // 4. Filtros opcionais por intervalo de datas
     if (options?.dataInicio) {
       q = q.gte('data', options.dataInicio);
     }
@@ -1711,7 +1715,7 @@ export async function fetchCotacoesDb(
       q = q.lte('data', options.dataFim);
     }
 
-    // 5. Paginação e Limites: aplica limite padrão de 50 para evitar erro 500 (Timeout / 57014) no Supabase
+    // 5. Paginação opcional:
     if (options?.page && options.page > 0) {
       const limit = options?.limit ?? 50;
       const from = (options.page - 1) * limit;
@@ -1724,28 +1728,29 @@ export async function fetchCotacoesDb(
       q = q.range(from, to);
     } else if (options?.limit && options.limit > 0) {
       q = q.limit(options.limit);
-    } else {
-      // Limite padrão seguro de 50 registros para evitar estouro de tempo (500 Timeout no Supabase)
-      q = q.limit(50);
     }
 
     let { data, error, status } = await q;
 
-    // Fallback: se a coluna 'deletado_em' ainda não existir na tabela cotacoes do Supabase
-    if (error && (error.code === '42703' || error.message?.toLowerCase().includes('deletado_em') || error.code === 'PGRST204')) {
+    // Fallback: se houver erro no relacionamento com clientes(*)
+    if (error) {
+      console.warn("Aviso na consulta cotacoes com clientes(*), tentando fallback:", error.message);
+      const isClientesErr = error.message?.toLowerCase().includes('clientes') || error.code === 'PGRST200';
+      const selectQuery = isClientesErr ? '*, cotacao_itens(*)' : '*, clientes(*), cotacao_itens(*)';
+
       let retryQ = db
         .from('cotacoes')
-        .select('*, cotacao_itens(*)')
-        .order('created_at', { ascending: false, nullsFirst: false });
+        .select(selectQuery)
+        .order('created_at', { ascending: false });
 
       if (filtroCliente && filtroCliente.trim()) {
         retryQ = retryQ.ilike('cliente_nome', `%${filtroCliente.trim()}%`);
       }
-      if (filtroStatus && filtroStatus !== 'todas' && filtroStatus !== 'todos') {
-        if (filtroStatus === 'ativas') {
+      if (statusNormalizado && statusNormalizado !== 'todas' && statusNormalizado !== 'todos' && statusNormalizado !== 'all') {
+        if (statusNormalizado === 'ativas') {
           retryQ = retryQ.in('status', ['pendente', 'aprovado', 'rascunho']);
         } else {
-          retryQ = retryQ.eq('status', filtroStatus);
+          retryQ = retryQ.ilike('status', statusNormalizado);
         }
       }
       if (options?.situacao) {
@@ -1757,11 +1762,20 @@ export async function fetchCotacoesDb(
       if (options?.dataFim) {
         retryQ = retryQ.lte('data', options.dataFim);
       }
-      if (options?.limit && options.limit > 0) {
+      if (options?.page && options.page > 0) {
+        const limit = options?.limit ?? 50;
+        const from = (options.page - 1) * limit;
+        const to = from + limit - 1;
+        retryQ = retryQ.range(from, to);
+      } else if (options?.offset !== undefined) {
+        const limit = options?.limit ?? 50;
+        const from = options.offset;
+        const to = from + limit - 1;
+        retryQ = retryQ.range(from, to);
+      } else if (options?.limit && options.limit > 0) {
         retryQ = retryQ.limit(options.limit);
-      } else {
-        retryQ = retryQ.limit(50);
       }
+
       const retryRes = await retryQ;
       data = retryRes.data;
       error = retryRes.error;
@@ -1777,12 +1791,22 @@ export async function fetchCotacoesDb(
 
     let result: SupabaseCotacao[] = [];
     if (data && Array.isArray(data)) {
-      result = (data as SupabaseCotacao[]).filter((c: any) => {
-        const num = String(c.numero || c.id || '');
-        if (num.includes('021935') || num.includes('21935')) return false;
-        // Filtro rigoroso: ignora registros com exclusão lógica
-        if (c.deletado_em) return false;
-        return true;
+      result = (data as SupabaseCotacao[])
+        .map((c: any) => {
+          const clienteRelacionado = c.clientes;
+          const clienteNomeResolvido = c.cliente_nome || clienteRelacionado?.nome || clienteRelacionado?.razao_social || clienteRelacionado?.empresa || 'Cliente Balcão';
+          return {
+            ...c,
+            cliente_nome: clienteNomeResolvido,
+            clientes: clienteRelacionado || null
+          };
+        });
+
+      // Ordena rigorosamente do mais recente para o mais antigo por created_at e data
+      result.sort((a, b) => {
+        const dateA = new Date(a.created_at || a.data || 0).getTime();
+        const dateB = new Date(b.created_at || b.data || 0).getTime();
+        return dateB - dateA;
       });
     }
 
@@ -1794,6 +1818,14 @@ export async function fetchCotacoesDb(
     console.error("Erro na busca de cotações:", err);
     return [];
   }
+}
+
+/**
+ * Recarrega toda a lista oficial de cotações diretamente da base oficial do Supabase
+ */
+export async function recarregarCotacoesBaseOficial(): Promise<SupabaseCotacao[]> {
+  invalidateCotacoesCache();
+  return fetchCotacoesDb(undefined, undefined, { forceRefresh: true });
 }
 
 /**
@@ -2333,7 +2365,7 @@ export async function fetchCotacaoById(idOrNumero: string): Promise<SupabaseCota
     if (isUuid(clean)) {
       const { data: dataById } = await db
         .from('cotacoes')
-        .select('*')
+        .select('*, clientes(*)')
         .eq('id', clean)
         .maybeSingle();
 
@@ -2346,7 +2378,7 @@ export async function fetchCotacaoById(idOrNumero: string): Promise<SupabaseCota
     if (!cotacao) {
       const { data: dataByNumero } = await db
         .from('cotacoes')
-        .select('*')
+        .select('*, clientes(*)')
         .eq('numero', clean)
         .maybeSingle();
 
@@ -2359,7 +2391,7 @@ export async function fetchCotacaoById(idOrNumero: string): Promise<SupabaseCota
     if (!cotacao && isUuid(clean)) {
       const { data: dataFallback } = await db
         .from('cotacoes')
-        .select('*')
+        .select('*, clientes(*)')
         .eq('id', clean)
         .maybeSingle();
 
@@ -2406,6 +2438,9 @@ export async function fetchCotacaoById(idOrNumero: string): Promise<SupabaseCota
     }
 
     cotacao.cotacao_itens = itensDaCotacao;
+    if (cotacao.clientes && !cotacao.cliente_nome) {
+      cotacao.cliente_nome = cotacao.clientes.nome || cotacao.clientes.razao_social || cotacao.clientes.empresa || 'Cliente Balcão';
+    }
     return cotacao as SupabaseCotacao;
   } catch (err) {
     console.error("Erro ao buscar cotação por ID/número:", err);

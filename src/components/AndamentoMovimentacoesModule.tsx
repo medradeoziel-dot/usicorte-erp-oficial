@@ -21,7 +21,7 @@ import {
   FileEdit
 } from 'lucide-react';
 import { Client, Quote, StatusProposta, ItemCotacaoResumo } from '../types';
-import { db } from '../lib/db';
+import { db, fetchCotacoesDb } from '../lib/db';
 import { 
   fetchBoletosDb, 
   darBaixaBoletoDb, 
@@ -90,13 +90,9 @@ export default function AndamentoMovimentacoesModule({
       const seenCotacoes = new Set<string>();
 
       try {
-        const { data: dbData, error: dbErr } = await db
-          .from('cotacoes')
-          .select('*, cotacao_itens(*)')
-          .order('created_at', { ascending: false })
-          .limit(50);
+        const dbData = await fetchCotacoesDb();
 
-        if (!dbErr && Array.isArray(dbData)) {
+        if (Array.isArray(dbData)) {
           dbData.forEach((q: any) => {
             const rawNum = q.numero || q.id || '';
             const key = String(rawNum).trim().toLowerCase();

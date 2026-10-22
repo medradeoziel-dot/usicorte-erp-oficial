@@ -729,8 +729,8 @@ export default function SalesModule({
             return {
               id: q.id || q.numero || `db-quote-${Date.now()}`,
               quoteNumber: q.numero || q.id || 'COT-SEM-NUMERO',
-              clientName: q.cliente_nome || 'Cliente Balcão',
-              contactPerson: q.contato || '',
+              clientName: q.cliente_nome || q.clientes?.nome || q.clientes?.razao_social || q.clientes?.empresa || 'Cliente Balcão',
+              contactPerson: q.contato || q.clientes?.contato || '',
               clientPhone: q.telefone || '',
               clientEmail: q.email || '',
               date: safeDateIso,
@@ -834,8 +834,8 @@ export default function SalesModule({
                   return {
                     id: q.id || q.numero || `db-quote-${Date.now()}`,
                     quoteNumber: q.numero || q.id || 'COT-SEM-NUMERO',
-                    clientName: q.cliente_nome || 'Cliente Balcão',
-                    contactPerson: q.contato || '',
+                    clientName: q.cliente_nome || q.clientes?.nome || q.clientes?.razao_social || q.clientes?.empresa || 'Cliente Balcão',
+                    contactPerson: q.contato || q.clientes?.contato || '',
                     clientPhone: q.telefone || '',
                     clientEmail: q.email || '',
                     date: safeDateIso,
