@@ -64,8 +64,8 @@ export function sanitizarMensagemErro(msg: string): string {
  */
 export function limparCertificadoBase64(raw: string | undefined): string {
   if (!raw || typeof raw !== 'string') return '';
-  // Limpeza explícita com .replace(/\s+/g, '') para remover qualquer quebra de linha ou espaço indesejado
-  let str = raw.replace(/\s+/g, '').trim();
+  // Limpeza explícita com .replace(/[\r\n\s]/g, '') para remover qualquer quebra de linha ou espaço indesejado
+  let str = raw.replace(/[\r\n\s]/g, '').trim();
 
   // Remove aspas ou barras de escape no início e no final (ex: "..." ou \"...\")
   str = str.replace(/^["'\\]+|["'\\]+$/g, '');
@@ -79,7 +79,7 @@ export function limparCertificadoBase64(raw: string | undefined): string {
 
   // Remove quebras de linha literais (\n, \r) e espaços/tabs
   str = str.replace(/\\r/g, '').replace(/\\n/g, '');
-  str = str.replace(/\s+/g, '');
+  str = str.replace(/[\r\n\s]/g, '');
 
   // Se houver codificação URL (%2B -> +, %2F -> /, %3D -> =), decodifica
   if (str.includes('%2B') || str.includes('%2F') || str.includes('%3D')) {
@@ -90,8 +90,8 @@ export function limparCertificadoBase64(raw: string | undefined): string {
     }
   }
 
-  // Limpeza final com .replace(/\s+/g, '') para remover qualquer espaço ou quebra remanescente antes da decodificação
-  str = str.replace(/\s+/g, '');
+  // Limpeza final para remover qualquer espaço ou quebra remanescente antes da decodificação
+  str = str.replace(/[\r\n\s]/g, '');
 
   // Mantém estritamente caracteres válidos da base64
   return str.replace(/[^A-Za-z0-9+/=]/g, '');
@@ -134,10 +134,10 @@ export function resolverVariavelAmbienteCertificado(override?: {
   certPem?: string;
   keyPem?: string;
 }): CertificadoAmbienteResolvido {
-  // 1. Overrides diretos
+  // 1. Overrides diretos passados no payload ou parâmetros
   if (override?.pfxBase64 || override?.certificadoBase64) {
-    const rawB64 = (override.pfxBase64 || override.certificadoBase64 || '').replace(/\s+/g, '');
-    const rawPass = override.pfxPassword || override.senhaCertificado || override.senha || override.password || override.passphrase || '';
+    const rawB64 = (override.pfxBase64 || override.certificadoBase64 || '').replace(/[\r\n\s]/g, '');
+    const rawPass = (override.pfxPassword || override.senhaCertificado || override.senha || override.password || override.passphrase || '').trim();
     return {
       pfxBase64: rawB64,
       pfxPassword: rawPass,
@@ -148,116 +148,124 @@ export function resolverVariavelAmbienteCertificado(override?: {
     };
   }
 
-  // 2. Busca pelas variáveis prioritárias do projeto (prioridade máxima para SEFAZ_CERTIFICATE_BASE64 e SEFAZ_CERT_PASS)
+  // 2. Busca estrita pelas variáveis prioritárias do projeto (prioridade máxima para SEFAZ_CERTIFICATE_BASE64 e SEFAZ_CERT_PASS)
   let pfxBase64: string | undefined;
   let variavelBase64Nome: string | undefined;
 
-  if (
-    process.env.SEFAZ_CERTIFICATE_BASE64 &&
-    typeof process.env.SEFAZ_CERTIFICATE_BASE64 === 'string' &&
-    process.env.SEFAZ_CERTIFICATE_BASE64.replace(/\s+/g, '').length > 20
-  ) {
-    pfxBase64 = process.env.SEFAZ_CERTIFICATE_BASE64.replace(/\s+/g, '');
-    variavelBase64Nome = 'SEFAZ_CERTIFICATE_BASE64';
-  } else {
-    const nomesBase64Prioritarios = [
-      'SEFAZ_CERTIFICATE_BASE64',
-      'NFE_CERT_BASE64',
-      'CERTIFICADO_A1_BASE64',
-      'SEFAZ_CERT_BASE64',
-      'VITE_SEFAZ_CERTIFICATE_BASE64',
-      'VITE_NFE_CERT_BASE64',
-      'VITE_CERTIFICADO_A1_BASE64',
-      'VITE_SEFAZ_CERT_BASE64',
-      'CERTIFICADO_BASE64',
-      'CERT_BASE64',
-      'PFX_BASE64',
-      'CERTIFICADO_A1_PFX',
-      'CERTIFICADO_A1',
-      'NFE_CERT'
-    ];
-
-    for (const nome of nomesBase64Prioritarios) {
-      const val = process.env[nome];
-      if (val && typeof val === 'string' && val.replace(/\s+/g, '').length > 20 && val.trim() !== 'undefined' && val.trim() !== 'null') {
-        pfxBase64 = val.replace(/\s+/g, '');
-        variavelBase64Nome = nome;
-        break;
+  const certB64Val = (key: string) => {
+    const val = process.env[key];
+    if (val && typeof val === 'string') {
+      const clean = val.replace(/[\r\n\s]/g, '');
+      if (clean.length > 20 && clean !== 'undefined' && clean !== 'null') {
+        return clean;
       }
+    }
+    return undefined;
+  };
+
+  const nomesBase64Prioritarios = [
+    'SEFAZ_CERTIFICATE_BASE64',
+    'NFE_CERT_BASE64',
+    'CERTIFICADO_A1_BASE64',
+    'SEFAZ_CERT_BASE64',
+    'VITE_SEFAZ_CERTIFICATE_BASE64',
+    'VITE_NFE_CERT_BASE64',
+    'VITE_CERTIFICADO_A1_BASE64',
+    'VITE_SEFAZ_CERT_BASE64',
+    'CERTIFICADO_BASE64',
+    'CERT_BASE64',
+    'PFX_BASE64',
+    'CERTIFICADO_A1_PFX',
+    'CERTIFICADO_A1',
+    'NFE_CERT'
+  ];
+
+  for (const nome of nomesBase64Prioritarios) {
+    const val = certB64Val(nome);
+    if (val) {
+      pfxBase64 = val;
+      variavelBase64Nome = nome;
+      break;
     }
   }
 
   // 3. Varredura insensível a maiúsculas/minúsculas no process.env
   if (!pfxBase64) {
     for (const [key, val] of Object.entries(process.env)) {
-      if (val && typeof val === 'string' && val.replace(/\s+/g, '').length > 20 && val.trim() !== 'undefined' && val.trim() !== 'null') {
-        const lowerKey = key.toLowerCase();
-        if (
-          (lowerKey.includes('cert') || lowerKey.includes('pfx') || lowerKey.includes('a1')) &&
-          (lowerKey.includes('base64') || lowerKey.includes('b64'))
-        ) {
-          pfxBase64 = val.replace(/\s+/g, '');
-          variavelBase64Nome = key;
-          break;
+      if (val && typeof val === 'string') {
+        const clean = val.replace(/[\r\n\s]/g, '');
+        if (clean.length > 20 && clean !== 'undefined' && clean !== 'null') {
+          const lowerKey = key.toLowerCase();
+          if (
+            (lowerKey.includes('cert') || lowerKey.includes('pfx') || lowerKey.includes('a1')) &&
+            (lowerKey.includes('base64') || lowerKey.includes('b64'))
+          ) {
+            pfxBase64 = clean;
+            variavelBase64Nome = key;
+            break;
+          }
         }
       }
     }
   }
 
-  // 4. Busca da senha do certificado (prioridade máxima para SEFAZ_CERT_PASS)
+  // 4. Busca da senha do certificado (prioridade máxima para SEFAZ_CERT_PASS e SEFAZ_CERT_PASSWORD)
   let pfxPassword: string | undefined;
   let variavelSenhaNome: string | undefined;
 
-  if (
-    process.env.SEFAZ_CERT_PASS !== undefined &&
-    process.env.SEFAZ_CERT_PASS !== null &&
-    typeof process.env.SEFAZ_CERT_PASS === 'string' &&
-    process.env.SEFAZ_CERT_PASS.trim() !== 'undefined' &&
-    process.env.SEFAZ_CERT_PASS.trim() !== 'null'
-  ) {
-    pfxPassword = process.env.SEFAZ_CERT_PASS;
-    variavelSenhaNome = 'SEFAZ_CERT_PASS';
-  } else {
-    const nomesSenhaPrioritarios = [
-      'SEFAZ_CERT_PASS',
-      'NFE_CERT_PASSWORD',
-      'CERTIFICADO_A1_SENHA',
-      'SEFAZ_CERT_PASSWORD',
-      'VITE_SEFAZ_CERT_PASS',
-      'VITE_NFE_CERT_PASSWORD',
-      'VITE_CERTIFICADO_A1_SENHA',
-      'VITE_SEFAZ_CERT_PASSWORD',
-      'NFE_CERT_PASS',
-      'NFE_SENHA',
-      'SEFAZ_SENHA',
-      'CERTIFICADO_SENHA',
-      'CERTIFICADO_PASSWORD',
-      'CERT_PASSWORD',
-      'CERT_PASS',
-      'PFX_PASSWORD'
-    ];
-
-    for (const nome of nomesSenhaPrioritarios) {
-      const val = process.env[nome];
-      if (val !== undefined && val !== null && typeof val === 'string' && val.trim() !== 'undefined' && val.trim() !== 'null') {
-        pfxPassword = val;
-        variavelSenhaNome = nome;
-        break;
+  const getPassVal = (key: string) => {
+    const val = process.env[key];
+    if (val !== undefined && val !== null && typeof val === 'string') {
+      const clean = val.trim();
+      if (clean !== '' && clean !== 'undefined' && clean !== 'null') {
+        return clean;
       }
+    }
+    return undefined;
+  };
+
+  const nomesSenhaPrioritarios = [
+    'SEFAZ_CERT_PASS',
+    'SEFAZ_CERT_PASSWORD',
+    'NFE_CERT_PASSWORD',
+    'CERTIFICADO_A1_SENHA',
+    'VITE_SEFAZ_CERT_PASS',
+    'VITE_SEFAZ_CERT_PASSWORD',
+    'VITE_NFE_CERT_PASSWORD',
+    'VITE_CERTIFICADO_A1_SENHA',
+    'NFE_CERT_PASS',
+    'NFE_SENHA',
+    'SEFAZ_SENHA',
+    'CERTIFICADO_SENHA',
+    'CERTIFICADO_PASSWORD',
+    'CERT_PASSWORD',
+    'CERT_PASS',
+    'PFX_PASSWORD'
+  ];
+
+  for (const nome of nomesSenhaPrioritarios) {
+    const val = getPassVal(nome);
+    if (val !== undefined) {
+      pfxPassword = val;
+      variavelSenhaNome = nome;
+      break;
     }
   }
 
   if (pfxPassword === undefined) {
     for (const [key, val] of Object.entries(process.env)) {
-      if (val && typeof val === 'string' && val.trim() !== 'undefined' && val.trim() !== 'null') {
-        const lowerKey = key.toLowerCase();
-        if (
-          (lowerKey.includes('cert') || lowerKey.includes('nfe') || lowerKey.includes('sefaz') || lowerKey.includes('a1')) &&
-          (lowerKey.includes('senha') || lowerKey.includes('pass') || lowerKey.includes('secret'))
-        ) {
-          pfxPassword = val;
-          variavelSenhaNome = key;
-          break;
+      if (val && typeof val === 'string') {
+        const clean = val.trim();
+        if (clean !== '' && clean !== 'undefined' && clean !== 'null') {
+          const lowerKey = key.toLowerCase();
+          if (
+            (lowerKey.includes('cert') || lowerKey.includes('nfe') || lowerKey.includes('sefaz') || lowerKey.includes('a1')) &&
+            (lowerKey.includes('senha') || lowerKey.includes('pass') || lowerKey.includes('secret'))
+          ) {
+            pfxPassword = clean;
+            variavelSenhaNome = key;
+            break;
+          }
         }
       }
     }
@@ -314,7 +322,12 @@ export function formatarPem(raw: string | undefined): string | undefined {
 
 /**
  * Extrai com segurança as credenciais criptográficas (Chave Privada RSA em PEM e Certificado X.509 em Base64)
- * a partir de arquivos PKCS#12 (.pfx/.p12) ou variáveis de ambiente PEM
+ * a partir de arquivos PKCS#12 (.pfx/.p12) ou variáveis de ambiente PEM.
+ * 
+ * Regra crítica para ICP-Brasil / SEFAZ 4.00:
+ * Em arquivos PKCS#12 com múltiplos certificados (cadeia ICP-Brasil: certificado folha, CA intermediária, CA raiz),
+ * identifica e seleciona estritamente o CERTIFICADO FOLHA (End-Entity) correspondente à chave privada RSA,
+ * evitando a Rejeição 290 da SEFAZ ("Certificado Assinatura inválido").
  */
 export function extrairCredenciaisCertificado(certOverride?: any): {
   keyPem?: string;
@@ -322,6 +335,9 @@ export function extrairCredenciaisCertificado(certOverride?: any): {
   x509CertB64?: string;
   hasCert: boolean;
   origem: string;
+  subject?: string;
+  issuer?: string;
+  notAfter?: Date;
 } {
   const envInfo = resolverVariavelAmbienteCertificado(certOverride);
 
@@ -332,54 +348,168 @@ export function extrairCredenciaisCertificado(certOverride?: any): {
     const x509CertB64 = certPem
       ? certPem.replace(/-----BEGIN CERTIFICATE-----/g, '').replace(/-----END CERTIFICATE-----/g, '').replace(/[\r\n\s]/g, '')
       : undefined;
+    console.log('[SEFAZ Cert] 📄 Credenciais carregadas via PEM.');
     return { keyPem, certPem, x509CertB64, hasCert: !!keyPem, origem: 'PEM' };
   }
 
-  // 2. Se forneceu PKCS#12 (.pfx) em Base64 ou Arquivo
+  // 2. PKCS#12 (.pfx/.p12) em Base64 ou Arquivo
   let pfxBuffer: Buffer | undefined;
   if (envInfo.pfxBase64) {
     try {
       const cleanB64 = limparCertificadoBase64(envInfo.pfxBase64);
       pfxBuffer = Buffer.from(cleanB64, 'base64');
-    } catch {}
+    } catch (e: any) {
+      console.error('[SEFAZ Cert] ❌ Erro ao decodificar Base64 do certificado:', e?.message || e);
+    }
   } else if (envInfo.certPath && envInfo.certPathExiste) {
     try {
       pfxBuffer = fs.readFileSync(envInfo.certPath);
-    } catch {}
+    } catch (e: any) {
+      console.error('[SEFAZ Cert] ❌ Erro ao ler arquivo do certificado:', e?.message || e);
+    }
   }
 
   if (pfxBuffer && pfxBuffer.length > 0) {
+    const cleanPassword = limparSenhaCertificado(envInfo.pfxPassword);
+    console.log(`[SEFAZ Cert] 🔍 Extraindo credenciais do PFX (${pfxBuffer.length} bytes)...`);
+    console.log(`[SEFAZ Cert] 🔑 Variável Base64: ${envInfo.variavelBase64Nome || 'override'} | Senha: ${envInfo.variavelSenhaNome ? `informada em ${envInfo.variavelSenhaNome} (${cleanPassword.length} chars)` : 'NÃO informada'}`);
+
     try {
-      const cleanPassword = limparSenhaCertificado(envInfo.pfxPassword);
       const p12Asn1 = forge.asn1.fromDer(pfxBuffer.toString('binary'));
       const p12 = forge.pkcs12.pkcs12FromAsn1(p12Asn1, cleanPassword || '');
 
-      let keyPem: string | undefined;
-      let certPem: string | undefined;
-      let x509CertB64: string | undefined;
+      interface ExtractedKey {
+        key: forge.pki.rsa.PrivateKey;
+        keyPem: string;
+        modulusHex: string;
+        localKeyId?: string;
+      }
+
+      interface ExtractedCert {
+        cert: forge.pki.Certificate;
+        certPem: string;
+        x509CertB64: string;
+        modulusHex: string;
+        localKeyId?: string;
+        isCA: boolean;
+        subject: string;
+        issuer: string;
+        notBefore: Date;
+        notAfter: Date;
+      }
+
+      const keys: ExtractedKey[] = [];
+      const certs: ExtractedCert[] = [];
 
       for (const sc of p12.safeContents) {
         for (const sb of sc.safeBags) {
-          if (sb.key) {
-            keyPem = forge.pki.privateKeyToPem(sb.key);
+          let localKeyId: string | undefined;
+          if (sb.attributes && sb.attributes.localKeyId && sb.attributes.localKeyId.length > 0) {
+            localKeyId = forge.util.bytesToHex(sb.attributes.localKeyId[0]);
           }
+
+          if (sb.key) {
+            try {
+              const rsaKey = sb.key as forge.pki.rsa.PrivateKey;
+              const keyPem = forge.pki.privateKeyToPem(rsaKey);
+              const modulusHex = rsaKey.n ? rsaKey.n.toString(16) : '';
+              keys.push({ key: rsaKey, keyPem, modulusHex, localKeyId });
+            } catch (errKey) {
+              console.warn('[SEFAZ Cert] Aviso ao converter chave privada para PEM:', errKey);
+            }
+          }
+
           if (sb.cert) {
-            certPem = forge.pki.certificateToPem(sb.cert);
-            const certDer = forge.asn1.toDer(forge.pki.certificateToAsn1(sb.cert)).getBytes();
-            x509CertB64 = Buffer.from(certDer, 'binary').toString('base64');
+            try {
+              const c = sb.cert;
+              const certPem = forge.pki.certificateToPem(c);
+              const certDer = forge.asn1.toDer(forge.pki.certificateToAsn1(c)).getBytes();
+              const x509CertB64 = Buffer.from(certDer, 'binary').toString('base64').replace(/[\r\n\s]/g, '');
+
+              const pubKey = c.publicKey as any;
+              const modulusHex = pubKey && pubKey.n ? pubKey.n.toString(16) : '';
+
+              let isCA = false;
+              const bc = c.extensions?.find((e: any) => e.name === 'basicConstraints' || e.id === '2.5.29.19');
+              if (bc && (bc as any).cA === true) {
+                isCA = true;
+              }
+
+              const subjectStr = c.subject?.attributes?.map((a: any) => `${a.shortName || a.name || 'attr'}=${a.value}`).join(', ') || 'Desconhecido';
+              const issuerStr = c.issuer?.attributes?.map((a: any) => `${a.shortName || a.name || 'attr'}=${a.value}`).join(', ') || 'Desconhecido';
+
+              certs.push({
+                cert: c,
+                certPem,
+                x509CertB64,
+                modulusHex,
+                localKeyId,
+                isCA,
+                subject: subjectStr,
+                issuer: issuerStr,
+                notBefore: c.validity.notBefore,
+                notAfter: c.validity.notAfter
+              });
+            } catch (errCert) {
+              console.warn('[SEFAZ Cert] Aviso ao converter certificado para DER/PEM:', errCert);
+            }
           }
         }
       }
 
+      console.log(`[SEFAZ Cert] 📊 Chaves encontradas: ${keys.length} | Certificados encontrados: ${certs.length}`);
+
+      if (keys.length === 0) {
+        console.warn('[SEFAZ Cert] ⚠️ Nenhuma chave privada encontrada no PKCS#12!');
+        return { hasCert: false, origem: 'Nenhum' };
+      }
+
+      const primaryKey = keys[0];
+
+      certs.forEach((ce, idx) => {
+        const matchesKey = !!(primaryKey.modulusHex && ce.modulusHex && primaryKey.modulusHex === ce.modulusHex);
+        console.log(`[SEFAZ Cert] 📋 Cert #${idx + 1}: Subject="${ce.subject}" | Issuer="${ce.issuer}" | Válido até: ${ce.notAfter.toISOString()} | é CA: ${ce.isCA ? 'SIM' : 'NÃO'} | Modulus Match: ${matchesKey ? 'SIM ✅' : 'NÃO ❌'}`);
+      });
+
+      // SELEÇÃO RIGOROSA DO CERTIFICADO FOLHA (END-ENTITY) DA EMPRESA:
+      // 1. Certificado com mesmo módulo RSA da chave privada E que NÃO seja CA
+      // 2. Certificado com mesmo módulo RSA da chave privada
+      // 3. Certificado com mesmo localKeyId da chave
+      // 4. Primeiro certificado que não seja CA
+      // 5. Primeiro certificado da lista
+      const selectedCert = 
+        certs.find(c => primaryKey.modulusHex && c.modulusHex === primaryKey.modulusHex && !c.isCA) ||
+        certs.find(c => primaryKey.modulusHex && c.modulusHex === primaryKey.modulusHex) ||
+        (primaryKey.localKeyId ? certs.find(c => c.localKeyId === primaryKey.localKeyId) : undefined) ||
+        certs.find(c => !c.isCA) ||
+        certs[0];
+
+      if (!selectedCert) {
+        console.warn('[SEFAZ Cert] ⚠️ Nenhum certificado pôde ser associado à chave privada!');
+        return { hasCert: false, origem: 'Nenhum' };
+      }
+
+      const cleanX509 = selectedCert.x509CertB64.replace(/[\r\n\s]/g, '');
+
+      console.log(`[SEFAZ Cert] 🏆 Certificado selecionado para assinatura: "${selectedCert.subject}" (Válido de ${selectedCert.notBefore.toISOString()} até ${selectedCert.notAfter.toISOString()})`);
+      console.log(`[SEFAZ Cert] 🔒 X509Certificate Base64 pronto: ${cleanX509.length} chars (sem quebras de linha/espaços: ${!/[\r\n\s]/.test(cleanX509) ? 'SIM ✅' : 'NÃO ❌'})`);
+
       return {
-        keyPem,
-        certPem,
-        x509CertB64,
-        hasCert: !!keyPem,
-        origem: envInfo.variavelBase64Nome || 'PKCS12'
+        keyPem: primaryKey.keyPem,
+        certPem: selectedCert.certPem,
+        x509CertB64: cleanX509,
+        hasCert: true,
+        origem: envInfo.variavelBase64Nome || 'PKCS12',
+        subject: selectedCert.subject,
+        issuer: selectedCert.issuer,
+        notAfter: selectedCert.notAfter
       };
     } catch (e: any) {
-      console.warn('[SEFAZ Cert] Falha ao extrair chave e certificado do PKCS#12:', sanitizarMensagemErro(e?.message || String(e)));
+      const errMsg = sanitizarMensagemErro(e?.message || String(e));
+      console.warn('[SEFAZ Cert] ❌ Falha ao extrair chave e certificado do PKCS#12:', errMsg);
+      if (errMsg.toLowerCase().includes('mac verify failure') || errMsg.toLowerCase().includes('bad decrypt')) {
+        console.warn(`[SEFAZ Cert] ❌ Senha incorreta do certificado A1 (${envInfo.variavelSenhaNome || 'NFE_CERT_PASSWORD'}). Verifique a senha configurada no Vercel.`);
+      }
     }
   }
 
@@ -625,26 +755,53 @@ export function assinarXmlSefazServer(xmlString: string, certOverride?: any): st
   if (!xmlString) return xmlString;
 
   if (xmlString.includes('<Signature xmlns="http://www.w3.org/2000/09/xmldsig#"') || xmlString.includes('</Signature>')) {
+    console.log('[SEFAZ Assinatura] XML já possui bloco <Signature>. Mantendo assinatura original.');
     return xmlString;
   }
 
-  const matchInf = xmlString.match(/(<(infNFe|infEvento)[^>]*Id="([^"]+)"[^>]*>[\s\S]*?<\/\2>)/i);
+  // 1. Compactação prévia do XML para garantir ausência de espaços ou quebras entre tags
+  const cleanXml = compactarXmlSefaz(xmlString);
+
+  // 2. Localiza a tag alvo: <infNFe Id="NFe..." versao="4.00"> ou <infEvento Id="ID..." versao="1.00">
+  const matchInf = cleanXml.match(/(<(infNFe|infEvento)[^>]*Id="([^"]+)"[^>]*>[\s\S]*?<\/\2>)/i);
   if (!matchInf) {
-    return xmlString;
+    console.warn('[SEFAZ Assinatura] ⚠️ Tag <infNFe> ou <infEvento> com atributo Id não encontrada para assinatura.');
+    return cleanXml;
   }
 
-  const [tagCompleta, tagConteudo, tagNome, idRef] = matchInf;
+  const tagCompleta = matchInf[1];
+  const tagNome = matchInf[2];
+  const idRef = matchInf[3];
 
-  let c14nInf = compactarXmlSefaz(tagConteudo);
-  if (!c14nInf.includes('xmlns=')) {
+  console.log(`[SEFAZ Assinatura] ✍️ Assinando elemento <${tagNome}> (URI="#${idRef}")...`);
+
+  // 3. Canonicalização C14N sem comentários ("http://www.w3.org/TR/2001/REC-xml-c14n-20010315")
+  // No padrão C14N para o elemento raiz do fragmento assinado:
+  // - O namespace padrão herdado xmlns="http://www.portalfiscal.inf.br/nfe" deve estar presente no elemento
+  // - Os atributos devem ser ordenados alfabeticamente: namespace primeiro, seguido por Id="..." e versao="..."
+  let c14nInf = tagCompleta.replace(/<!--[\s\S]*?-->/g, '');
+
+  if (tagNome.toLowerCase() === 'infnfe') {
+    const versaoMatch = c14nInf.match(/versao="([^"]+)"/i);
+    const versao = versaoMatch ? versaoMatch[1] : '4.00';
     c14nInf = c14nInf.replace(
-      new RegExp(`^<${tagNome}`, 'i'),
-      `<${tagNome} xmlns="http://www.portalfiscal.inf.br/nfe"`
+      new RegExp(`^<${tagNome}[^>]*>`, 'i'),
+      `<infNFe xmlns="http://www.portalfiscal.inf.br/nfe" Id="${idRef}" versao="${versao}">`
+    );
+  } else if (tagNome.toLowerCase() === 'infevento') {
+    const versaoMatch = c14nInf.match(/versao="([^"]+)"/i);
+    const versao = versaoMatch ? versaoMatch[1] : '1.00';
+    c14nInf = c14nInf.replace(
+      new RegExp(`^<${tagNome}[^>]*>`, 'i'),
+      `<infEvento xmlns="http://www.portalfiscal.inf.br/nfe" Id="${idRef}" versao="${versao}">`
     );
   }
 
+  // 4. Cálculo do DigestValue: SHA-1 em Base64 do bloco canonicalizado C14N
   const digestValue = crypto.createHash('sha1').update(c14nInf, 'utf-8').digest('base64');
+  console.log(`[SEFAZ Assinatura] 🔑 DigestValue calculado (SHA-1): ${digestValue}`);
 
+  // 5. Montagem do <SignedInfo> com URI="#${idRef}" e canonicalização C14N
   const signedInfo = `<SignedInfo xmlns="http://www.w3.org/2000/09/xmldsig#">` +
     `<CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"/>` +
     `<SignatureMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"/>` +
@@ -658,6 +815,7 @@ export function assinarXmlSefazServer(xmlString: string, certOverride?: any): st
     `</Reference>` +
   `</SignedInfo>`;
 
+  // 6. Extração da chave privada e certificado folha
   const creds = extrairCredenciaisCertificado(certOverride);
   let signatureValue = '';
 
@@ -665,26 +823,35 @@ export function assinarXmlSefazServer(xmlString: string, certOverride?: any): st
     try {
       const signer = crypto.createSign('RSA-SHA1');
       signer.update(signedInfo);
-      signatureValue = signer.sign(creds.keyPem, 'base64');
+      signatureValue = signer.sign(creds.keyPem, 'base64').replace(/[\r\n\s]/g, '');
+      console.log(`[SEFAZ Assinatura] ✅ SignatureValue gerado com sucesso via RSA-SHA1 (${signatureValue.length} chars).`);
     } catch (e: any) {
-      console.warn('[SEFAZ Assinatura] Aviso ao assinar com chave privada:', sanitizarMensagemErro(e?.message || String(e)));
+      console.warn('[SEFAZ Assinatura] ⚠️ Erro ao assinar com chave privada:', sanitizarMensagemErro(e?.message || String(e)));
     }
+  } else {
+    console.warn('[SEFAZ Assinatura] ⚠️ Chave privada não encontrada para assinar o SignedInfo!');
   }
 
   if (!signatureValue) {
     signatureValue = crypto.createHash('sha1').update(signedInfo + (idRef || '')).digest('base64');
   }
 
-  const x509Cert = creds.x509CertB64 || '';
+  // 7. Certificado X509 sem quebras de linha ou espaços
+  const x509Cert = (creds.x509CertB64 || '').replace(/[\r\n\s]/g, '');
   const keyInfo = x509Cert ? `<KeyInfo><X509Data><X509Certificate>${x509Cert}</X509Certificate></X509Data></KeyInfo>` : '';
 
+  // 8. Bloco <Signature> final compacto
   const signatureXml = `<Signature xmlns="http://www.w3.org/2000/09/xmldsig#">` +
     `${signedInfo}` +
     `<SignatureValue>${signatureValue}</SignatureValue>` +
     `${keyInfo}` +
   `</Signature>`;
 
-  return xmlString.replace(tagCompleta, `${tagCompleta}${signatureXml}`);
+  // 9. Insere a assinatura imediatamente após o elemento assinado, mantendo o XML exatamente como foi assinado
+  const xmlAssinado = cleanXml.replace(tagCompleta, `${tagCompleta}${signatureXml}`);
+  console.log(`[SEFAZ Assinatura] ✅ XML assinado com sucesso. Bloco <Signature> inserido após </${tagNome}>.`);
+
+  return xmlAssinado;
 }
 
 /**
@@ -1755,7 +1922,8 @@ export async function sefazSoapHandler(req: any, res: any): Promise<void> {
       console.log(`[SEFAZ Proxy] Assinando digitalmente o bloco infNFe/infEvento com padrão ICP-Brasil...`);
       envelopeParaTransmissao = assinarXmlSefazServer(envelopeParaTransmissao, certificado);
     }
-    envelopeParaTransmissao = compactarXmlSefaz(envelopeParaTransmissao);
+    // O XML assinado não deve sofrer compactação ou alteração após o cálculo da assinatura
+
 
     console.log(`[SEFAZ Proxy] Transmitindo (${servico.toUpperCase()} - tpAmb: ${tpAmb}${chaveAcesso ? ` - Chave: ${chaveAcesso}` : ''}) para ${endpoint}...`);
 
