@@ -577,12 +577,17 @@ export const SOAP_ACTIONS_SEFAZ: Record<string, string> = {
  * Helper para envio uniforme de resposta JSON em ambientes Express, Vercel ou Node HTTP puro
  */
 export function sendJson(res: any, statusCode: number, data: any): void {
-  if (typeof res.status === 'function' && typeof res.json === 'function') {
-    return res.status(statusCode).json(data);
+  try {
+    if (res.headersSent) return;
+    if (typeof res.status === 'function' && typeof res.json === 'function') {
+      return res.status(statusCode).json(data);
+    }
+    res.statusCode = statusCode;
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.end(JSON.stringify(data));
+  } catch (e) {
+    console.error('[sendJson] Falha ao enviar resposta:', e);
   }
-  res.statusCode = statusCode;
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.end(JSON.stringify(data));
 }
 
 export interface AgenteHttpsSefazResultado {
@@ -1587,15 +1592,25 @@ export function extrairDadosRequisicaoSefaz(req: any): {
   }
 
   const query = req.query || {};
-  const timeoutMs = typeof body?.timeoutMs === 'number' && body.timeoutMs > 0 ? body.timeoutMs : 15000;
+  // 3. Timeouts no Servidor: timeout padrão de 25 segundos
+  const timeoutMs = typeof body?.timeoutMs === 'number' && body.timeoutMs > 0 ? body.timeoutMs : 25000;
   const certificado = body?.certificado;
 
-  const chaveAcesso = String(
+  // Extração abrangente da chave de acesso (44 dígitos) em qualquer formato ou parâmetro enviado
+  let chaveAcesso = String(
+    body?.chave ||
     body?.chaveAcesso || 
     body?.chave_acesso || 
     body?.chNFe || 
+    body?.chaveNfe ||
+    body?.chave_nfe ||
+    body?.nfe_chave ||
+    query?.chave ||
     query?.chaveAcesso || 
     query?.chave_acesso || 
+    query?.chNFe || 
+    query?.chaveNfe ||
+    query?.chave_nfe ||
     ''
   ).replace(/\D/g, '');
 
@@ -1608,7 +1623,16 @@ export function extrairDadosRequisicaoSefaz(req: any): {
                        body?.xml_evento || 
                        body?.soapEnvelope || 
                        body?.soap_envelope || 
+                       body?.nfeDadosMsg ||
                        (typeof body === 'string' ? body : '');
+
+  // Se a chave não estava nos parâmetros diretos, tenta extrair do XML enviado
+  if ((!chaveAcesso || chaveAcesso.length !== 44) && typeof xmlCandidate === 'string' && xmlCandidate.trim()) {
+    const matchCh = xmlCandidate.match(/<chNFe>(\d{44})<\/chNFe>/i) || xmlCandidate.match(/Id="NFe(\d{44})"/i);
+    if (matchCh) {
+      chaveAcesso = matchCh[1];
+    }
+  }
   
   if (
     body?.tpAmb === 2 || 
@@ -1628,39 +1652,96 @@ export function extrairDadosRequisicaoSefaz(req: any): {
     tpAmb = 1;
   }
 
-  const acaoRaw = String(body?.acao || body?.action || body?.tipo || '').toLowerCase();
-  let servico = body?.servico || body?.service || '';
+  const rawActionInput = String(
+    body?.acao || 
+    body?.action || 
+    body?.servico || 
+    body?.service || 
+    body?.tipo || 
+    req.headers?.['action'] || 
+    req.headers?.['soapaction'] || 
+    query?.acao || 
+    query?.action || 
+    query?.servico || 
+    ''
+  ).toLowerCase().trim();
 
-  if (!servico) {
-    if (acaoRaw === 'consultar_situacao' || acaoRaw === 'consulta_situacao' || acaoRaw === 'consultar_chave') {
+  let servico = '';
+
+  // 2. Ação de Consulta por Chave (NfeConsultaProtocolo / NFeConsultaProtocolo4):
+  // Normalização exaustiva de ações recebidas
+  if (
+    rawActionInput.includes('nfeconsultaprotocolo') ||
+    rawActionInput.includes('consultaprotocolo') ||
+    rawActionInput.includes('consultar_situacao') ||
+    rawActionInput.includes('consulta_situacao') ||
+    rawActionInput.includes('consultar_chave') ||
+    rawActionInput.includes('conssitnfe') ||
+    rawActionInput === 'consultar' ||
+    rawActionInput === 'consulta'
+  ) {
+    servico = 'consultaProtocolo';
+  } else if (
+    rawActionInput.includes('nferetautorizacao') ||
+    rawActionInput.includes('retautorizacao') ||
+    rawActionInput.includes('consultar_recibo') ||
+    rawActionInput.includes('consulta_recibo') ||
+    rawActionInput.includes('consrecinfe') ||
+    body?.nRec || 
+    body?.numeroRecibo
+  ) {
+    servico = 'retAutorizacao';
+  } else if (
+    rawActionInput.includes('nferecepcaoevento') ||
+    rawActionInput.includes('recepcaoevento') ||
+    rawActionInput.includes('cancelar_nfe') ||
+    rawActionInput.includes('cancelamento') ||
+    rawActionInput.includes('evento') ||
+    rawActionInput.includes('envevento') ||
+    body?.justificativa
+  ) {
+    servico = 'evento';
+  } else if (
+    rawActionInput.includes('nfestatusservico') ||
+    rawActionInput.includes('statusservico') ||
+    rawActionInput.includes('status_servico') ||
+    rawActionInput.includes('consstatserv') ||
+    rawActionInput === 'status'
+  ) {
+    servico = 'statusServico';
+  } else if (
+    rawActionInput.includes('nfeautorizacao') ||
+    rawActionInput.includes('autorizacao') ||
+    rawActionInput.includes('emitir_nfe') ||
+    rawActionInput.includes('transmitir') ||
+    rawActionInput.includes('envinfe')
+  ) {
+    servico = 'autorizacao';
+  } else if (
+    rawActionInput.includes('nfeinutilizacao') ||
+    rawActionInput.includes('inutilizacao') ||
+    rawActionInput.includes('inutnfe')
+  ) {
+    servico = 'inutilizacao';
+  } else if (typeof xmlCandidate === 'string' && xmlCandidate.trim()) {
+    if (xmlCandidate.includes('<consSitNFe') || xmlCandidate.includes('NFeConsultaProtocolo4')) {
       servico = 'consultaProtocolo';
-    } else if (acaoRaw === 'consultar_recibo' || acaoRaw === 'consulta_recibo' || body?.nRec || body?.numeroRecibo) {
+    } else if (xmlCandidate.includes('<consReciNFe') || xmlCandidate.includes('NFeRetAutorizacao4')) {
       servico = 'retAutorizacao';
-    } else if (acaoRaw === 'cancelar_nfe' || acaoRaw === 'cancelamento' || body?.justificativa) {
+    } else if (xmlCandidate.includes('<envEvento') || xmlCandidate.includes('NFeRecepcaoEvento4')) {
       servico = 'evento';
-    } else if (acaoRaw === 'status_servico' || acaoRaw === 'status') {
+    } else if (xmlCandidate.includes('<consStatServ') || xmlCandidate.includes('NFeStatusServico4')) {
       servico = 'statusServico';
-    } else if (acaoRaw === 'emitir_nfe' || acaoRaw === 'autorizacao' || acaoRaw === 'transmitir') {
-      servico = 'autorizacao';
-    } else if (typeof xmlCandidate === 'string' && xmlCandidate.trim()) {
-      if (xmlCandidate.includes('<enviNFe') || xmlCandidate.includes('NFeAutorizacao4') || xmlCandidate.includes('<NFe')) {
-        servico = 'autorizacao';
-      } else if (xmlCandidate.includes('<consReciNFe') || xmlCandidate.includes('NFeRetAutorizacao4')) {
-        servico = 'retAutorizacao';
-      } else if (xmlCandidate.includes('<envEvento') || xmlCandidate.includes('NFeRecepcaoEvento4')) {
-        servico = 'evento';
-      } else if (xmlCandidate.includes('<consSitNFe') || xmlCandidate.includes('NFeConsultaProtocolo4')) {
-        servico = 'consultaProtocolo';
-      } else if (xmlCandidate.includes('<consStatServ') || xmlCandidate.includes('NFeStatusServico4')) {
-        servico = 'statusServico';
-      } else if (xmlCandidate.includes('<inutNFe') || xmlCandidate.includes('NFeInutilizacao4')) {
-        servico = 'inutilizacao';
-      }
-    } else if (chaveAcesso && !body?.itens && !body?.destinatario && !body?.valorTotal) {
-      servico = 'consultaProtocolo';
-    } else {
+    } else if (xmlCandidate.includes('<inutNFe') || xmlCandidate.includes('NFeInutilizacao4')) {
+      servico = 'inutilizacao';
+    } else if (xmlCandidate.includes('<enviNFe') || xmlCandidate.includes('NFeAutorizacao4') || xmlCandidate.includes('<NFe')) {
       servico = 'autorizacao';
     }
+  } else if (chaveAcesso && !body?.itens && !body?.destinatario && !body?.valorTotal) {
+    // Se a requisição informou apenas chave de acesso sem itens para faturar, classifica como consulta de protocolo
+    servico = 'consultaProtocolo';
+  } else {
+    servico = 'autorizacao';
   }
 
   if (!servico) servico = 'autorizacao';
@@ -1695,8 +1776,10 @@ export function extrairDadosRequisicaoSefaz(req: any): {
     }
   }
 
+  // URL do WebService de Consulta de SP:
+  // URL SP Produção: https://nfe.fazenda.sp.gov.br/ws/nfeconsultaprotocolo4.asmx
   let endpoint = body?.endpoint || body?.endpoint_sefaz;
-  if (!endpoint || typeof endpoint !== 'string' || !endpoint.startsWith('http')) {
+  if (!endpoint || typeof endpoint !== 'string' || !endpoint.startsWith('http') || (servico === 'consultaProtocolo' && endpoint.includes('nfeautorizacao'))) {
     endpoint = WEBSERVICES_SEFAZ_SP[tpAmb][servico as keyof typeof WEBSERVICES_SEFAZ_SP[1]] || WEBSERVICES_SEFAZ_SP[tpAmb].autorizacao;
   } else {
     if (tpAmb === 2 && endpoint.includes('nfe.fazenda.sp.gov.br') && !endpoint.includes('homologacao.')) {
@@ -1715,6 +1798,17 @@ export function extrairDadosRequisicaoSefaz(req: any): {
     const wrapped = enveloparXmlSoapSefaz(xmlFinal, servico, body?.idLote || '1', body?.indSinc || '1', certificado);
     soapEnvelope = wrapped.envelope;
     if (!soapAction) soapAction = wrapped.action;
+  }
+
+  // Se o serviço for consulta de protocolo, garante rigorosamente a SOAP Action e o namespace oficial de SP
+  if (servico === 'consultaProtocolo') {
+    soapAction = SOAP_ACTIONS_SEFAZ.consultaProtocolo; // 'http://www.portalfiscal.inf.br/nfe/wsdl/NFeConsultaProtocolo4'
+    if (soapEnvelope && !soapEnvelope.includes('NFeConsultaProtocolo4')) {
+      const chaveLimpa = (chaveAcesso || '').replace(/\D/g, '');
+      if (chaveLimpa) {
+        soapEnvelope = `<?xml version="1.0" encoding="utf-8"?><soap12:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap12="http://www.w3.org/2003/05/soap-envelope"><soap12:Body><nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeConsultaProtocolo4"><consSitNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00"><tpAmb>${tpAmb}</tpAmb><xServ>CONSULTAR</xServ><chNFe>${chaveLimpa}</chNFe></consSitNFe></nfeDadosMsg></soap12:Body></soap12:Envelope>`;
+      }
+    }
   }
 
   if (!soapAction) {
@@ -1736,12 +1830,13 @@ export function extrairDadosRequisicaoSefaz(req: any): {
 
 /**
  * Executa a requisição SOAP via HTTPS nativo do Node.js com o Agente mTLS configurado
+ * Suporte a timeout de 25 segundos
  */
 export function executarRequisicaoSoapNode(
   endpointUrl: string,
   soapAction: string,
   soapEnvelope: string,
-  timeoutMs: number = 15000,
+  timeoutMs: number = 25000,
   certOverride?: any
 ): Promise<{ 
   status: number; 
@@ -1802,6 +1897,8 @@ export function executarRequisicaoSoapNode(
         });
       });
 
+      req.setTimeout(timeoutMs);
+
       req.on('timeout', () => {
         req.destroy(new Error(`Timeout de conexão após ${timeoutMs}ms aguardando resposta da SEFAZ`));
       });
@@ -1819,26 +1916,44 @@ export function executarRequisicaoSoapNode(
 }
 
 /**
- * Lê o corpo da requisição bruta se ainda não tiver sido parseado
+ * Lê o corpo da requisição bruta se ainda não tiver sido parseado.
+ * Protegido contra travamentos em ambientes serverless (Vercel) com timer de segurança.
  */
 export async function parseRequestBodyIfNeeded(req: any): Promise<void> {
   if (req.body !== undefined && req.body !== null) {
     return;
   }
+  if (req.readableEnded || req.complete) {
+    req.body = {};
+    return;
+  }
 
   return new Promise((resolve) => {
+    const safetyTimer = setTimeout(() => {
+      if (!req.body) req.body = {};
+      resolve();
+    }, 1500);
+
     const chunks: Buffer[] = [];
-    req.on('data', (chunk: Buffer) => chunks.push(chunk));
+    req.on('data', (chunk: Buffer | string) => {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    });
     req.on('end', () => {
-      const raw = Buffer.concat(chunks).toString('utf-8');
+      clearTimeout(safetyTimer);
       try {
-        req.body = JSON.parse(raw);
+        const raw = Buffer.concat(chunks).toString('utf-8').trim();
+        if (raw.startsWith('{') && raw.endsWith('}')) {
+          req.body = JSON.parse(raw);
+        } else {
+          req.body = raw || {};
+        }
       } catch {
-        req.body = raw;
+        req.body = {};
       }
       resolve();
     });
     req.on('error', () => {
+      clearTimeout(safetyTimer);
       req.body = {};
       resolve();
     });
@@ -1847,6 +1962,7 @@ export async function parseRequestBodyIfNeeded(req: any): Promise<void> {
 
 /**
  * Handler Unificado de Transmissão SOAP Oficial da SEFAZ-SP
+ * Equipado com Try/Catch Global e retorno JSON estruturado para nunca quebrar com HTTP 500 genérico.
  */
 export async function sefazSoapHandler(req: any, res: any): Promise<void> {
   // CORS Headers padrão
@@ -1869,6 +1985,7 @@ export async function sefazSoapHandler(req: any, res: any): Promise<void> {
     const envInfo = resolverVariavelAmbienteCertificado();
 
     const diagnostico = {
+      success: true,
       status: 'online',
       servico: 'Proxy SEFAZ-SP SOAP / NF-e v4.00 (Express Engine)',
       ambientePadrao: 'producao (tpAmb = 1)',
@@ -1911,28 +2028,32 @@ export async function sefazSoapHandler(req: any, res: any): Promise<void> {
       instrucoesUso: {
         metodo: 'POST',
         corpoJson: {
-          chaveAcesso: 'Chave de 44 dígitos da NF-e (opcional se XML já montado)',
+          chave: 'Chave de 44 dígitos da NF-e (opcional se XML já montado)',
+          chaveAcesso: 'Chave de 44 dígitos da NF-e',
           xml: '<enviNFe ...>...</enviNFe> ou Envelope SOAP completo (opcional)',
           tpAmb: '1 para Produção ou 2 para Homologação (padrão oficial: 1)',
-          servico: 'autorizacao | retAutorizacao | evento | consultaProtocolo | statusServico'
+          action: 'NfeConsultaProtocolo | NFeAutorizacao4 | NFeRetAutorizacao4 | NFeRecepcaoEvento4'
         }
       }
     });
     return;
   }
 
+  // 1. Try/Catch Global em toda a execução para nunca quebrar com HTTP 500 genérico no Vercel
   try {
     await parseRequestBodyIfNeeded(req);
     const dadosReq = extrairDadosRequisicaoSefaz(req);
 
     if (!dadosReq.soapEnvelope && !dadosReq.xmlConteudo && !dadosReq.chaveAcesso) {
-      sendJson(res, 400, {
+      sendJson(res, 200, {
+        success: false,
         ok: false,
         statusHttp: 400,
         codigo: 'REQUISICAO_INVALIDA',
         cStat: 'REQUISICAO_INVALIDA',
+        error: 'Dados da NF-e, chave de acesso ou Envelope SOAP não informados na requisição.',
         mensagem: 'Dados da NF-e, chave de acesso ou Envelope SOAP não informados na requisição.',
-        detalhe: 'Envie a chave de acesso no campo "chaveAcesso", o XML no campo "xml", ou o envelope completo em "soapEnvelope".',
+        detalhe: 'Envie a chave de acesso no campo "chave" ou "chaveAcesso", o XML no campo "xml", ou o envelope completo em "soapEnvelope".',
         sugestao: 'Certifique-se de que o corpo da requisição POST contenha os dados da NF-e a ser transmitida para a SEFAZ-SP.'
       });
       return;
@@ -1942,7 +2063,6 @@ export async function sefazSoapHandler(req: any, res: any): Promise<void> {
 
     let envelopeParaTransmissao = dadosReq.soapEnvelope || '';
     // Se o cliente enviou um nfeProc (NF-e + protNFe), extrai apenas a <NFe> para transmissão:
-    // a SEFAZ rejeita enviNFe contendo nfeProc/protNFe com erro de schema.
     if (envelopeParaTransmissao.includes('<nfeProc')) {
       const mNfe = envelopeParaTransmissao.match(/<NFe xmlns="http:\/\/www\.portalfiscal\.inf\.br\/nfe"[\s\S]*?<\/NFe>/);
       if (mNfe) {
@@ -1956,10 +2076,8 @@ export async function sefazSoapHandler(req: any, res: any): Promise<void> {
       console.log(`[SEFAZ Proxy] Assinando digitalmente o bloco infNFe/infEvento com padrão ICP-Brasil...`);
       envelopeParaTransmissao = assinarXmlSefazServer(envelopeParaTransmissao, certificado);
     }
-    // O XML assinado não deve sofrer compactação ou alteração após o cálculo da assinatura
 
-
-    console.log(`[SEFAZ Proxy] Transmitindo (${servico.toUpperCase()} - tpAmb: ${tpAmb}${chaveAcesso ? ` - Chave: ${chaveAcesso}` : ''}) para ${endpoint}...`);
+    console.log(`[SEFAZ Proxy] Transmitindo (${servico.toUpperCase()} - tpAmb: ${tpAmb}${chaveAcesso ? ` - Chave: ${chaveAcesso}` : ''}) para ${endpoint} (timeout: ${timeoutMs}ms)...`);
 
     const response = await executarRequisicaoSoapNode(endpoint!, soapAction!, envelopeParaTransmissao, timeoutMs, certificado);
 
@@ -1967,7 +2085,7 @@ export async function sefazSoapHandler(req: any, res: any): Promise<void> {
 
     const dadosEstruturados = extrairDadosRetornoSefazXmlServer(response.data);
 
-    // Se a SEFAZ recusou mTLS (403), devolve diagnóstico com HTTP 403 real (NUNCA 200 OK)
+    // Se a SEFAZ recusou mTLS (403), devolve diagnóstico com HTTP 403 real
     if (response.status === 403) {
       let detalheErro = '';
       let codigoErro = 'SEFAZ_403_CERTIFICADO_EXIGIDO';
@@ -1984,8 +2102,10 @@ export async function sefazSoapHandler(req: any, res: any): Promise<void> {
       }
 
       sendJson(res, 403, {
+        success: false,
         ok: false,
         statusHttp: 403,
+        error: detalheErro,
         codigo: codigoErro,
         cStat: '403',
         xMotivo: 'Acesso recusado pela SEFAZ (403 Forbidden). O Certificado Digital A1 (.pfx) é obrigatório para autenticar a conexão mTLS com a SEFAZ-SP.',
@@ -2012,12 +2132,14 @@ export async function sefazSoapHandler(req: any, res: any): Promise<void> {
 
     if (dadosEstruturados.tipoResposta === 'consumo_indevido') {
       sendJson(res, 429, {
+        success: false,
         ok: false,
         statusHttp: 429,
         codigo: 'SEFAZ_656_CONSUMO_INDEVIDO',
         tipoResposta: 'consumo_indevido',
         isConsumoIndevido: true,
         cStat: '656',
+        error: dadosEstruturados.xMotivo || 'Rejeição: Consumo Indevido',
         xMotivo: dadosEstruturados.xMotivo || 'Rejeição: Consumo Indevido',
         mensagem: 'A SEFAZ bloqueou temporariamente esta nota por excesso de tentativas. Aguarde 1 hora antes de transmitir ou consultar novamente.',
         sugestao: 'Não clique em transmitir nem em consultar até passar 1 hora. Cada nova tentativa pode reiniciar o bloqueio.',
@@ -2034,7 +2156,8 @@ export async function sefazSoapHandler(req: any, res: any): Promise<void> {
     const isSucessoHttp = response.status >= 200 && response.status < 300;
 
     sendJson(res, response.status, {
-      ok: isSucessoHttp,
+      success: isSucessoHttp && !dadosEstruturados.isFault,
+      ok: isSucessoHttp && !dadosEstruturados.isFault,
       statusHttp: response.status,
       sucessoTransporte: isSucessoHttp,
       tipoResposta: dadosEstruturados.tipoResposta,
@@ -2057,13 +2180,28 @@ export async function sefazSoapHandler(req: any, res: any): Promise<void> {
       headers: response.headers
     });
   } catch (err: any) {
-    const { endpoint, tpAmb, servico, chaveAcesso } = extrairDadosRequisicaoSefaz(req);
-    const erroFormatado = formatarErroConexaoSefaz(err, endpoint || 'SEFAZ-SP');
+    // 1. Try/Catch Global obrigatório: captura qualquer exceção e retorna JSON com success: false e error: error.message
+    let endpoint = 'SEFAZ-SP';
+    let tpAmb: 1 | 2 = 1;
+    let servico = 'consultaProtocolo';
+    let chaveAcesso = '';
+    try {
+      const dados = extrairDadosRequisicaoSefaz(req);
+      endpoint = dados.endpoint || endpoint;
+      tpAmb = dados.tpAmb;
+      servico = dados.servico;
+      chaveAcesso = dados.chaveAcesso || '';
+    } catch {}
+
+    const erroFormatado = formatarErroConexaoSefaz(err, endpoint);
     console.warn(`[SEFAZ Proxy] Falha na comunicação SOAP com ${endpoint}:`, erroFormatado);
 
-    sendJson(res, 502, {
+    sendJson(res, 200, {
+      success: false,
       ok: false,
-      statusHttp: 502,
+      error: erroFormatado.mensagem || err?.message || String(err),
+      mensagem: erroFormatado.mensagem || err?.message || String(err),
+      statusHttp: 500,
       tpAmb,
       ambiente: tpAmb === 1 ? 'producao' : 'homologacao',
       servico,
@@ -2071,7 +2209,6 @@ export async function sefazSoapHandler(req: any, res: any): Promise<void> {
       codigo: erroFormatado.codigo,
       cStat: erroFormatado.codigo,
       xMotivo: erroFormatado.mensagem,
-      mensagem: erroFormatado.mensagem,
       detalhe: erroFormatado.detalhe,
       sugestao: erroFormatado.sugestao,
       rawError: sanitizarMensagemErro(err?.message || String(err))

@@ -2054,7 +2054,7 @@ export async function enviarSoapSefaz(
   endpointSefaz: string,
   soapAction: string,
   soapEnvelope: string,
-  timeoutMs: number = 15000
+  timeoutMs: number = 25000
 ): Promise<RespostaSoapSefaz> {
   const customProxy = (typeof import.meta !== 'undefined' && (
     import.meta.env?.VITE_SEFAZ_PROXY_URL ||
@@ -2072,6 +2072,8 @@ export async function enviarSoapSefaz(
         'Accept': 'application/json, application/soap+xml, application/xml, text/xml'
       },
       body: JSON.stringify({
+        action: 'NfeConsultaProtocolo',
+        servico: 'consultaProtocolo',
         endpoint: endpointSefaz,
         soapAction,
         soapEnvelope,
@@ -2085,7 +2087,7 @@ export async function enviarSoapSefaz(
       const jsonRes = await res.json();
       const statusHttp = jsonRes.statusHttp || res.status;
       const xmlCorpo = jsonRes.xml || jsonRes.xmlRetorno || '';
-      const isHttpOk = (statusHttp >= 200 && statusHttp < 300);
+      const isHttpOk = (statusHttp >= 200 && statusHttp < 300) && jsonRes.success !== false;
 
       if (isHttpOk) {
         return {
@@ -2104,8 +2106,8 @@ export async function enviarSoapSefaz(
         statusHttp: statusHttp,
         xml: xmlCorpo,
         codigoErro: jsonRes.codigo || jsonRes.cStat || `HTTP_${statusHttp}`,
-        mensagemErro: jsonRes.mensagem || jsonRes.xMotivo || `Erro HTTP ${statusHttp} retornado pela SEFAZ`,
-        detalheErro: jsonRes.detalhe || jsonRes.rawError || res.statusText,
+        mensagemErro: jsonRes.mensagem || jsonRes.xMotivo || jsonRes.error || `Erro HTTP ${statusHttp} retornado pela SEFAZ`,
+        detalheErro: jsonRes.detalhe || jsonRes.rawError || jsonRes.error || res.statusText,
         sugestao: jsonRes.sugestao
       };
     }
@@ -2207,12 +2209,6 @@ export interface DadosRetornoSefaz {
 
 /**
  * Extrai dados estruturados de respostas XML retornadas pela SEFAZ (NF-e v4.00)
- * Diferencia rigorosamente o status do lote (<retEnviNFe>) do status individual da nota (<protNFe><infProt>),
- * bem como possíveis SOAP Faults (<soap:Fault> / <env:Fault>).
- * Garante que:
- * 1. O cStat retornado seja o status real da nota fiscal (cStat 100), e não apenas o status do lote (103/104/105).
- * 2. Recibos (<nRec>) e lotes pendentes (103/105) sejam sinalizados como isLotePendente = true e JAMAIS como autorizados.
- * 3. SOAP Faults (ex: caracteres de edição, schema inválido no envelope) sejam extraídos com sua mensagem real.
  */
 export function extrairDadosRetornoSefazXml(xmlString: string): DadosRetornoSefaz {
   if (!xmlString || typeof xmlString !== 'string' || !xmlString.trim()) {
@@ -2327,13 +2323,11 @@ export function extrairDadosRetornoSefazXml(xmlString: string): DadosRetornoSefa
   let effectiveCStat = cStatNota || cStatLote;
   let effectiveXMotivo = xMotivoNota || xMotivoLote;
 
-  // Se for SOAP Fault e não houve cStat no corpo, usa o código do fault
   if (isFault && (!effectiveCStat || effectiveCStat === '100')) {
     effectiveCStat = faultCode || 'SOAP_FAULT';
     effectiveXMotivo = faultString || effectiveXMotivo || 'Falha SOAP na comunicação com a SEFAZ';
   }
 
-  // Se nProt não veio no nó <nProt>, busca se foi informado no xMotivo ou texto bruto (comum em cStat 204: Duplicidade de NF-e [nProt: 135...])
   if (!nProt && (xMotivoNota || xMotivoLote || xmlString)) {
     const rawText = `${xMotivoNota || ''} ${xMotivoLote || ''} ${xmlString}`;
     const matchXMotProt = rawText.match(/(?:nProt|protocolo)[:\s=]*(\d{15})/i);
@@ -2342,7 +2336,6 @@ export function extrairDadosRetornoSefazXml(xmlString: string): DadosRetornoSefa
     }
   }
 
-  // 5. Determinação dos campos consolidados com tratamento inteligente de Duplicidade (204)
   const isDuplicidadeComProtocolo = (cStatNota === '204' || cStatLote === '204' || effectiveCStat === '204') && !!nProt;
   const isAutorizada = (cStatNota === '100' || cStatNota === '150' || isDuplicidadeComProtocolo) && !isFault;
   const isLotePendente = (cStatLote === '103' || cStatLote === '105' || (!cStatNota && !!nRec)) && !isFault;
@@ -2383,13 +2376,11 @@ export function extrairDadosRetornoSefazXml(xmlString: string): DadosRetornoSefa
 /**
  * Consulta a situação cadastral e fiscal da NF-e por chave de acesso de 44 dígitos
  * perante os WebServices oficiais de Produção da SEFAZ-SP (NFeConsultaProtocolo4).
- * Utilizado para:
- * 1. Verificação prévia de status antes do envio (evita Rejeição 204 se já autorizada).
- * 2. Recuperação de autorização pós-timeout ou queda de conexão.
+ * Timeout padrão de 25 segundos (25000ms).
  */
 export async function consultarSituacaoNfeSefaz(
   chaveAcesso: string,
-  timeoutMs: number = 10000
+  timeoutMs: number = 25000
 ): Promise<DadosRetornoSefaz & { rawXml?: string; error?: string }> {
   const cleanChave = (chaveAcesso || '').replace(/\D/g, '');
   if (!cleanChave || cleanChave.length < 43) {
@@ -2403,6 +2394,7 @@ export async function consultarSituacaoNfeSefaz(
   }
 
   const chaveValida = recalcularChaveAcessoComDvCorreto(cleanChave);
+  // URL SP Produção oficial: https://nfe.fazenda.sp.gov.br/ws/nfeconsultaprotocolo4.asmx
   const endpoint = obterSefazEndpoint('consultaProtocolo');
   const soapEnvelope = gerarEnvelopeSoapConsultaSituacao(chaveValida);
   const soapAction = 'http://www.portalfiscal.inf.br/nfe/wsdl/NFeConsultaProtocolo4';
@@ -2442,11 +2434,11 @@ export async function consultarSituacaoNfeSefaz(
 /**
  * Consulta o resultado do processamento do lote na SEFAZ pelo número do recibo (nRec)
  * Serviço oficial NFeRetAutorizacao4 (https://nfe.fazenda.sp.gov.br/ws/nferetautorizacao4.asmx).
- * Retorna os dados do protocolo da NF-e autorizada quando o lote for finalizado (cStat 104 -> cStat 100).
+ * Timeout padrão de 25 segundos (25000ms).
  */
 export async function consultarReciboLoteSefaz(
   numeroRecibo: string,
-  timeoutMs: number = 10000
+  timeoutMs: number = 25000
 ): Promise<DadosRetornoSefaz & { rawXml?: string; error?: string }> {
   const cleanRecibo = (numeroRecibo || '').replace(/\D/g, '');
   if (!cleanRecibo) {
@@ -2495,6 +2487,7 @@ export async function consultarReciboLoteSefaz(
     };
   }
 }
+
 
 
 /**
