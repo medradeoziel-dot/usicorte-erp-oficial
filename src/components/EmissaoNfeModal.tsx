@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Quote, Client, QuoteItem } from '../types';
 import { 
+  emitirNFe,
   transmitirNfeSefaz, 
   prepararItensFiscais, 
   ItemFiscalNfe,
@@ -502,7 +503,7 @@ export default function EmissaoNfeModal({
       }
     }
 
-    // 1. Altera o status_nfe para "Processando"
+    // 1. Altera o status_nfe para "Processando" no banco sem fechar a tela
     try {
       await updateCotacaoNfeStatusDb(currentQuoteState.id || currentQuoteState.quoteNumber, {
         status_nfe: 'Processando'
@@ -516,17 +517,13 @@ export default function EmissaoNfeModal({
           }
         }
       }
-      onSuccess({
-        ...currentQuoteState,
-        status_nfe: 'Processando'
-      });
     } catch (e) {
       console.warn('Aviso ao registrar status Processando:', e);
     }
 
     try {
-      // 2. Envia a solicitação para a API fiscal / SEFAZ com todos os itens da cotação
-      const res = await transmitirNfeSefaz(currentQuoteState, client);
+      // 2. Invocação direta do serviço de transmissão à SEFAZ (via nfeService / proxy Vercel)
+      const res = await emitirNFe(currentQuoteState, client);
 
       if (registrarBloqueioSeHouver(res)) {
         // Bloqueio 656: a nota NÃO foi recebida; mantém como Pendente para nova tentativa após o prazo
@@ -546,7 +543,11 @@ export default function EmissaoNfeModal({
           ...currentQuoteState,
           status_nfe: 'Emitida',
           nfe_chave: res.nfeChave,
+          chave_acesso: res.nfeChave,
           nfe_numero: res.nfeNumero,
+          serie_nfe: res.serie,
+          protocolo_autorizacao: res.protocolo,
+          protocolo_nfe: res.protocolo,
           danfe_url: res.danfeUrl,
           xml_url: res.xmlUrl,
           xml_conteudo: res.xmlConteudo,
@@ -557,9 +558,6 @@ export default function EmissaoNfeModal({
         onSuccess(updatedQuote);
 
         // INCREMENTO AUTOMÁTICO NA EMISSÃO:
-        // No momento exato em que a nota for autorizada com sucesso na SEFAZ,
-        // o sistema incrementa o ultimo_numero_nfe na base de dados (tabela emitente)
-        // para que a próxima nota siga a sequência corretamente (ex: emitiu a 1, atualiza para 1 para a próxima ser a 2)
         const numAutorizado = parseInt(String(res.nfeNumero).replace(/\D/g, ''), 10);
         if (numAutorizado > 0) {
           try {
@@ -569,16 +567,12 @@ export default function EmissaoNfeModal({
           }
         }
 
-        // 1. AÇÃO AUTOMÁTICA PÓS-AUTORIZAÇÃO (STATUS 100):
-        // Dispara imediatamente o Modal/Visualizador do DANFE em PDF
-        // e aciona a impressão automática / salvar como PDF do sistema
+        // AÇÃO AUTOMÁTICA PÓS-AUTORIZAÇÃO (STATUS 100):
         setShowPreDanfeModal(false);
         setShowDanfeOficialModal(true);
         setAutoPrintDanfe(true);
 
-        // 2. DISPARO AUTOMÁTICO DO XML E DANFE POR E-MAIL (CLIENTE + CONTADOR):
-        // Dispara automaticamente cópia com XML e DANFE para o e-mail do Contador (email_contador)
-        // e para o cliente (se cadastrado)
+        // DISPARO AUTOMÁTICO DO XML E DANFE POR E-MAIL (CLIENTE + CONTADOR):
         try {
           const emailRes = enviarEmailNfe(updatedQuote, client, company, res.xmlConteudo, true);
           if (emailRes.destinatariosDescricao) {
@@ -597,12 +591,12 @@ export default function EmissaoNfeModal({
           ...currentQuoteState,
           status_nfe: 'Pendente',
           nfe_chave: res.chaveAcesso || res.nfeChave || currentQuoteState.nfe_chave,
+          chave_acesso: res.chaveAcesso || res.nfeChave || currentQuoteState.nfe_chave,
           nfe_numero: res.nfeNumero || currentQuoteState.nfe_numero,
           serie_nfe: res.serie || currentQuoteState.serie_nfe,
           mensagem_erro_nfe: msgPendente
         };
         setCurrentQuoteState(pendenteQuote);
-        onSuccess(pendenteQuote);
       } else {
         // 4. Rejeição/Erro: Salva o erro em mensagem_erro_nfe e exibe o alerta explicativo na tela
         const msg = res.mensagemErro || res.xMotivo || 'Rejeição desconhecida pela SEFAZ.';
@@ -618,7 +612,7 @@ export default function EmissaoNfeModal({
           status_nfe: 'Erro',
           mensagem_erro_nfe: msg
         };
-        onSuccess(errorQuote);
+        setCurrentQuoteState(errorQuote);
       }
     } catch (err: any) {
       if (registrarBloqueioSeHouver(err)) return;
@@ -648,7 +642,6 @@ export default function EmissaoNfeModal({
         mensagem_erro_nfe: msg
       };
       setCurrentQuoteState(resultingQuote);
-      onSuccess(resultingQuote);
     } finally {
       setIsTransmitting(false);
     }
@@ -1414,7 +1407,7 @@ export default function EmissaoNfeModal({
                   {isTransmitting ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin text-white" />
-                      <span>Transmitindo...</span>
+                      <span>Transmitindo para a SEFAZ...</span>
                     </>
                   ) : (
                     <>
@@ -1741,7 +1734,8 @@ export default function EmissaoNfeModal({
               <button
                 type="button"
                 onClick={() => setShowPreDanfeModal(false)}
-                className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs rounded-xl transition-colors cursor-pointer"
+                disabled={isTransmitting}
+                className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs rounded-xl transition-colors cursor-pointer disabled:opacity-50"
               >
                 Voltar para Revisão
               </button>
@@ -1750,8 +1744,8 @@ export default function EmissaoNfeModal({
                 <button
                   type="button"
                   onClick={handleOpenPreDanfeNewTab}
-                  disabled={openingNewTab}
-                  className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-indigo-300 hover:text-indigo-200 border border-indigo-500/30 font-bold text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer"
+                  disabled={openingNewTab || isTransmitting}
+                  className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-indigo-300 hover:text-indigo-200 border border-indigo-500/30 font-bold text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                 >
                   <Printer className="w-4 h-4" />
                   <span>Imprimir Prévia / Nova Aba</span>
@@ -1766,7 +1760,7 @@ export default function EmissaoNfeModal({
                   {isTransmitting ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin text-white" />
-                      <span>Transmitindo...</span>
+                      <span>Transmitindo para a SEFAZ...</span>
                     </>
                   ) : (
                     <>

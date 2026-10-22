@@ -18,7 +18,8 @@ import {
   isNfeCancelada,
   downloadXmlCancelamento,
   obterNomePadraoDanfePdf,
-  transmitirNfeSefaz
+  transmitirNfeSefaz,
+  emitirNFe
 } from '../services/nfeService';
 import CancelarNfeModal from './CancelarNfeModal';
 import { formatCurrency, formatSafeDate } from '../utils/calculator';
@@ -253,7 +254,7 @@ export default function DanfeEspelhoA4Modal({
 
   const isCancelada = isNfeCancelada(currentQuoteState?.status_nfe);
   const isAutorizada = isNfeAutorizada(currentQuoteState?.status_nfe);
-  const isPrevia = isPreviaProp !== undefined ? isPreviaProp : (!isAutorizada && !isCancelada);
+  const isPrevia = !isAutorizada && (isPreviaProp !== undefined ? isPreviaProp : !isCancelada);
 
   const handleTransmitirSefaz = async () => {
     if (isSending) return;
@@ -261,31 +262,29 @@ export default function DanfeEspelhoA4Modal({
     setSefazFeedback(null);
 
     try {
-      if (onTransmit) {
-        await onTransmit();
-        return;
-      }
-
-      // Transmissão direta para a API da SEFAZ (via proxy Vercel)
-      const res = await transmitirNfeSefaz(currentQuoteState, client);
+      // Invocação direta do serviço oficial de emissão / transmissão à SEFAZ (via nfeService / proxy)
+      const res = await emitirNFe(currentQuoteState, client);
       if (res.sucesso && res.statusNfe === 'Emitida') {
         const updatedQuote: Quote = {
           ...currentQuoteState,
           status_nfe: 'Emitida',
           nfe_chave: res.nfeChave,
+          chave_acesso: res.nfeChave,
           nfe_numero: res.nfeNumero,
           serie_nfe: res.serie,
+          protocolo_autorizacao: res.protocolo,
+          protocolo_nfe: res.protocolo,
           danfe_url: res.danfeUrl,
           xml_url: res.xmlUrl,
           xml_conteudo: res.xmlConteudo,
           mensagem_erro_nfe: undefined,
-          nfe_emitida_em: res.dataEmissao
+          nfe_emitida_em: res.dataEmissao || new Date().toISOString()
         };
         setCurrentQuoteState(updatedQuote);
         if (onQuoteUpdated) onQuoteUpdated(updatedQuote);
         setSefazFeedback({
           tipo: 'sucesso',
-          mensagem: `NF-e emitida e autorizada com sucesso pela SEFAZ!`,
+          mensagem: `NF-e autorizada com sucesso pela SEFAZ (Protocolo: ${res.protocolo || 'Confirmado'})!`,
           chave: res.nfeChave,
           protocolo: res.protocolo
         });
@@ -1034,7 +1033,8 @@ export default function DanfeEspelhoA4Modal({
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs rounded-xl transition-colors cursor-pointer"
+            disabled={isSending}
+            className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs rounded-xl transition-colors cursor-pointer disabled:opacity-50"
           >
             Fechar
           </button>
@@ -1051,7 +1051,7 @@ export default function DanfeEspelhoA4Modal({
                 <button
                   type="button"
                   onClick={handleDownloadXml}
-                  disabled={isDownloadingXml}
+                  disabled={isDownloadingXml || isSending}
                   className="px-4 py-2.5 bg-emerald-700 hover:bg-emerald-600 text-white font-semibold text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-sm disabled:opacity-50"
                   title="Baixar arquivo XML da NF-e autorizado pela SEFAZ"
                 >
@@ -1063,7 +1063,8 @@ export default function DanfeEspelhoA4Modal({
                   <button
                     type="button"
                     onClick={() => setShowCancelarModal(true)}
-                    className="px-4 py-2.5 bg-rose-700 hover:bg-rose-600 text-white font-semibold text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+                    disabled={isSending}
+                    className="px-4 py-2.5 bg-rose-700 hover:bg-rose-600 text-white font-semibold text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-sm disabled:opacity-50"
                     title="Cancelar NF-e Homologada na SEFAZ (Status 101)"
                   >
                     <Ban className="w-4 h-4" />
@@ -1074,7 +1075,8 @@ export default function DanfeEspelhoA4Modal({
                 <button
                   type="button"
                   onClick={handleEnviarEmail}
-                  className="px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-indigo-500/30 font-semibold text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+                  disabled={isSending}
+                  className="px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-indigo-500/30 font-semibold text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-sm disabled:opacity-50"
                   title="Enviar DANFE e chave da NF-e por e-mail para o cliente"
                 >
                   <Mail className="w-4 h-4" />
@@ -1086,8 +1088,8 @@ export default function DanfeEspelhoA4Modal({
             <button
               type="button"
               onClick={handlePrint}
-              disabled={isPrinting}
-              className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl transition-all flex items-center gap-2 cursor-pointer shadow-lg shadow-emerald-600/30"
+              disabled={isPrinting || isSending}
+              className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl transition-all flex items-center gap-2 cursor-pointer shadow-lg shadow-emerald-600/30 disabled:opacity-50"
               title="Imprimir DANFE oficial ou Salvar como PDF"
             >
               <Printer className="w-4 h-4" />
@@ -1104,7 +1106,7 @@ export default function DanfeEspelhoA4Modal({
                 {isSending ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin text-white" />
-                    <span>Transmitindo...</span>
+                    <span>Transmitindo para a SEFAZ...</span>
                   </>
                 ) : (
                   <>

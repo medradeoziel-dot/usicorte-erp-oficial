@@ -5342,4 +5342,32 @@ export async function abrirPreDanfeEmNovaAba(
 
 export { inserirNotaFiscalDb, fetchNotasFiscaisDb, type NotaFiscalDb, cancelarNotaFiscalSupabase, resolveStatusNfeFinal } from '../lib/db';
 
+export const emitirNFe = transmitirNfeSefaz;
+
+export const nfeService = {
+  emitirNFe: transmitirNfeSefaz,
+  transmitirNfeSefaz,
+  prepararItensFiscais,
+  formatarChaveAcesso,
+  abrirPreDanfeEmNovaAba,
+  buscarInscricaoEstadual,
+  downloadXmlNfe,
+  obterOuBaixarXmlNfe,
+  enviarEmailNfe,
+  isNfeAutorizada,
+  isNfeCancelada,
+  downloadXmlCancelamento,
+  abrirDanfeEmNovaAba,
+  obterAliquotaIcmsSimples,
+  calcularCreditoIcmsSimples,
+  recalcularChaveAcessoComDvCorreto,
+  calcularDvModulo11,
+  consultarStatusOuReciboNfe,
+  obterReciboLocal,
+  fetchClienteCompletoParaDanfe
+};
+
+export default nfeService;
+
+
 

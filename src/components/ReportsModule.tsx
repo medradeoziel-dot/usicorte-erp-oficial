@@ -5468,9 +5468,11 @@ export default function ReportsModule({
               client={resolveClientForQuote(quoteForNfeModal)}
               onSuccess={(updated) => {
                 handleNfeSuccess(updated);
-                setQuoteForNfeModal(null);
-                setQuoteForDanfeModal(updated);
-                setAutoPrintDanfeModal(true);
+                if (updated.status_nfe === 'Emitida') {
+                  setQuoteForNfeModal(null);
+                  setQuoteForDanfeModal(updated);
+                  setAutoPrintDanfeModal(true);
+                }
               }}
               onClose={() => setQuoteForNfeModal(null)}
             />
@@ -5490,11 +5492,9 @@ export default function ReportsModule({
               client={resolveClientForQuote(quoteForDanfeModal)}
               isPrevia={!isNfeAutorizada(quoteForDanfeModal.status_nfe)}
               autoPrint={autoPrintDanfeModal}
-              onTransmit={() => {
-                const q = quoteForDanfeModal;
-                setQuoteForDanfeModal(null);
-                setAutoPrintDanfeModal(false);
-                if (q) setQuoteForNfeModal(q);
+              onQuoteUpdated={(updated) => {
+                handleNfeSuccess(updated);
+                setQuoteForDanfeModal(updated);
               }}
             />
           )}
