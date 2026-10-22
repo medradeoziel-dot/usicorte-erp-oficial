@@ -846,10 +846,13 @@ export function extrairDadosRetornoSefazXmlServer(xmlString: string) {
   const isDuplicidadeComProtocolo = (cStatNota === '204' || cStatLote === '204' || effectiveCStat === '204') && !!nProt;
   const isAutorizada = (cStatNota === '100' || cStatNota === '150' || isDuplicidadeComProtocolo) && !isFault;
   const isLotePendente = (cStatLote === '103' || cStatLote === '105' || (!cStatNota && !!nRec)) && !isFault;
+  const isConsumoIndevido = cStatLote === '656' || cStatNota === '656' || effectiveCStat === '656';
 
   let tipoResposta = 'desconhecido';
   if (isAutorizada) {
     tipoResposta = 'autorizacao';
+  } else if (isConsumoIndevido) {
+    tipoResposta = 'consumo_indevido';
   } else if (isLotePendente) {
     tipoResposta = 'lote_pendente';
   } else if (isFault) {
@@ -874,6 +877,7 @@ export function extrairDadosRetornoSefazXmlServer(xmlString: string) {
     isAutorizada,
     isLotePendente,
     isFault,
+    isConsumoIndevido,
     tipoResposta,
     faultCode,
     faultString
@@ -1762,6 +1766,27 @@ export async function sefazSoapHandler(req: any, res: any): Promise<void> {
         soapAction,
         chaveAcesso,
         xml: response.data,
+        xmlRetorno: response.data
+      });
+      return;
+    }
+
+    if (dadosEstruturados.tipoResposta === 'consumo_indevido') {
+      sendJson(res, 429, {
+        ok: false,
+        statusHttp: 429,
+        codigo: 'SEFAZ_656_CONSUMO_INDEVIDO',
+        tipoResposta: 'consumo_indevido',
+        isConsumoIndevido: true,
+        cStat: '656',
+        xMotivo: dadosEstruturados.xMotivo || 'Rejeição: Consumo Indevido',
+        mensagem: 'A SEFAZ bloqueou temporariamente esta nota por excesso de tentativas. Aguarde 1 hora antes de transmitir ou consultar novamente.',
+        sugestao: 'Não clique em transmitir nem em consultar até passar 1 hora. Cada nova tentativa pode reiniciar o bloqueio.',
+        bloqueadoAte: Date.now() + 60 * 60 * 1000,
+        retentavel: false,
+        tpAmb,
+        servico,
+        chaveAcesso: dadosEstruturados.chNFe || chaveAcesso,
         xmlRetorno: response.data
       });
       return;

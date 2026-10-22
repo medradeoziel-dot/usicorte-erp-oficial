@@ -557,6 +557,8 @@ export interface NfeTransmissionResult {
   cStat?: string;
   xMotivo?: string;
   nRec?: string;
+  isConsumoIndevido?: boolean;
+  bloqueadoAte?: number;
   origemRecuperacao?: 'consulta_previa' | 'timeout_consulta' | 'consulta_recibo';
   mensagemErro?: string;
 }
