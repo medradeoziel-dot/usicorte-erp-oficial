@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import url from 'node:url';
 import tls from 'node:tls';
 import dotenv from 'dotenv';
+import forge from 'node-forge';
 
 // Garante carregamento das variáveis de ambiente em qualquer modo de execução
 dotenv.config();
@@ -292,6 +293,80 @@ export function formatarPem(raw: string | undefined): string | undefined {
 }
 
 /**
+ * Extrai com segurança as credenciais criptográficas (Chave Privada RSA em PEM e Certificado X.509 em Base64)
+ * a partir de arquivos PKCS#12 (.pfx/.p12) ou variáveis de ambiente PEM
+ */
+export function extrairCredenciaisCertificado(certOverride?: any): {
+  keyPem?: string;
+  certPem?: string;
+  x509CertB64?: string;
+  hasCert: boolean;
+  origem: string;
+} {
+  const envInfo = resolverVariavelAmbienteCertificado(certOverride);
+
+  // 1. Se forneceu PEM direto
+  if (envInfo.keyPem && envInfo.certPem) {
+    const keyPem = formatarPem(envInfo.keyPem);
+    const certPem = formatarPem(envInfo.certPem);
+    const x509CertB64 = certPem
+      ? certPem.replace(/-----BEGIN CERTIFICATE-----/g, '').replace(/-----END CERTIFICATE-----/g, '').replace(/[\r\n\s]/g, '')
+      : undefined;
+    return { keyPem, certPem, x509CertB64, hasCert: !!keyPem, origem: 'PEM' };
+  }
+
+  // 2. Se forneceu PKCS#12 (.pfx) em Base64 ou Arquivo
+  let pfxBuffer: Buffer | undefined;
+  if (envInfo.pfxBase64) {
+    try {
+      const cleanB64 = limparCertificadoBase64(envInfo.pfxBase64);
+      pfxBuffer = Buffer.from(cleanB64, 'base64');
+    } catch {}
+  } else if (envInfo.certPath && envInfo.certPathExiste) {
+    try {
+      pfxBuffer = fs.readFileSync(envInfo.certPath);
+    } catch {}
+  }
+
+  if (pfxBuffer && pfxBuffer.length > 0) {
+    try {
+      const cleanPassword = limparSenhaCertificado(envInfo.pfxPassword);
+      const p12Asn1 = forge.asn1.fromDer(pfxBuffer.toString('binary'));
+      const p12 = forge.pkcs12.pkcs12FromAsn1(p12Asn1, cleanPassword || '');
+
+      let keyPem: string | undefined;
+      let certPem: string | undefined;
+      let x509CertB64: string | undefined;
+
+      for (const sc of p12.safeContents) {
+        for (const sb of sc.safeBags) {
+          if (sb.key) {
+            keyPem = forge.pki.privateKeyToPem(sb.key);
+          }
+          if (sb.cert) {
+            certPem = forge.pki.certificateToPem(sb.cert);
+            const certDer = forge.asn1.toDer(forge.pki.certificateToAsn1(sb.cert)).getBytes();
+            x509CertB64 = Buffer.from(certDer, 'binary').toString('base64');
+          }
+        }
+      }
+
+      return {
+        keyPem,
+        certPem,
+        x509CertB64,
+        hasCert: !!keyPem,
+        origem: envInfo.variavelBase64Nome || 'PKCS12'
+      };
+    } catch (e: any) {
+      console.warn('[SEFAZ Cert] Falha ao extrair chave e certificado do PKCS#12:', sanitizarMensagemErro(e?.message || String(e)));
+    }
+  }
+
+  return { hasCert: false, origem: 'Nenhum' };
+}
+
+/**
  * URLs oficiais dos WebServices da SEFAZ-SP (NF-e v4.00 - Modelo 55)
  * Suporte a Produção (tpAmb = 1) e Homologação (tpAmb = 2)
  */
@@ -509,9 +584,11 @@ export function criarAgenteHttpsSefaz(certOverride?: {
 export function compactarXmlSefaz(xml: string): string {
   if (!xml || typeof xml !== 'string') return '';
   return xml
-    .replace(/^\uFEFF+/, '')
+    .replace(/^[\uFEFF\u200B\u200C\u200D\u2060]+/, '')
+    .replace(/[\uFEFF\u200B\u200C\u200D\u2060]/g, '')
     .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/>[\s\r\n\t]+</g, '><')
+    .replace(/>[\s\r\n\t\u00A0]+</g, '><')
+    .replace(/\s+\/>/g, '/>')
     .trim();
 }
 
@@ -557,37 +634,30 @@ export function assinarXmlSefazServer(xmlString: string, certOverride?: any): st
     `</Reference>` +
   `</SignedInfo>`;
 
+  const creds = extrairCredenciaisCertificado(certOverride);
   let signatureValue = '';
-  let x509Cert = '';
 
-  const certPrivateKey = formatarPem(certOverride?.keyPem || process.env.NFE_KEY_PEM || process.env.SEFAZ_KEY_PEM || process.env.NFE_PRIVATE_KEY);
-  const certPublicPem = formatarPem(certOverride?.certPem || process.env.NFE_CERT_PEM || process.env.SEFAZ_CERT_PEM);
-
-  if (certPrivateKey) {
+  if (creds.keyPem) {
     try {
       const signer = crypto.createSign('RSA-SHA1');
       signer.update(signedInfo);
-      signatureValue = signer.sign(certPrivateKey, 'base64');
+      signatureValue = signer.sign(creds.keyPem, 'base64');
     } catch (e: any) {
-      console.warn('[SEFAZ Assinatura] Aviso ao assinar com chave privada PEM:', sanitizarMensagemErro(e?.message || String(e)));
+      console.warn('[SEFAZ Assinatura] Aviso ao assinar com chave privada:', sanitizarMensagemErro(e?.message || String(e)));
     }
-  }
-
-  if (certPublicPem) {
-    x509Cert = certPublicPem
-      .replace(/-----BEGIN CERTIFICATE-----/g, '')
-      .replace(/-----END CERTIFICATE-----/g, '')
-      .replace(/[\r\n\s]/g, '');
   }
 
   if (!signatureValue) {
     signatureValue = crypto.createHash('sha1').update(signedInfo + (idRef || '')).digest('base64');
   }
 
+  const x509Cert = creds.x509CertB64 || '';
+  const keyInfo = x509Cert ? `<KeyInfo><X509Data><X509Certificate>${x509Cert}</X509Certificate></X509Data></KeyInfo>` : '';
+
   const signatureXml = `<Signature xmlns="http://www.w3.org/2000/09/xmldsig#">` +
     `${signedInfo}` +
     `<SignatureValue>${signatureValue}</SignatureValue>` +
-    (x509Cert ? `<KeyInfo><X509Data><X509Certificate>${x509Cert}</X509Certificate></X509Data></KeyInfo>` : '') +
+    `${keyInfo}` +
   `</Signature>`;
 
   return xmlString.replace(tagCompleta, `${tagCompleta}${signatureXml}`);
@@ -685,8 +755,41 @@ export function formatarErroConexaoSefaz(err: any, endpoint: string): {
  * Extrai dados estruturados de respostas XML retornadas pela SEFAZ (NF-e v4.00)
  */
 export function extrairDadosRetornoSefazXmlServer(xmlString: string) {
-  if (!xmlString) {
-    return { isAutorizada: false, isLotePendente: false };
+  if (!xmlString || typeof xmlString !== 'string' || !xmlString.trim()) {
+    return {
+      isAutorizada: false,
+      isLotePendente: false,
+      isFault: false,
+      tipoResposta: 'resposta_vazia',
+      cStat: 'XML_VAZIO',
+      xMotivo: 'Resposta vazia retornada pela SEFAZ'
+    };
+  }
+
+  if (!xmlString.includes('<')) {
+    return {
+      isAutorizada: false,
+      isLotePendente: false,
+      isFault: false,
+      tipoResposta: 'resposta_vazia',
+      cStat: 'NAO_XML',
+      xMotivo: xmlString.trim().slice(0, 300) || 'Resposta da SEFAZ não possui formato XML'
+    };
+  }
+
+  // 1. Verificação explícita de SOAP Fault (<soap:Fault> ou <env:Fault>)
+  let isFault = false;
+  let faultCode: string | undefined;
+  let faultString: string | undefined;
+
+  const faultMatch = xmlString.match(/<(?:\w+:)?Fault[^>]*>([\s\S]*?)<\/(?:\w+:)?Fault>/i);
+  if (faultMatch) {
+    isFault = true;
+    const faultXml = faultMatch[1];
+    faultCode = faultXml.match(/<(?:\w+:)?(?:faultcode|Value)>([^<]+)<\/(?:\w+:)?(?:faultcode|Value)>/i)?.[1]?.trim();
+    faultString = faultXml.match(/<(?:\w+:)?faultstring>([^<]+)<\/(?:\w+:)?faultstring>/i)?.[1]?.trim()
+      || faultXml.match(/<(?:\w+:)?Text[^>]*>([^<]+)<\/(?:\w+:)?Text>/i)?.[1]?.trim()
+      || faultXml.match(/<(?:\w+:)?Reason[^>]*>([\s\S]*?)<\/(?:\w+:)?Reason>/i)?.[1]?.replace(/<[^>]+>/g, '').trim();
   }
 
   let cStatNota: string | undefined;
@@ -729,8 +832,13 @@ export function extrairDadosRetornoSefazXmlServer(xmlString: string) {
     tpAmb = xmlString.match(/<tpAmb>(\d+)<\/tpAmb>/i)?.[1];
   }
 
-  const effectiveCStat = cStatNota || cStatLote;
-  const effectiveXMotivo = xMotivoNota || xMotivoLote;
+  let effectiveCStat = cStatNota || cStatLote;
+  let effectiveXMotivo = xMotivoNota || xMotivoLote;
+
+  if (isFault && (!effectiveCStat || effectiveCStat === '100')) {
+    effectiveCStat = faultCode || 'SOAP_FAULT';
+    effectiveXMotivo = faultString || effectiveXMotivo || 'Falha SOAP na comunicação com a SEFAZ';
+  }
 
   if (!nProt && (xMotivoNota || xMotivoLote || xmlString)) {
     const matchXMotProt = `${xMotivoNota || ''} ${xMotivoLote || ''} ${xmlString}`.match(/(?:nProt|protocolo)[:\s=]*(\d{15})/i);
@@ -740,8 +848,19 @@ export function extrairDadosRetornoSefazXmlServer(xmlString: string) {
   }
 
   const isDuplicidadeComProtocolo = (cStatNota === '204' || cStatLote === '204' || effectiveCStat === '204') && !!nProt;
-  const isAutorizada = (cStatNota === '100' || cStatNota === '150' || isDuplicidadeComProtocolo);
-  const isLotePendente = (cStatLote === '103' || cStatLote === '105' || (!cStatNota && !!nRec));
+  const isAutorizada = (cStatNota === '100' || cStatNota === '150' || isDuplicidadeComProtocolo) && !isFault;
+  const isLotePendente = (cStatLote === '103' || cStatLote === '105' || (!cStatNota && !!nRec)) && !isFault;
+
+  let tipoResposta = 'desconhecido';
+  if (isAutorizada) {
+    tipoResposta = 'autorizacao';
+  } else if (isLotePendente) {
+    tipoResposta = 'lote_pendente';
+  } else if (isFault) {
+    tipoResposta = 'soap_fault';
+  } else if (effectiveCStat && effectiveCStat !== '100' && effectiveCStat !== '150') {
+    tipoResposta = 'rejeicao_fiscal';
+  }
 
   return {
     cStat: effectiveCStat,
@@ -757,7 +876,11 @@ export function extrairDadosRetornoSefazXmlServer(xmlString: string) {
     dhRecbto,
     digVal,
     isAutorizada,
-    isLotePendente
+    isLotePendente,
+    isFault,
+    tipoResposta,
+    faultCode,
+    faultString
   };
 }
 
@@ -1591,9 +1714,18 @@ export default async function handler(req: any, res: any): Promise<void> {
 
     const { endpoint, soapAction, soapEnvelope, timeoutMs, certificado, tpAmb, servico, chaveAcesso } = dadosReq;
 
+    let envelopeParaTransmissao = dadosReq.soapEnvelope || '';
+    if (envelopeParaTransmissao && 
+        (envelopeParaTransmissao.includes('<infNFe') || envelopeParaTransmissao.includes('<infEvento')) && 
+        !envelopeParaTransmissao.includes('<Signature')) {
+      console.log(`[SEFAZ Proxy Vercel] Assinando digitalmente o bloco infNFe/infEvento com padrão ICP-Brasil...`);
+      envelopeParaTransmissao = assinarXmlSefazServer(envelopeParaTransmissao, certificado);
+    }
+    envelopeParaTransmissao = compactarXmlSefaz(envelopeParaTransmissao);
+
     console.log(`[SEFAZ Proxy Vercel] Transmitindo (${servico.toUpperCase()} - tpAmb: ${tpAmb}${chaveAcesso ? ` - Chave: ${chaveAcesso}` : ''}) para ${endpoint}...`);
 
-    const response = await executarRequisicaoSoapNode(endpoint!, soapAction!, soapEnvelope!, timeoutMs, certificado);
+    const response = await executarRequisicaoSoapNode(endpoint!, soapAction!, envelopeParaTransmissao, timeoutMs, certificado);
 
     console.log(`[SEFAZ Proxy Vercel] Resposta recebida da SEFAZ: HTTP ${response.status} (${response.data.length} bytes, hasCert: ${response.hasCert}, validacao: ${response.validacaoStatus}).`);
 
@@ -1647,8 +1779,17 @@ export default async function handler(req: any, res: any): Promise<void> {
     const isSucessoHttp = response.status >= 200 && response.status < 300;
 
     sendJson(res, response.status, {
-      ok: isSucessoHttp && dadosEstruturados.isAutorizada !== false,
+      ok: isSucessoHttp,
       statusHttp: response.status,
+      sucessoTransporte: isSucessoHttp,
+      tipoResposta: dadosEstruturados.tipoResposta,
+      isAutorizada: dadosEstruturados.isAutorizada,
+      isLotePendente: dadosEstruturados.isLotePendente,
+      isFault: dadosEstruturados.isFault,
+      cStat: dadosEstruturados.cStat,
+      xMotivo: dadosEstruturados.xMotivo,
+      nRec: dadosEstruturados.nRec,
+      nProt: dadosEstruturados.nProt,
       tpAmb,
       ambiente: tpAmb === 1 ? 'producao' : 'homologacao',
       servico,

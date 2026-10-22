@@ -1747,9 +1747,11 @@ export function obterSefazEndpoint(
 export function compactarXmlSefaz(xml: string): string {
   if (!xml || typeof xml !== 'string') return '';
   return xml
-    .replace(/^\uFEFF+/, '')
+    .replace(/^[\uFEFF\u200B\u200C\u200D\u2060]+/, '')
+    .replace(/[\uFEFF\u200B\u200C\u200D\u2060]/g, '')
     .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/>[\s\r\n\t]+</g, '><')
+    .replace(/>[\s\r\n\t\u00A0]+</g, '><')
+    .replace(/\s+\/>/g, '/>')
     .trim();
 }
 
@@ -2090,19 +2092,28 @@ export async function enviarSoapSefaz(
     const contentType = res.headers.get('content-type') || '';
     if (contentType.includes('application/json')) {
       const jsonRes = await res.json();
-      if (res.ok && jsonRes.ok) {
+      const statusHttp = jsonRes.statusHttp || res.status;
+      const xmlCorpo = jsonRes.xml || jsonRes.xmlRetorno || '';
+      const isHttpOk = (statusHttp >= 200 && statusHttp < 300);
+
+      if (isHttpOk) {
         return {
           sucessoHttp: true,
-          statusHttp: jsonRes.statusHttp || res.status,
-          xml: jsonRes.xml || ''
+          statusHttp: statusHttp,
+          xml: xmlCorpo,
+          codigoErro: jsonRes.cStat || jsonRes.codigo,
+          mensagemErro: jsonRes.xMotivo || jsonRes.mensagem,
+          detalheErro: jsonRes.detalhe || jsonRes.rawError,
+          sugestao: jsonRes.sugestao
         };
       }
+
       return {
         sucessoHttp: false,
-        statusHttp: jsonRes.statusHttp || res.status,
-        xml: jsonRes.xml || '',
-        codigoErro: jsonRes.codigo || `HTTP_${res.status}`,
-        mensagemErro: jsonRes.mensagem || `Falha HTTP ${res.status} ao comunicar com a SEFAZ`,
+        statusHttp: statusHttp,
+        xml: xmlCorpo,
+        codigoErro: jsonRes.codigo || jsonRes.cStat || `HTTP_${statusHttp}`,
+        mensagemErro: jsonRes.mensagem || jsonRes.xMotivo || `Erro HTTP ${statusHttp} retornado pela SEFAZ`,
         detalheErro: jsonRes.detalhe || jsonRes.rawError || res.statusText,
         sugestao: jsonRes.sugestao
       };
@@ -2174,6 +2185,14 @@ export function obterReciboLocal(quoteId: string, chaveAcesso?: string): string 
   return null;
 }
 
+export type TipoRespostaSefaz = 
+  | 'autorizacao' 
+  | 'rejeicao_fiscal' 
+  | 'lote_pendente' 
+  | 'soap_fault' 
+  | 'resposta_vazia' 
+  | 'desconhecido';
+
 export interface DadosRetornoSefaz {
   cStat?: string;
   xMotivo?: string;
@@ -2189,21 +2208,60 @@ export interface DadosRetornoSefaz {
   digVal?: string;
   isAutorizada: boolean;
   isLotePendente: boolean;
+  isFault?: boolean;
+  tipoResposta?: TipoRespostaSefaz;
+  faultCode?: string;
+  faultString?: string;
 }
 
 /**
  * Extrai dados estruturados de respostas XML retornadas pela SEFAZ (NF-e v4.00)
- * Diferencia rigorosamente o status do lote (<retEnviNFe>) do status individual da nota (<protNFe><infProt>).
+ * Diferencia rigorosamente o status do lote (<retEnviNFe>) do status individual da nota (<protNFe><infProt>),
+ * bem como possíveis SOAP Faults (<soap:Fault> / <env:Fault>).
  * Garante que:
  * 1. O cStat retornado seja o status real da nota fiscal (cStat 100), e não apenas o status do lote (103/104/105).
  * 2. Recibos (<nRec>) e lotes pendentes (103/105) sejam sinalizados como isLotePendente = true e JAMAIS como autorizados.
+ * 3. SOAP Faults (ex: caracteres de edição, schema inválido no envelope) sejam extraídos com sua mensagem real.
  */
 export function extrairDadosRetornoSefazXml(xmlString: string): DadosRetornoSefaz {
-  if (!xmlString) {
-    return { isAutorizada: false, isLotePendente: false };
+  if (!xmlString || typeof xmlString !== 'string' || !xmlString.trim()) {
+    return {
+      isAutorizada: false,
+      isLotePendente: false,
+      isFault: false,
+      tipoResposta: 'resposta_vazia',
+      cStat: 'XML_VAZIO',
+      xMotivo: 'Resposta vazia retornada pela SEFAZ'
+    };
   }
 
-  // 1. Extração prioritária do bloco da NF-e: <protNFe><infProt>
+  if (!xmlString.includes('<')) {
+    return {
+      isAutorizada: false,
+      isLotePendente: false,
+      isFault: false,
+      tipoResposta: 'resposta_vazia',
+      cStat: 'NAO_XML',
+      xMotivo: xmlString.trim().slice(0, 300) || 'Resposta da SEFAZ não possui formato XML'
+    };
+  }
+
+  // 1. Verificação explícita de SOAP Fault (<soap:Fault> ou <env:Fault>)
+  let isFault = false;
+  let faultCode: string | undefined;
+  let faultString: string | undefined;
+
+  const faultMatch = xmlString.match(/<(?:\w+:)?Fault[^>]*>([\s\S]*?)<\/(?:\w+:)?Fault>/i);
+  if (faultMatch) {
+    isFault = true;
+    const faultXml = faultMatch[1];
+    faultCode = faultXml.match(/<(?:\w+:)?(?:faultcode|Value)>([^<]+)<\/(?:\w+:)?(?:faultcode|Value)>/i)?.[1]?.trim();
+    faultString = faultXml.match(/<(?:\w+:)?faultstring>([^<]+)<\/(?:\w+:)?faultstring>/i)?.[1]?.trim()
+      || faultXml.match(/<(?:\w+:)?Text[^>]*>([^<]+)<\/(?:\w+:)?Text>/i)?.[1]?.trim()
+      || faultXml.match(/<(?:\w+:)?Reason[^>]*>([\s\S]*?)<\/(?:\w+:)?Reason>/i)?.[1]?.replace(/<[^>]+>/g, '').trim();
+  }
+
+  // 2. Extração prioritária do bloco da NF-e: <protNFe><infProt>
   let cStatNota: string | undefined;
   let xMotivoNota: string | undefined;
   let nProt: string | undefined;
@@ -2232,7 +2290,7 @@ export function extrairDadosRetornoSefazXml(xmlString: string): DadosRetornoSefa
     if (tpAmbMatch) tpAmb = tpAmbMatch[1];
   }
 
-  // 2. Extração para eventos (ex: cancelamento em <infEvento> / <retEvento>)
+  // 3. Extração para eventos (ex: cancelamento em <infEvento> / <retEvento>)
   if (!nProt) {
     const infEventoMatch = xmlString.match(/<infEvento[^>]*>([\s\S]*?)<\/infEvento>/i);
     if (infEventoMatch) {
@@ -2249,7 +2307,7 @@ export function extrairDadosRetornoSefazXml(xmlString: string): DadosRetornoSefa
     }
   }
 
-  // 3. Extração dos dados do lote (<retEnviNFe> ou nó raiz fora de protNFe)
+  // 4. Extração dos dados do lote (<retEnviNFe> ou nó raiz fora de protNFe)
   let cStatLote: string | undefined;
   let xMotivoLote: string | undefined;
   let nRec: string | undefined;
@@ -2275,8 +2333,14 @@ export function extrairDadosRetornoSefazXml(xmlString: string): DadosRetornoSefa
     if (tpAmbMatch) tpAmb = tpAmbMatch[1];
   }
 
-  const effectiveCStat = cStatNota || cStatLote;
-  const effectiveXMotivo = xMotivoNota || xMotivoLote;
+  let effectiveCStat = cStatNota || cStatLote;
+  let effectiveXMotivo = xMotivoNota || xMotivoLote;
+
+  // Se for SOAP Fault e não houve cStat no corpo, usa o código do fault
+  if (isFault && (!effectiveCStat || effectiveCStat === '100')) {
+    effectiveCStat = faultCode || 'SOAP_FAULT';
+    effectiveXMotivo = faultString || effectiveXMotivo || 'Falha SOAP na comunicação com a SEFAZ';
+  }
 
   // Se nProt não veio no nó <nProt>, busca se foi informado no xMotivo ou texto bruto (comum em cStat 204: Duplicidade de NF-e [nProt: 135...])
   if (!nProt && (xMotivoNota || xMotivoLote || xmlString)) {
@@ -2287,10 +2351,21 @@ export function extrairDadosRetornoSefazXml(xmlString: string): DadosRetornoSefa
     }
   }
 
-  // 4. Determinação dos campos consolidados com tratamento inteligente de Duplicidade (204)
+  // 5. Determinação dos campos consolidados com tratamento inteligente de Duplicidade (204)
   const isDuplicidadeComProtocolo = (cStatNota === '204' || cStatLote === '204' || effectiveCStat === '204') && !!nProt;
-  const isAutorizada = (cStatNota === '100' || cStatNota === '150' || isDuplicidadeComProtocolo);
-  const isLotePendente = (cStatLote === '103' || cStatLote === '105' || (!cStatNota && !!nRec));
+  const isAutorizada = (cStatNota === '100' || cStatNota === '150' || isDuplicidadeComProtocolo) && !isFault;
+  const isLotePendente = (cStatLote === '103' || cStatLote === '105' || (!cStatNota && !!nRec)) && !isFault;
+
+  let tipoResposta: TipoRespostaSefaz = 'desconhecido';
+  if (isAutorizada) {
+    tipoResposta = 'autorizacao';
+  } else if (isLotePendente) {
+    tipoResposta = 'lote_pendente';
+  } else if (isFault) {
+    tipoResposta = 'soap_fault';
+  } else if (effectiveCStat && effectiveCStat !== '100' && effectiveCStat !== '150') {
+    tipoResposta = 'rejeicao_fiscal';
+  }
 
   return {
     cStat: effectiveCStat,
@@ -2306,7 +2381,11 @@ export function extrairDadosRetornoSefazXml(xmlString: string): DadosRetornoSefa
     dhRecbto,
     digVal,
     isAutorizada,
-    isLotePendente
+    isLotePendente,
+    isFault,
+    tipoResposta,
+    faultCode,
+    faultString
   };
 }
 
@@ -3357,6 +3436,33 @@ export async function transmitirNfeSefaz(
       }
 
       if (!resSoap.sucessoHttp) {
+        // Se houver XML retornado (ex: SOAP Fault em HTTP 500 pela SEFAZ), extrai o motivo real antes de assumir falha cega
+        if (resSoap.xml) {
+          const dadosFault = extrairDadosRetornoSefazXml(resSoap.xml);
+          if (dadosFault.isFault || (dadosFault.cStat && dadosFault.cStat !== '100')) {
+            const faultMotivo = dadosFault.xMotivo || 'Rejeição SOAP reportada pela SEFAZ';
+            const faultCode = dadosFault.cStat || `HTTP_${resSoap.statusHttp}`;
+            const errMsg = `Rejeição SOAP SEFAZ [${faultCode}]: ${faultMotivo}`;
+            console.warn(`[SEFAZ-SP SOAP Fault] ❌ ${errMsg}`);
+            try {
+              await updateCotacaoNfeStatusDb(quoteIdOrNum, {
+                status_nfe: 'Erro',
+                mensagem_erro_nfe: errMsg
+              });
+            } catch {}
+            return {
+              sucesso: false,
+              statusNfe: 'Erro',
+              chaveAcesso,
+              nfeNumero: numeroNfe,
+              serie,
+              cStat: faultCode,
+              xMotivo: faultMotivo,
+              mensagemErro: errMsg
+            };
+          }
+        }
+
         const cStatErr = resSoap.codigoErro || `HTTP_${resSoap.statusHttp}`;
         const msgErr = resSoap.mensagemErro || 'Falha na transmissão SOAP para a SEFAZ-SP';
         const detalhe = resSoap.detalheErro ? `\nDetalhe: ${resSoap.detalheErro}` : '';
@@ -3369,6 +3475,32 @@ export async function transmitirNfeSefaz(
 
       const responseXml = resSoap.xml;
       const dadosRetorno = extrairDadosRetornoSefazXml(responseXml);
+
+      // =========================================================================================
+      // CASO 1: SOAP FAULT NA RESPOSTA (ex: caracteres de edição, envelope inválido)
+      // =========================================================================================
+      if (dadosRetorno.isFault) {
+        const cStatFault = dadosRetorno.cStat || 'SOAP_FAULT';
+        const xMotivoFault = dadosRetorno.xMotivo || 'Falha no envelope SOAP informada pela SEFAZ';
+        const errMsg = `Rejeição SOAP SEFAZ [${cStatFault}]: ${xMotivoFault}`;
+        console.warn(`[SEFAZ-SP Rejeição SOAP] ❌ ${errMsg}`);
+        try {
+          await updateCotacaoNfeStatusDb(quoteIdOrNum, {
+            status_nfe: 'Erro',
+            mensagem_erro_nfe: errMsg
+          });
+        } catch {}
+        return {
+          sucesso: false,
+          statusNfe: 'Erro',
+          chaveAcesso,
+          nfeNumero: numeroNfe,
+          serie,
+          cStat: cStatFault,
+          xMotivo: xMotivoFault,
+          mensagemErro: errMsg
+        };
+      }
 
       // =========================================================================================
       // TRAVA 3: CONSULTA AUTOMÁTICA DE RECIBO (103 / 105)
