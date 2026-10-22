@@ -2476,7 +2476,7 @@ export function gerarXmlNfe(
       <verProc>UsiCorte-ERP-1.0</verProc>
     </ide>
     <emit>
-      <CNPJ>${emitente.cnpj.replace(/\D/g, '')}</CNPJ>
+      <CNPJ>${String(emitente.cnpj || '').replace(/\D/g, '')}</CNPJ>
       <xNome>${escapeXml(emitente.razaoSocial)}</xNome>
       <xFant>${escapeXml(emitente.nomeFantasia)}</xFant>
       <enderEmit>
@@ -2486,16 +2486,16 @@ export function gerarXmlNfe(
         <cMun>3506003</cMun>
         <xMun>${escapeXml(emitente.cidade)}</xMun>
         <UF>${emitente.uf}</UF>
-        <CEP>${emitente.cep.replace(/\D/g, '')}</CEP>
+        <CEP>${String(emitente.cep || '').replace(/\D/g, '').padEnd(8, '0').slice(0, 8)}</CEP>
         <cPais>1058</cPais>
         <xPais>BRASIL</xPais>
-        <fone>${emitente.telefone.replace(/\D/g, '')}</fone>
+        <fone>${String(emitente.telefone || '').replace(/\D/g, '')}</fone>
       </enderEmit>
-      <IE>${emitente.ie.replace(/\D/g, '')}</IE>
+      <IE>${String(emitente.ie || '').replace(/\D/g, '')}</IE>
       <CRT>1</CRT>
     </emit>
     <dest>
-      <${destinatario.tipoDocumento === 'CPF' ? 'CPF' : 'CNPJ'}>${destinatario.documento.replace(/\D/g, '')}</${destinatario.tipoDocumento === 'CPF' ? 'CPF' : 'CNPJ'}>
+      <${(destinatario.tipoDocumento === 'CPF' || String(destinatario.documento || '').replace(/\D/g, '').length <= 11) ? 'CPF' : 'CNPJ'}>${String(destinatario.documento || '').replace(/\D/g, '')}</${(destinatario.tipoDocumento === 'CPF' || String(destinatario.documento || '').replace(/\D/g, '').length <= 11) ? 'CPF' : 'CNPJ'}>
       <xNome>${escapeXml(destinatario.nome)}</xNome>
       <enderDest>
         <xLgr>${escapeXml(destinatario.endereco || 'ENDERECO')}</xLgr>
@@ -2503,12 +2503,12 @@ export function gerarXmlNfe(
         <xBairro>${escapeXml(destinatario.bairro || 'CENTRO')}</xBairro>
         <xMun>${escapeXml(destinatario.cidade || 'SAO PAULO')}</xMun>
         <UF>${destinatario.uf || 'SP'}</UF>
-        <CEP>${(destinatario.cep || '00000000').replace(/\D/g, '')}</CEP>
+        <CEP>${String(destinatario.cep || '00000000').replace(/\D/g, '').padEnd(8, '0').slice(0, 8)}</CEP>
         <cPais>1058</cPais>
         <xPais>BRASIL</xPais>
       </enderDest>
-      <indIEDest>${destinatario.indicadorIe || '9'}</indIEDest>
-      ${destinatario.inscricaoEstadual && destinatario.inscricaoEstadual.toUpperCase() !== 'ISENTO' ? `<IE>${destinatario.inscricaoEstadual.replace(/\D/g, '')}</IE>` : ''}
+      <indIEDest>${destinatario.indicadorIe || (String(destinatario.inscricaoEstadual || '').toUpperCase().includes('ISENTO') || !String(destinatario.inscricaoEstadual || '').replace(/\D/g, '') ? '9' : '1')}</indIEDest>
+      ${destinatario.inscricaoEstadual && !String(destinatario.inscricaoEstadual).toUpperCase().includes('ISENTO') && String(destinatario.inscricaoEstadual).replace(/\D/g, '').length >= 2 ? `<IE>${String(destinatario.inscricaoEstadual).replace(/\D/g, '')}</IE>` : ''}
     </dest>
     ${xmlItens}
     <total>

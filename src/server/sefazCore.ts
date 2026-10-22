@@ -821,14 +821,20 @@ export function montarXmlNfeServer(dados: {
   const dest = dados.destinatario || {};
   const vTotal = Number(dados.valorTotal || 0).toFixed(2);
 
-  const emitCnpj = String(emit.cnpj || '25.038.430/0001-23').replace(/\D/g, '');
+  const emitCnpj = String(emit.cnpj || '25038430000123').replace(/\D/g, '');
   const emitRazao = emit.razaoSocial || emit.razao_social || 'L. M. BANZATTO METAIS';
   const emitFant = emit.nomeFantasia || emit.nome_fantasia || 'USICORTE METAIS';
   const emitIe = String(emit.ie || emit.inscricao_estadual || '20963213114').replace(/\D/g, '');
+  const emitCep = String(emit.cep || '17031350').replace(/\D/g, '').padEnd(8, '0').slice(0, 8);
+  const emitFone = String(emit.telefone || '14998809362').replace(/\D/g, '');
 
   const destDoc = String(dest.documento || dest.doc || dest.document || '00000000000191').replace(/\D/g, '');
-  const destTipoDoc = destDoc.length > 11 ? 'CNPJ' : 'CPF';
+  const destTipoDoc = destDoc.length <= 11 ? 'CPF' : 'CNPJ';
   const destNome = dest.nome || dest.name || 'CLIENTE CONSUMIDOR FINAL';
+  const destCep = String(dest.cep || '17000000').replace(/\D/g, '').padEnd(8, '0').slice(0, 8);
+  const rawDestIe = String(dest.ie || dest.inscricaoEstadual || dest.inscricao_estadual || '').trim();
+  const destIe = rawDestIe.replace(/\D/g, '');
+  const isDestIeIsento = !destIe || rawDestIe.toUpperCase() === 'ISENTO' || rawDestIe.toUpperCase().includes('ISENTO');
 
   const itens = (dados.itens && dados.itens.length > 0) ? dados.itens : [{
     codigo: '001',
@@ -907,16 +913,16 @@ export function montarXmlNfeServer(dados: {
       <xNome>${emitRazao}</xNome>
       <xFant>${emitFant}</xFant>
       <enderEmit>
-        <xLgr>${emit.endereco || 'RUA DAS INDUSTRIAS'}</xLgr>
-        <nro>${emit.numero || '100'}</nro>
-        <xBairro>${emit.bairro || 'DISTRITO INDUSTRIAL'}</xBairro>
+        <xLgr>${emit.endereco || 'RUA CORONEL IVON CESAR PIMENTEL'}</xLgr>
+        <nro>${emit.numero || '3-41'}</nro>
+        <xBairro>${emit.bairro || 'PARQUE PAULISTA'}</xBairro>
         <cMun>3506003</cMun>
         <xMun>${emit.cidade || 'BAURU'}</xMun>
         <UF>${emit.uf || 'SP'}</UF>
-        <CEP>${String(emit.cep || '17031350').replace(/\D/g, '')}</CEP>
+        <CEP>${emitCep}</CEP>
         <cPais>1058</cPais>
         <xPais>BRASIL</xPais>
-        <fone>${String(emit.telefone || '14998809362').replace(/\D/g, '')}</fone>
+        ${emitFone ? `<fone>${emitFone}</fone>` : ''}
       </enderEmit>
       <IE>${emitIe}</IE>
       <CRT>1</CRT>
@@ -931,11 +937,12 @@ export function montarXmlNfeServer(dados: {
         <cMun>3506003</cMun>
         <xMun>${dest.cidade || 'BAURU'}</xMun>
         <UF>${dest.uf || 'SP'}</UF>
-        <CEP>${String(dest.cep || '17000000').replace(/\D/g, '')}</CEP>
+        <CEP>${destCep}</CEP>
         <cPais>1058</cPais>
         <xPais>BRASIL</xPais>
       </enderDest>
-      <indIEDest>9</indIEDest>
+      <indIEDest>${dest.indicadorIe || dest.indIEDest || (isDestIeIsento ? '9' : '1')}</indIEDest>
+      ${!isDestIeIsento && destIe.length >= 2 ? `<IE>${destIe}</IE>` : ''}
     </dest>
     ${xmlItens}
     <total>
