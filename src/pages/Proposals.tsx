@@ -66,7 +66,7 @@ export default function Proposals() {
       if (isUuid(targetId)) {
         const res = await db
           .from("cotacoes")
-          .select("*, cotacao_itens(*), clientes(razao_social, nome_fantasia)")
+          .select("*, cotacao_itens(*), clientes(nome, razao_social:nome, nome_fantasia)")
           .eq("id", targetId)
           .maybeSingle();
         cot = res.data;
@@ -77,7 +77,7 @@ export default function Proposals() {
       if (!cot) {
         const res = await db
           .from("cotacoes")
-          .select("*, cotacao_itens(*), clientes(razao_social, nome_fantasia)")
+          .select("*, cotacao_itens(*), clientes(nome, razao_social:nome, nome_fantasia)")
           .eq("numero", targetId)
           .maybeSingle();
         cot = res.data;

@@ -1727,18 +1727,43 @@ export async function fetchCotacoesDb(
     }
 
     // Otimização da Query do Supabase: busca principal trazendo apenas os campos necessários
-    // Utiliza relacionamento padrão de clientes(razao_social, nome_fantasia) sem alias com sufixo clientes_1
-    const defaultSelect = options?.columns || 
-      'id, numero, data, cliente_id, cliente_nome, contato, telefone, email, status, situacao, observacoes, valor_total, created_at, updated_at, status_nfe, nfe_numero, nfe_chave, danfe_url, clientes(razao_social, nome_fantasia), cotacao_itens(id, cotacao_id, produto, medida, descricao, quantidade, valor_unitario, valor_total, observacao, desenho_url)';
+    // Utiliza relacionamento padrão de clientes com alias seguro (razao_social:nome, nome_fantasia)
+    const clientesRelation = 'clientes(nome, razao_social:nome, nome_fantasia)';
+    const defaultSelect = options?.columns
+      ? options.columns.replace(/clientes\(razao_social,\s*nome_fantasia\)/g, clientesRelation)
+      : `id, numero, data, cliente_id, cliente_nome, contato, telefone, email, status, situacao, observacoes, valor_total, created_at, updated_at, status_nfe, nfe_numero, nfe_chave, danfe_url, ${clientesRelation}, cotacao_itens(id, cotacao_id, produto, medida, descricao, quantidade, valor_unitario, valor_total, observacao, desenho_url)`;
 
     let q: any = db
       .from('cotacoes')
       .select(defaultSelect)
       .order('created_at', { ascending: false });
 
+    // Pré-busca IDs de clientes correspondentes se houver busca ou filtro de cliente
+    let matchedClientIds: string[] = [];
+    const searchTarget = (options?.search || filtroCliente || '').trim();
+    if (searchTarget) {
+      try {
+        const { data: matched } = await db
+          .from('clientes')
+          .select('id')
+          .or(`nome.ilike.%${searchTarget}%,nome_fantasia.ilike.%${searchTarget}%,empresa.ilike.%${searchTarget}%`)
+          .limit(25);
+        if (matched && matched.length > 0) {
+          matchedClientIds = matched.map((c: any) => c.id).filter(Boolean);
+        }
+      } catch {
+        // Fallback silencioso
+      }
+    }
+
     // 1. Filtro opcional por cliente
     if (filtroCliente && filtroCliente.trim()) {
-      q = q.ilike('cliente_nome', `%${filtroCliente.trim()}%`);
+      const cTerm = filtroCliente.trim();
+      if (matchedClientIds.length > 0) {
+        q = q.or(`cliente_nome.ilike.%${cTerm}%,cliente_id.in.(${matchedClientIds.join(',')})`);
+      } else {
+        q = q.ilike('cliente_nome', `%${cTerm}%`);
+      }
     }
 
     // 2. Filtro opcional por status:
@@ -1760,13 +1785,21 @@ export async function fetchCotacoesDb(
       const term = options.search.trim();
       const field = options.searchField || 'todos';
       if (field === 'cliente') {
-        q = q.ilike('cliente_nome', `%${term}%`);
+        if (matchedClientIds.length > 0) {
+          q = q.or(`cliente_nome.ilike.%${term}%,cliente_id.in.(${matchedClientIds.join(',')})`);
+        } else {
+          q = q.ilike('cliente_nome', `%${term}%`);
+        }
       } else if (field === 'cotacao') {
         q = q.or(`numero.ilike.%${term}%,nfe_numero.ilike.%${term}%,nfe_chave.ilike.%${term}%`);
       } else if (field === 'contato') {
         q = q.ilike('contato', `%${term}%`);
       } else {
-        q = q.or(`cliente_nome.ilike.%${term}%,numero.ilike.%${term}%,contato.ilike.%${term}%`);
+        if (matchedClientIds.length > 0) {
+          q = q.or(`cliente_nome.ilike.%${term}%,cliente_id.in.(${matchedClientIds.join(',')}),numero.ilike.%${term}%,contato.ilike.%${term}%`);
+        } else {
+          q = q.or(`cliente_nome.ilike.%${term}%,numero.ilike.%${term}%,contato.ilike.%${term}%`);
+        }
       }
     }
 
@@ -1806,8 +1839,8 @@ export async function fetchCotacoesDb(
     // Fallback: se houver erro no relacionamento com clientes ou colunas específicas
     if (error) {
       console.warn("Aviso na consulta cotacoes otimizada, tentando fallback:", error.message);
-      const isClientesErr = error.message?.toLowerCase().includes('clientes') || error.code === 'PGRST200' || error.message?.includes('clientes_1');
-      const selectQuery = isClientesErr ? '*, cotacao_itens(*)' : '*, clientes(razao_social, nome_fantasia), cotacao_itens(*)';
+      const isClientesErr = error.message?.toLowerCase().includes('clientes') || error.code === 'PGRST200' || error.message?.includes('clientes_1') || error.code === '42703';
+      const selectQuery = isClientesErr ? '*, cotacao_itens(*)' : `*, ${clientesRelation}, cotacao_itens(*)`;
 
       let retryQ: any = db
         .from('cotacoes')
@@ -1815,7 +1848,12 @@ export async function fetchCotacoesDb(
         .order('created_at', { ascending: false });
 
       if (filtroCliente && filtroCliente.trim()) {
-        retryQ = retryQ.ilike('cliente_nome', `%${filtroCliente.trim()}%`);
+        const cTerm = filtroCliente.trim();
+        if (matchedClientIds.length > 0) {
+          retryQ = retryQ.or(`cliente_nome.ilike.%${cTerm}%,cliente_id.in.(${matchedClientIds.join(',')})`);
+        } else {
+          retryQ = retryQ.ilike('cliente_nome', `%${cTerm}%`);
+        }
       }
       if (statusNormalizado && statusNormalizado !== 'todas' && statusNormalizado !== 'todos' && statusNormalizado !== 'all') {
         if (statusNormalizado === 'ativas') {
@@ -1830,13 +1868,21 @@ export async function fetchCotacoesDb(
         const term = options.search.trim();
         const field = options.searchField || 'todos';
         if (field === 'cliente') {
-          retryQ = retryQ.ilike('cliente_nome', `%${term}%`);
+          if (matchedClientIds.length > 0) {
+            retryQ = retryQ.or(`cliente_nome.ilike.%${term}%,cliente_id.in.(${matchedClientIds.join(',')})`);
+          } else {
+            retryQ = retryQ.ilike('cliente_nome', `%${term}%`);
+          }
         } else if (field === 'cotacao') {
           retryQ = retryQ.or(`numero.ilike.%${term}%,nfe_numero.ilike.%${term}%,nfe_chave.ilike.%${term}%`);
         } else if (field === 'contato') {
           retryQ = retryQ.ilike('contato', `%${term}%`);
         } else {
-          retryQ = retryQ.or(`cliente_nome.ilike.%${term}%,numero.ilike.%${term}%,contato.ilike.%${term}%`);
+          if (matchedClientIds.length > 0) {
+            retryQ = retryQ.or(`cliente_nome.ilike.%${term}%,cliente_id.in.(${matchedClientIds.join(',')}),numero.ilike.%${term}%,contato.ilike.%${term}%`);
+          } else {
+            retryQ = retryQ.or(`cliente_nome.ilike.%${term}%,numero.ilike.%${term}%,contato.ilike.%${term}%`);
+          }
         }
       }
       if (options?.situacao) {
@@ -2485,7 +2531,7 @@ export async function fetchCotacaoById(idOrNumero: string): Promise<SupabaseCota
     if (isUuid(clean)) {
       const { data: dataById, error: errById } = await db
         .from('cotacoes')
-        .select('*, clientes(razao_social, nome_fantasia)')
+        .select('*, clientes(nome, razao_social:nome, nome_fantasia)')
         .eq('id', clean)
         .maybeSingle();
 
@@ -2505,7 +2551,7 @@ export async function fetchCotacaoById(idOrNumero: string): Promise<SupabaseCota
     if (!cotacao) {
       const { data: dataByNumero, error: errByNumero } = await db
         .from('cotacoes')
-        .select('*, clientes(razao_social, nome_fantasia)')
+        .select('*, clientes(nome, razao_social:nome, nome_fantasia)')
         .eq('numero', clean)
         .maybeSingle();
 

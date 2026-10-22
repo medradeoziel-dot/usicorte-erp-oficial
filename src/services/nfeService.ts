@@ -369,7 +369,7 @@ export async function fetchClienteCompletoParaDanfe(
       const { data: exato } = await db
         .from('clientes')
         .select('*')
-        .or(`nome.ilike.${termo},razao_social.ilike.${termo},nome_fantasia.ilike.${termo},empresa.ilike.${termo}`)
+        .or(`nome.ilike.${termo},nome_fantasia.ilike.${termo},empresa.ilike.${termo}`)
         .limit(1)
         .maybeSingle();
 
@@ -380,7 +380,7 @@ export async function fetchClienteCompletoParaDanfe(
         const { data: parcial } = await db
           .from('clientes')
           .select('*')
-          .or(`nome.ilike.%${termo}%,razao_social.ilike.%${termo}%,nome_fantasia.ilike.%${termo}%,empresa.ilike.%${termo}%`)
+          .or(`nome.ilike.%${termo}%,nome_fantasia.ilike.%${termo}%,empresa.ilike.%${termo}%`)
           .limit(1)
           .maybeSingle();
 
