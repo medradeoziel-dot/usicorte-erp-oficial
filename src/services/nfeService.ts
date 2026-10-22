@@ -2132,10 +2132,17 @@ export async function enviarSoapSefaz(
       mensagemErro: !res.ok ? `Erro HTTP ${res.status}: ${res.statusText}` : undefined
     };
   } catch (err: any) {
-    const isTimeout = err?.name === 'TimeoutError' || err?.message?.toLowerCase().includes('timeout') || err?.message?.toLowerCase().includes('abort');
-    const msg = isTimeout 
-      ? `Timeout de conexão (${timeoutMs}ms) aguardando resposta da SEFAZ.` 
-      : (err?.message || 'Falha na conexão com o servidor proxy SEFAZ.');
+    // Tratamento seguro para extrair a mensagem de erro independentemente do formato
+    const errorMessage = typeof err === 'object' && err !== null 
+        ? (err.message || err.toString() || '') 
+        : String(err || '');
+        
+    const errLower = errorMessage.toLowerCase();
+    const isTimeout = err?.name === 'TimeoutError' || errLower.includes('timeout') || errLower.includes('timed out');
+    
+    const msg = isTimeout
+        ? `Timeout de conexão (${timeoutMs}ms) aguardando resposta da SEFAZ.`
+        : (errorMessage || 'Falha na conexão com o servidor proxy SEFAZ.');
 
     return {
       sucessoHttp: false,
