@@ -10,23 +10,43 @@ import {
 } from "../types";
 import { formatarMedidasLimpa } from "../utils/calculator";
 
-// Fallbacks robustos para variáveis de ambiente do Supabase (evita travamento do preview)
-const DEFAULT_SUPABASE_URL = "https://kyzeiroxvgbkincisrdf.supabase.co";
-const DEFAULT_SUPABASE_ANON_KEY = "sb_publishable_2vCA1d0mEry_9Qy-QREVxA_aaR9IE6z";
+// Fallbacks robustos para variáveis de ambiente do Supabase (Publishable Key e URL padrão)
+export const DEFAULT_SUPABASE_URL = "https://kyzeiroxvgbkincisrdf.supabase.co";
+export const DEFAULT_SUPABASE_ANON_KEY = "sb_publishable_2vCA1d0mEry_9Qy-QREVxA_aaR9IE6z";
 
-const rawUrl = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_URL 
-  ? String(import.meta.env.VITE_SUPABASE_URL).trim() 
-  : "");
-const rawKey = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_ANON_KEY 
-  ? String(import.meta.env.VITE_SUPABASE_ANON_KEY).trim() 
-  : "");
+// Suporte abrangente a variáveis Vite e Next.js no browser e SSR
+const clientEnv = typeof import.meta !== 'undefined' && import.meta.env ? (import.meta.env as Record<string, string | undefined>) : {};
+const nodeEnv = typeof process !== 'undefined' && process.env ? (process.env as Record<string, string | undefined>) : {};
 
-const SUPABASE_URL = (rawUrl && rawUrl.startsWith("http")) ? rawUrl : DEFAULT_SUPABASE_URL;
-const SUPABASE_ANON_KEY = (rawKey && rawKey.length > 0) ? rawKey : DEFAULT_SUPABASE_ANON_KEY;
+const rawUrl = (
+  clientEnv.VITE_SUPABASE_URL ||
+  clientEnv.NEXT_PUBLIC_SUPABASE_URL ||
+  nodeEnv.VITE_SUPABASE_URL ||
+  nodeEnv.NEXT_PUBLIC_SUPABASE_URL ||
+  nodeEnv.SUPABASE_URL ||
+  ""
+).trim();
 
-function initSupabaseClient() {
+const rawKey = (
+  clientEnv.VITE_SUPABASE_ANON_KEY ||
+  clientEnv.VITE_SUPABASE_PUBLISHABLE_KEY ||
+  clientEnv.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+  clientEnv.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+  nodeEnv.VITE_SUPABASE_ANON_KEY ||
+  nodeEnv.VITE_SUPABASE_PUBLISHABLE_KEY ||
+  nodeEnv.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+  nodeEnv.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+  nodeEnv.SUPABASE_ANON_KEY ||
+  nodeEnv.SUPABASE_PUBLISHABLE_KEY ||
+  ""
+).trim();
+
+export const SUPABASE_URL = (rawUrl && rawUrl.startsWith("http")) ? rawUrl : DEFAULT_SUPABASE_URL;
+export const SUPABASE_ANON_KEY = (rawKey && (rawKey.startsWith("sb_publishable_") || rawKey.startsWith("eyJ") || rawKey.length > 20)) ? rawKey : DEFAULT_SUPABASE_ANON_KEY;
+
+export function initSupabaseClient(url = SUPABASE_URL, key = SUPABASE_ANON_KEY) {
   try {
-    return createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    return createClient(url, key, {
       auth: {
         persistSession: true,
         autoRefreshToken: true,
@@ -1678,6 +1698,10 @@ export interface FetchCotacoesOptions {
   situacao?: string;
   forceRefresh?: boolean;
   includeDrafts?: boolean;
+  columns?: string;
+  search?: string;
+  searchField?: 'cliente' | 'cotacao' | 'contato' | 'produto' | 'data' | 'todos' | string;
+  strictPendenteOnly?: boolean;
 }
 
 // Cache em memória de curta duração para aceleração da navegação e troca de abas
@@ -1702,11 +1726,13 @@ export async function fetchCotacoesDb(
       return cached.data;
     }
 
-    // Consulta oficial exatamente conforme especificação:
-    // await supabase.from('cotacoes').select('*, clientes(*), cotacao_itens(*)').order('created_at', { ascending: false });
-    let q = db
+    // Otimização da Query do Supabase: busca principal trazendo apenas os campos necessários
+    const defaultSelect = options?.columns || 
+      'id, numero, data, cliente_id, cliente_nome, contato, telefone, email, status, situacao, observacoes, valor_total, created_at, updated_at, status_nfe, nfe_numero, nfe_chave, danfe_url, clientes(id, nome, razao_social, empresa, contato), cotacao_itens(id, cotacao_id, produto, medida, descricao, quantidade, valor_unitario, valor_total, observacao, desenho_url)';
+
+    let q: any = db
       .from('cotacoes')
-      .select('*, clientes(*), cotacao_itens(*)')
+      .select(defaultSelect)
       .order('created_at', { ascending: false });
 
     // 1. Filtro opcional por cliente
@@ -1718,18 +1744,37 @@ export async function fetchCotacoesDb(
     const statusNormalizado = (filtroStatus || '').trim().toLowerCase();
     if (statusNormalizado && statusNormalizado !== 'todas' && statusNormalizado !== 'todos' && statusNormalizado !== 'all' && statusNormalizado !== 'todas as cotações') {
       if (statusNormalizado === 'ativas') {
-        q = q.in('status', ['pendente', 'aprovado', 'rascunho']);
+        q = q.in('status', ['pendente', 'aprovado', 'rascunho', 'Pendente', 'Aprovado', 'Rascunho']);
+      } else if (statusNormalizado === 'pendente') {
+        // Filtro Padrão Inicial: SOMENTE cotações com status 'Pendente' (ou 'pendente')
+        // Utiliza busca direta indexável garantindo resposta instantânea do banco
+        q = q.or('status.eq.Pendente,status.eq.pendente');
       } else {
         q = q.ilike('status', statusNormalizado);
       }
     }
 
-    // 3. Filtro opcional por situação (ex: FATURADO)
+    // 3. Busca Sob Demanda por texto (Nome do Cliente, Número da Cotação, Contato ou Produto)
+    if (options?.search && options.search.trim()) {
+      const term = options.search.trim();
+      const field = options.searchField || 'todos';
+      if (field === 'cliente') {
+        q = q.ilike('cliente_nome', `%${term}%`);
+      } else if (field === 'cotacao') {
+        q = q.or(`numero.ilike.%${term}%,nfe_numero.ilike.%${term}%,nfe_chave.ilike.%${term}%`);
+      } else if (field === 'contato') {
+        q = q.ilike('contato', `%${term}%`);
+      } else {
+        q = q.or(`cliente_nome.ilike.%${term}%,numero.ilike.%${term}%,contato.ilike.%${term}%`);
+      }
+    }
+
+    // 4. Filtro opcional por situação (ex: FATURADO)
     if (options?.situacao) {
       q = q.eq('situacao', options.situacao);
     }
 
-    // 4. Filtros opcionais por intervalo de datas
+    // 5. Filtros opcionais por intervalo de datas
     if (options?.dataInicio) {
       q = q.gte('data', options.dataInicio);
     }
@@ -1737,7 +1782,7 @@ export async function fetchCotacoesDb(
       q = q.lte('data', options.dataFim);
     }
 
-    // 5. Paginação opcional:
+    // 6. Paginação e limite prudente (ex.: .limit(50))
     if (options?.page && options.page > 0) {
       const limit = options?.limit ?? 50;
       const from = (options.page - 1) * limit;
@@ -1750,17 +1795,20 @@ export async function fetchCotacoesDb(
       q = q.range(from, to);
     } else if (options?.limit && options.limit > 0) {
       q = q.limit(options.limit);
+    } else if (statusNormalizado === 'pendente' && !options?.search) {
+      // Limite padrão inicial prudente de 50 registros para cotações pendentes ordenadas das mais recentes
+      q = q.limit(50);
     }
 
     let { data, error, status } = await q;
 
-    // Fallback: se houver erro no relacionamento com clientes(*)
+    // Fallback: se houver erro no relacionamento com clientes(*) ou colunas específicas
     if (error) {
-      console.warn("Aviso na consulta cotacoes com clientes(*), tentando fallback:", error.message);
+      console.warn("Aviso na consulta cotacoes otimizada, tentando fallback:", error.message);
       const isClientesErr = error.message?.toLowerCase().includes('clientes') || error.code === 'PGRST200';
       const selectQuery = isClientesErr ? '*, cotacao_itens(*)' : '*, clientes(*), cotacao_itens(*)';
 
-      let retryQ = db
+      let retryQ: any = db
         .from('cotacoes')
         .select(selectQuery)
         .order('created_at', { ascending: false });
@@ -1770,9 +1818,24 @@ export async function fetchCotacoesDb(
       }
       if (statusNormalizado && statusNormalizado !== 'todas' && statusNormalizado !== 'todos' && statusNormalizado !== 'all') {
         if (statusNormalizado === 'ativas') {
-          retryQ = retryQ.in('status', ['pendente', 'aprovado', 'rascunho']);
+          retryQ = retryQ.in('status', ['pendente', 'aprovado', 'rascunho', 'Pendente', 'Aprovado', 'Rascunho']);
+        } else if (statusNormalizado === 'pendente') {
+          retryQ = retryQ.or('status.eq.Pendente,status.eq.pendente');
         } else {
           retryQ = retryQ.ilike('status', statusNormalizado);
+        }
+      }
+      if (options?.search && options.search.trim()) {
+        const term = options.search.trim();
+        const field = options.searchField || 'todos';
+        if (field === 'cliente') {
+          retryQ = retryQ.ilike('cliente_nome', `%${term}%`);
+        } else if (field === 'cotacao') {
+          retryQ = retryQ.or(`numero.ilike.%${term}%,nfe_numero.ilike.%${term}%,nfe_chave.ilike.%${term}%`);
+        } else if (field === 'contato') {
+          retryQ = retryQ.ilike('contato', `%${term}%`);
+        } else {
+          retryQ = retryQ.or(`cliente_nome.ilike.%${term}%,numero.ilike.%${term}%,contato.ilike.%${term}%`);
         }
       }
       if (options?.situacao) {
@@ -1796,6 +1859,8 @@ export async function fetchCotacoesDb(
         retryQ = retryQ.range(from, to);
       } else if (options?.limit && options.limit > 0) {
         retryQ = retryQ.limit(options.limit);
+      } else if (statusNormalizado === 'pendente' && !options?.search) {
+        retryQ = retryQ.limit(50);
       }
 
       const retryRes = await retryQ;
@@ -1813,7 +1878,7 @@ export async function fetchCotacoesDb(
 
     let result: SupabaseCotacao[] = [];
     if (data && Array.isArray(data)) {
-      result = (data as SupabaseCotacao[])
+      result = (data as any as SupabaseCotacao[])
         .filter((c: any) => {
           // Ignora cotações deletadas
           if (c.deletado_em) return false;

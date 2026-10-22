@@ -232,7 +232,7 @@ export default function ReportsModule({
       setActiveImagePreviewItem(null);
       setIsBulkDeleteOpen(false);
       userRequestedFullHistoryRef.current = true;
-      loadAllConsultaData();
+      loadAllConsultaData({ forceRefresh: true, status: statusFiltro, limit: (statusFiltro === 'pendente' && !inputBusca.trim() && !clienteBusca.trim()) ? 50 : undefined });
     }
     if (onTabChange) {
       onTabChange(tab);
@@ -247,14 +247,14 @@ export default function ReportsModule({
         setItemToDelete(null);
         setActiveImagePreviewItem(null);
         setIsBulkDeleteOpen(false);
-        loadAllConsultaData();
+        loadAllConsultaData({ forceRefresh: true, status: statusFiltro, limit: (statusFiltro === 'pendente' && !inputBusca.trim() && !clienteBusca.trim()) ? 50 : undefined });
       }
     }
   }, [initialTab]);
 
   useEffect(() => {
     if (activeTab === 'consulta') {
-      loadAllConsultaData();
+      loadAllConsultaData({ forceRefresh: true, status: statusFiltro, limit: (statusFiltro === 'pendente' && !inputBusca.trim() && !clienteBusca.trim()) ? 50 : undefined });
     }
   }, [activeTab]);
 
@@ -604,8 +604,8 @@ export default function ReportsModule({
   const [inputBusca, setInputBusca] = useState<string>('');
   // Campo dedicado: NOME DO CLIENTE (filtra sempre, combinado com a busca acima)
   const [clienteBusca, setClienteBusca] = useState<string>('');
-  // Filtro padrão por situação da proposta: inicia selecionado em "Todas as Situações" (garante exibição completa de todo o histórico)
-  const [statusFiltro, setStatusFiltro] = useState<string>('todos');
+  // Filtro padrão por situação da proposta: inicia selecionado em "Pendente" (Apenas Pendentes)
+  const [statusFiltro, setStatusFiltro] = useState<string>('pendente');
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [dbQuotesItems, setDbQuotesItems] = useState<ConsultaItem[]>([]);
 
@@ -1799,11 +1799,20 @@ export default function ReportsModule({
 
   // Carrega cotações e itens do Supabase e LocalStorage com deduplicação rigorosa e exibindo apenas a versão mais recente
   const loadAllConsultaData = async (
-    optionsOrForceRefresh?: boolean | { forceRefresh?: boolean; limit?: number },
+    optionsOrForceRefresh?: boolean | { 
+      forceRefresh?: boolean; 
+      limit?: number; 
+      status?: string; 
+      search?: string; 
+      searchField?: 'cliente' | 'cotacao' | 'contato' | 'produto' | 'data' | 'todos' | string;
+    },
     fallbackLimit?: number
   ) => {
     let forceRefresh = false;
     let limit: number | undefined = undefined;
+    let targetStatus: string = statusFiltro;
+    let targetSearch: string | undefined = undefined;
+    let targetSearchField: any = tipoFiltro;
 
     if (typeof optionsOrForceRefresh === 'boolean') {
       forceRefresh = optionsOrForceRefresh;
@@ -1811,6 +1820,17 @@ export default function ReportsModule({
     } else if (typeof optionsOrForceRefresh === 'object' && optionsOrForceRefresh !== null) {
       forceRefresh = Boolean(optionsOrForceRefresh.forceRefresh);
       limit = optionsOrForceRefresh.limit;
+      if (optionsOrForceRefresh.status !== undefined) targetStatus = optionsOrForceRefresh.status;
+      if (optionsOrForceRefresh.search !== undefined) targetSearch = optionsOrForceRefresh.search;
+      if (optionsOrForceRefresh.searchField !== undefined) targetSearchField = optionsOrForceRefresh.searchField;
+    }
+
+    if (targetSearch === undefined) {
+      const activeText = clienteBusca.trim() || inputBusca.trim();
+      if (activeText) {
+        targetSearch = activeText;
+        targetSearchField = clienteBusca.trim() ? 'cliente' : tipoFiltro;
+      }
     }
 
     if (isLoadingConsultaRef.current) return;
@@ -1822,14 +1842,27 @@ export default function ReportsModule({
     const distinctQuotesList: { id: string; numero: string; cliente: string; data: string; total: number; createdAt?: string }[] = [];
 
     try {
-      // 1. Do Supabase (Prioridade Máxima com deduplicação e dados completos)
+      // 1. Do Supabase (Prioridade Máxima com deduplicação e busca otimizada)
       try {
-        // Busca completa de todas as cotações com itens (cotacao_itens) e clientes (clientes)
-        const fetchOptions: FetchCotacoesOptions = { forceRefresh };
-        if (limit && limit > 0) {
+        const fetchOptions: FetchCotacoesOptions = { 
+          forceRefresh,
+          search: targetSearch,
+          searchField: targetSearchField
+        };
+
+        const isPendenteDefault = targetStatus === 'pendente' && !targetSearch;
+        if (isPendenteDefault) {
+          fetchOptions.limit = limit || 50;
+        } else if (limit && limit > 0) {
           fetchOptions.limit = limit;
         }
-        const dbData = await fetchCotacoesDb(undefined, undefined, fetchOptions);
+
+        // Se o usuário estiver pesquisando por termo e o status for 'pendente' (padrão inicial),
+        // busca em todos os status conforme solicitado no Supabase
+        const statusForDb = (targetSearch && targetStatus === 'pendente') ? undefined : (targetStatus === 'todos' ? undefined : targetStatus);
+        const clienteFilterForDb = (targetSearchField === 'cliente' && targetSearch) ? targetSearch : undefined;
+
+        const dbData = await fetchCotacoesDb(clienteFilterForDb, statusForDb, fetchOptions);
         if (dbData && dbData.length > 0) {
           // Ordena rigorosamente do mais recente para o mais antigo por created_at e data
           const sortedDbData = [...dbData].sort((a, b) => {
@@ -2093,18 +2126,44 @@ export default function ReportsModule({
     }
   };
 
+  const isInitialMountRef = useRef<boolean>(true);
+
   useEffect(() => {
-    // Carregamento de todas as cotações com relacionamentos completos (cotacao_itens e clientes)
-    loadAllConsultaData();
+    // Carregamento inicial: SOMENTE cotações com status 'Pendente' e limite prudente de 50 registros
+    loadAllConsultaData({ forceRefresh: true, status: 'pendente', limit: 50 });
 
     const handleMigrated = () => {
-      loadAllConsultaData();
+      loadAllConsultaData({ forceRefresh: true, status: statusFiltro });
     };
     window.addEventListener('cotacoes_migradas_emergencia', handleMigrated);
     return () => {
       window.removeEventListener('cotacoes_migradas_emergencia', handleMigrated);
     };
   }, []);
+
+  // Busca Sob Demanda (Busca por Nome, Número ou Filtros):
+  // As cotações de outros status só devem ser buscadas no Supabase quando o usuário:
+  // - Digitar algo no campo de busca (Nome do Cliente, Número da Cotação, Contato, Produto); OU
+  // - Alterar manualmente o filtro de situação no dropdown para "Todas as Situações" ou outro status específico.
+  useEffect(() => {
+    if (isInitialMountRef.current) {
+      isInitialMountRef.current = false;
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      const activeSearch = inputBusca.trim() || clienteBusca.trim();
+      loadAllConsultaData({
+        forceRefresh: true,
+        status: statusFiltro,
+        search: activeSearch || undefined,
+        searchField: clienteBusca.trim() ? 'cliente' : tipoFiltro,
+        limit: (statusFiltro === 'pendente' && !activeSearch) ? 50 : undefined
+      });
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, [inputBusca, clienteBusca, statusFiltro, tipoFiltro]);
 
   // Reseta para a primeira página quando os filtros de busca mudarem
   useEffect(() => {
@@ -2115,8 +2174,13 @@ export default function ReportsModule({
   const handleLimparPesquisa = useCallback(() => {
     setInputBusca('');
     setClienteBusca('');
-    setStatusFiltro('todos');
+    setStatusFiltro('pendente');
     setCurrentPage(1);
+    loadAllConsultaData({
+      forceRefresh: true,
+      status: 'pendente',
+      limit: 50
+    });
   }, []);
 
   // Mantém a cotação ativa sincronizada com currentQuote se o usuário estiver na visualização da cotação atual
@@ -4466,7 +4530,25 @@ export default function ReportsModule({
 
                 {openStatusDropdownId === 'filtro' && (
                   <div className="absolute left-0 top-full mt-1.5 z-50 min-w-[210px] bg-white border border-slate-200 rounded-lg shadow-xl py-1 animate-in fade-in zoom-in-95 duration-100">
-                    {/* 1. Em Aberto / Ativas (Padrão ao abrir a tela) */}
+                    {/* 0. Pendente (Padrão Inicial) */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStatusFiltro('pendente');
+                        setOpenStatusDropdownId(null);
+                      }}
+                      className={`w-full flex items-center justify-between px-3 py-1.5 text-left text-xs transition-colors hover:bg-blue-50 cursor-pointer ${
+                        statusFiltro === 'pendente' ? 'bg-blue-50/80 font-bold' : 'font-medium'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-blue-500 shrink-0" />
+                        <span className="text-blue-600 font-bold">Pendente (Padrão Inicial)</span>
+                      </div>
+                      {statusFiltro === 'pendente' && <Check className="w-3.5 h-3.5 text-blue-600 shrink-0 ml-1" />}
+                    </button>
+
+                    {/* 1. Em Aberto / Ativas */}
                     <button
                       type="button"
                       onClick={() => {
@@ -4541,7 +4623,7 @@ export default function ReportsModule({
                     <div className="h-px bg-slate-100 my-1" />
 
                     {/* Filtros específicos por situação individual */}
-                    {STATUS_OPTIONS.filter(opt => opt.value !== 'faturado').map((opt) => {
+                    {STATUS_OPTIONS.filter(opt => opt.value !== 'faturado' && opt.value !== 'pendente').map((opt) => {
                       const isSelected = statusFiltro === opt.value;
                       return (
                         <button
@@ -4619,16 +4701,16 @@ export default function ReportsModule({
                 )}
               </div>
 
-              {/* Botão de Limpar Pesquisa e recarregar os 10 últimos itens de forma otimizada */}
-              {(inputBusca || clienteBusca || statusFiltro !== 'todos' || !isInitialRecentOnly) && (
+              {/* Botão de Limpar Pesquisa e recarregar os 50 itens pendentes padrão de forma otimizada */}
+              {(inputBusca || clienteBusca || statusFiltro !== 'pendente') && (
                 <button
                   type="button"
                   onClick={handleLimparPesquisa}
                   className="h-[37px] px-3 bg-slate-800 hover:bg-slate-700 text-amber-300 hover:text-amber-200 border border-amber-500/40 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs whitespace-nowrap"
-                  title="Limpar pesquisa e recarregar os 10 últimos itens de forma otimizada"
+                  title="Limpar pesquisa e recarregar as 50 cotações pendentes mais recentes"
                 >
                   <RotateCcw className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Limpar / 10 Recentes</span>
+                  <span>Limpar / 50 Pendentes</span>
                 </button>
               )}
             </div>

@@ -6,6 +6,8 @@ import {
   fetchCotacoesDb, 
   mapSupabaseStatusToQuote, 
   db,
+  SUPABASE_URL,
+  SUPABASE_ANON_KEY,
   SupabaseCotacao
 } from '../lib/db';
 import { 
@@ -525,17 +527,15 @@ export default function SalesModule({
       const isSaved = isSavedRef.current;
 
       if (idToClean && !isSaved && currentItems.length === 0 && (currentStatus === 'Rascunho' || (currentStatus as string) === 'RASCUNHO')) {
-        const rawUrl = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_URL ? String(import.meta.env.VITE_SUPABASE_URL).trim() : '') || 'https://kyzeiroxvgbkincisrdf.supabase.co';
-        const rawKey = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_ANON_KEY ? String(import.meta.env.VITE_SUPABASE_ANON_KEY).trim() : '') || 'sb_publishable_2vCA1d0mEry_9Qy-QREVxA_aaR9IE6z';
-        const cleanUrl = rawUrl.replace(/\/$/, '');
+        const cleanUrl = SUPABASE_URL.replace(/\/$/, '');
 
         try {
           const deleteEndpoint = `${cleanUrl}/rest/v1/cotacoes?id=eq.${idToClean}`;
           fetch(deleteEndpoint, {
             method: 'DELETE',
             headers: {
-              'apikey': rawKey,
-              'Authorization': `Bearer ${rawKey}`,
+              'apikey': SUPABASE_ANON_KEY,
+              'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
               'Content-Type': 'application/json'
             },
             keepalive: true
