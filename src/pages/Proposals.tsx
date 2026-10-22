@@ -66,7 +66,7 @@ export default function Proposals() {
       if (isUuid(targetId)) {
         const res = await db
           .from("cotacoes")
-          .select("*, cotacao_itens(*), clientes(nome, razao_social:nome, nome_fantasia)")
+          .select("*, cotacao_itens(*), clientes(razao_social, nome_fantasia)")
           .eq("id", targetId)
           .maybeSingle();
         cot = res.data;
@@ -77,7 +77,7 @@ export default function Proposals() {
       if (!cot) {
         const res = await db
           .from("cotacoes")
-          .select("*, cotacao_itens(*), clientes(nome, razao_social:nome, nome_fantasia)")
+          .select("*, cotacao_itens(*), clientes(razao_social, nome_fantasia)")
           .eq("numero", targetId)
           .maybeSingle();
         cot = res.data;
@@ -274,12 +274,12 @@ export default function Proposals() {
         .select("*")
         .order("nome", { ascending: true });
 
-      // 2. Cotações do Supabase (limitado a 50 para evitar erro 500 por timeout de statement no Supabase)
+      // 2. Cotações do Supabase (limitado a 30 para resposta ultra-rápida)
       const { data: supaCotacoes, error: errCotacoes, status: statusCotacoes } = await db
         .from("cotacoes")
         .select("*, cotacao_itens(*)")
         .order("created_at", { ascending: false })
-        .limit(50);
+        .limit(30);
 
       let currentClientsList = [...mockClientes];
       if (!errClientes && statusClientes !== 404 && supaClientes && supaClientes.length > 0) {

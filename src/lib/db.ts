@@ -1727,10 +1727,10 @@ export async function fetchCotacoesDb(
     }
 
     // Otimização da Query do Supabase: busca principal trazendo apenas os campos necessários
-    // Utiliza relacionamento padrão de clientes com alias seguro (razao_social:nome, nome_fantasia)
-    const clientesRelation = 'clientes(nome, razao_social:nome, nome_fantasia)';
+    // Relação direta com a tabela de clientes (clientes(razao_social, nome_fantasia)) sem usar alias clientes_1
+    const clientesRelation = 'clientes(razao_social, nome_fantasia)';
     const defaultSelect = options?.columns
-      ? options.columns.replace(/clientes\(razao_social,\s*nome_fantasia\)/g, clientesRelation)
+      ? options.columns
       : `id, numero, data, cliente_id, cliente_nome, contato, telefone, email, status, situacao, observacoes, valor_total, created_at, updated_at, status_nfe, nfe_numero, nfe_chave, danfe_url, ${clientesRelation}, cotacao_itens(id, cotacao_id, produto, medida, descricao, quantidade, valor_unitario, valor_total, observacao, desenho_url)`;
 
     let q: any = db
@@ -1766,15 +1766,14 @@ export async function fetchCotacoesDb(
       }
     }
 
-    // 2. Filtro opcional por status:
+    // 2. Filtro inicial por status Pendente: .eq('status', 'Pendente') para garantir busca rápida
     const statusNormalizado = (filtroStatus || '').trim().toLowerCase();
-    if (statusNormalizado && statusNormalizado !== 'todas' && statusNormalizado !== 'todos' && statusNormalizado !== 'all' && statusNormalizado !== 'todas as cotações') {
+    if (!filtroStatus || statusNormalizado === 'pendente') {
+      // Filtro inicial por status Pendente
+      q = q.eq('status', 'Pendente');
+    } else if (statusNormalizado !== 'todas' && statusNormalizado !== 'todos' && statusNormalizado !== 'all' && statusNormalizado !== 'todas as cotações') {
       if (statusNormalizado === 'ativas') {
         q = q.in('status', ['pendente', 'aprovado', 'rascunho', 'Pendente', 'Aprovado', 'Rascunho']);
-      } else if (statusNormalizado === 'pendente') {
-        // Filtro Padrão Inicial: SOMENTE cotações com status 'Pendente' (ou 'pendente')
-        // Utiliza busca direta indexável garantindo resposta instantânea do banco
-        q = q.or('status.eq.Pendente,status.eq.pendente');
       } else {
         q = q.ilike('status', statusNormalizado);
       }
@@ -1816,22 +1815,22 @@ export async function fetchCotacoesDb(
       q = q.lte('data', options.dataFim);
     }
 
-    // 6. Paginação e limite prudente (ex.: .limit(50))
+    // 6. Definição do limite de registros trazidos na consulta para 30 (.limit(30))
     if (options?.page && options.page > 0) {
-      const limit = options?.limit ?? 50;
+      const limit = options?.limit ?? 30;
       const from = (options.page - 1) * limit;
       const to = from + limit - 1;
       q = q.range(from, to);
     } else if (options?.offset !== undefined) {
-      const limit = options?.limit ?? 50;
+      const limit = options?.limit ?? 30;
       const from = options.offset;
       const to = from + limit - 1;
       q = q.range(from, to);
     } else if (options?.limit && options.limit > 0) {
       q = q.limit(options.limit);
-    } else if (statusNormalizado === 'pendente' && !options?.search) {
-      // Limite padrão inicial prudente de 50 registros para cotações pendentes ordenadas das mais recentes
-      q = q.limit(50);
+    } else {
+      // Limite padrão de 30 registros
+      q = q.limit(30);
     }
 
     let { data, error, status } = await q;
@@ -1839,7 +1838,7 @@ export async function fetchCotacoesDb(
     // Fallback: se houver erro no relacionamento com clientes ou colunas específicas
     if (error) {
       console.warn("Aviso na consulta cotacoes otimizada, tentando fallback:", error.message);
-      const isClientesErr = error.message?.toLowerCase().includes('clientes') || error.code === 'PGRST200' || error.message?.includes('clientes_1') || error.code === '42703';
+      const isClientesErr = error.message?.toLowerCase().includes('clientes') || error.code === 'PGRST200' || error.code === '42703';
       const selectQuery = isClientesErr ? '*, cotacao_itens(*)' : `*, ${clientesRelation}, cotacao_itens(*)`;
 
       let retryQ: any = db
@@ -1855,11 +1854,11 @@ export async function fetchCotacoesDb(
           retryQ = retryQ.ilike('cliente_nome', `%${cTerm}%`);
         }
       }
-      if (statusNormalizado && statusNormalizado !== 'todas' && statusNormalizado !== 'todos' && statusNormalizado !== 'all') {
+      if (!filtroStatus || statusNormalizado === 'pendente') {
+        retryQ = retryQ.eq('status', 'Pendente');
+      } else if (statusNormalizado !== 'todas' && statusNormalizado !== 'todos' && statusNormalizado !== 'all') {
         if (statusNormalizado === 'ativas') {
           retryQ = retryQ.in('status', ['pendente', 'aprovado', 'rascunho', 'Pendente', 'Aprovado', 'Rascunho']);
-        } else if (statusNormalizado === 'pendente') {
-          retryQ = retryQ.or('status.eq.Pendente,status.eq.pendente');
         } else {
           retryQ = retryQ.ilike('status', statusNormalizado);
         }
@@ -1895,19 +1894,19 @@ export async function fetchCotacoesDb(
         retryQ = retryQ.lte('data', options.dataFim);
       }
       if (options?.page && options.page > 0) {
-        const limit = options?.limit ?? 50;
+        const limit = options?.limit ?? 30;
         const from = (options.page - 1) * limit;
         const to = from + limit - 1;
         retryQ = retryQ.range(from, to);
       } else if (options?.offset !== undefined) {
-        const limit = options?.limit ?? 50;
+        const limit = options?.limit ?? 30;
         const from = options.offset;
         const to = from + limit - 1;
         retryQ = retryQ.range(from, to);
       } else if (options?.limit && options.limit > 0) {
         retryQ = retryQ.limit(options.limit);
-      } else if (statusNormalizado === 'pendente' && !options?.search) {
-        retryQ = retryQ.limit(50);
+      } else {
+        retryQ = retryQ.limit(30);
       }
 
       const retryRes = await retryQ;
@@ -1917,13 +1916,13 @@ export async function fetchCotacoesDb(
           .from('cotacoes')
           .select('*, cotacao_itens(*)')
           .order('created_at', { ascending: false });
-        if (statusNormalizado === 'pendente') {
-          safeQ = safeQ.or('status.eq.Pendente,status.eq.pendente');
+        if (!filtroStatus || statusNormalizado === 'pendente') {
+          safeQ = safeQ.eq('status', 'Pendente');
         }
         if (options?.limit && options.limit > 0) {
           safeQ = safeQ.limit(options.limit);
-        } else if (statusNormalizado === 'pendente' && !options?.search) {
-          safeQ = safeQ.limit(50);
+        } else {
+          safeQ = safeQ.limit(30);
         }
         const safeRes = await safeQ;
         data = safeRes.data;
@@ -2531,7 +2530,7 @@ export async function fetchCotacaoById(idOrNumero: string): Promise<SupabaseCota
     if (isUuid(clean)) {
       const { data: dataById, error: errById } = await db
         .from('cotacoes')
-        .select('*, clientes(nome, razao_social:nome, nome_fantasia)')
+        .select('*, clientes(razao_social, nome_fantasia)')
         .eq('id', clean)
         .maybeSingle();
 
@@ -2551,7 +2550,7 @@ export async function fetchCotacaoById(idOrNumero: string): Promise<SupabaseCota
     if (!cotacao) {
       const { data: dataByNumero, error: errByNumero } = await db
         .from('cotacoes')
-        .select('*, clientes(nome, razao_social:nome, nome_fantasia)')
+        .select('*, clientes(razao_social, nome_fantasia)')
         .eq('numero', clean)
         .maybeSingle();
 

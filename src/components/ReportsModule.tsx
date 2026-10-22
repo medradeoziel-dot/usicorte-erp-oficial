@@ -232,7 +232,7 @@ export default function ReportsModule({
       setActiveImagePreviewItem(null);
       setIsBulkDeleteOpen(false);
       userRequestedFullHistoryRef.current = true;
-      loadAllConsultaData({ forceRefresh: true, status: statusFiltro, limit: (statusFiltro === 'pendente' && !inputBusca.trim() && !clienteBusca.trim()) ? 50 : undefined });
+      loadAllConsultaData({ forceRefresh: true, status: statusFiltro, limit: (statusFiltro === 'pendente' && !inputBusca.trim() && !clienteBusca.trim()) ? 30 : undefined });
     }
     if (onTabChange) {
       onTabChange(tab);
@@ -247,14 +247,14 @@ export default function ReportsModule({
         setItemToDelete(null);
         setActiveImagePreviewItem(null);
         setIsBulkDeleteOpen(false);
-        loadAllConsultaData({ forceRefresh: true, status: statusFiltro, limit: (statusFiltro === 'pendente' && !inputBusca.trim() && !clienteBusca.trim()) ? 50 : undefined });
+        loadAllConsultaData({ forceRefresh: true, status: statusFiltro, limit: (statusFiltro === 'pendente' && !inputBusca.trim() && !clienteBusca.trim()) ? 30 : undefined });
       }
     }
   }, [initialTab]);
 
   useEffect(() => {
     if (activeTab === 'consulta') {
-      loadAllConsultaData({ forceRefresh: true, status: statusFiltro, limit: (statusFiltro === 'pendente' && !inputBusca.trim() && !clienteBusca.trim()) ? 50 : undefined });
+      loadAllConsultaData({ forceRefresh: true, status: statusFiltro, limit: (statusFiltro === 'pendente' && !inputBusca.trim() && !clienteBusca.trim()) ? 30 : undefined });
     }
   }, [activeTab]);
 
@@ -1852,7 +1852,7 @@ export default function ReportsModule({
 
         const isPendenteDefault = targetStatus === 'pendente' && !targetSearch;
         if (isPendenteDefault) {
-          fetchOptions.limit = limit || 50;
+          fetchOptions.limit = limit || 30;
         } else if (limit && limit > 0) {
           fetchOptions.limit = limit;
         }
@@ -2158,7 +2158,7 @@ export default function ReportsModule({
         status: statusFiltro,
         search: activeSearch || undefined,
         searchField: clienteBusca.trim() ? 'cliente' : tipoFiltro,
-        limit: (statusFiltro === 'pendente' && !activeSearch) ? 50 : undefined
+        limit: (statusFiltro === 'pendente' && !activeSearch) ? 30 : undefined
       });
     }, 350);
 
