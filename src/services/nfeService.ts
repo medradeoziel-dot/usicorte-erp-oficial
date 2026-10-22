@@ -823,8 +823,8 @@ export async function transmitirCancelamentoNfeSefaz(
         15000
       );
 
-      if (!resSoap.sucessoHttp && !resSoap.xml) {
-        const cStatErr = resSoap.codigoErro || 'CONEXAO_FALHOU';
+      if (!resSoap.sucessoHttp) {
+        const cStatErr = resSoap.codigoErro || `HTTP_${resSoap.statusHttp}`;
         const msgErr = resSoap.mensagemErro || 'Falha de comunicação SOAP com a SEFAZ-SP';
         const detalhe = resSoap.detalheErro ? `\nDetalhe: ${resSoap.detalheErro}` : '';
         const sugestao = resSoap.sugestao ? `\nSugestão: ${resSoap.sugestao}` : '';
@@ -2902,8 +2902,32 @@ export async function transmitirNfeSefaz(
     try {
       const resSoap = await enviarSoapSefaz(sefazEndpoint, soapAction, soapEnvelope, 15000);
 
-      if (!resSoap.sucessoHttp && !resSoap.xml) {
-        const cStatErr = resSoap.codigoErro || 'ERRO_CONEXAO';
+      if (resSoap.statusHttp === 403 || resSoap.codigoErro === 'SEFAZ_403_CERTIFICADO_EXIGIDO') {
+        const cStatErr = '403';
+        const msgErr = resSoap.mensagemErro || 'Acesso recusado pela SEFAZ (403 Forbidden). O Certificado Digital A1 é obrigatório.';
+        const detalhe = resSoap.detalheErro ? `\nDetalhe: ${resSoap.detalheErro}` : '';
+        const sugestao = resSoap.sugestao ? `\nSugestão: ${resSoap.sugestao}` : '';
+        const errMsg = `${msgErr}${detalhe}${sugestao}`;
+        try {
+          await updateCotacaoNfeStatusDb(quoteIdOrNum, {
+            status_nfe: 'Erro',
+            mensagem_erro_nfe: errMsg
+          });
+        } catch {}
+        return {
+          sucesso: false,
+          statusNfe: 'Erro',
+          chaveAcesso,
+          nfeNumero: numeroNfe,
+          serie,
+          cStat: cStatErr,
+          xMotivo: errMsg,
+          mensagemErro: errMsg
+        };
+      }
+
+      if (!resSoap.sucessoHttp) {
+        const cStatErr = resSoap.codigoErro || `HTTP_${resSoap.statusHttp}`;
         const msgErr = resSoap.mensagemErro || 'Falha na transmissão SOAP para a SEFAZ-SP';
         const detalhe = resSoap.detalheErro ? `\nDetalhe: ${resSoap.detalheErro}` : '';
         const sugestao = resSoap.sugestao ? `\nSugestão: ${resSoap.sugestao}` : '';

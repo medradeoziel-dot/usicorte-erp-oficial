@@ -2,6 +2,91 @@ import https from 'node:https';
 import http from 'node:http';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import url from 'node:url';
+
+/**
+ * Correção do aviso [DEP0169] (url.parse() deprecation) no Node.js 22+
+ * Redireciona o uso interno de bibliotecas legadas para a API padronizada WHATWG URL
+ */
+if (typeof (url as any).parse === 'function') {
+  const originalUrlParse = (url as any).parse;
+  (url as any).parse = function (urlString: string, parseQueryString?: boolean, slashesDenoteHost?: boolean): any {
+    if (typeof urlString !== 'string') {
+      return originalUrlParse.apply(this, arguments as any);
+    }
+    try {
+      const hasProtocol = /^[a-zA-Z][a-zA-Z\d+\-.]*:/.test(urlString);
+      const parsed = hasProtocol ? new URL(urlString) : new URL(urlString, 'http://localhost');
+      return {
+        protocol: hasProtocol ? parsed.protocol : null,
+        slashes: hasProtocol ? true : null,
+        auth: (parsed.username || parsed.password) ? `${parsed.username}:${parsed.password}` : null,
+        host: hasProtocol ? parsed.host : null,
+        port: hasProtocol ? parsed.port : null,
+        hostname: hasProtocol ? parsed.hostname : null,
+        hash: parsed.hash || null,
+        search: parsed.search || null,
+        query: parseQueryString 
+          ? Object.fromEntries(parsed.searchParams) 
+          : (parsed.search ? parsed.search.slice(1) : null),
+        pathname: parsed.pathname,
+        path: `${parsed.pathname}${parsed.search}`,
+        href: hasProtocol ? parsed.href : `${parsed.pathname}${parsed.search}${parsed.hash}`
+      };
+    } catch {
+      return originalUrlParse.apply(this, arguments as any);
+    }
+  };
+}
+
+/**
+ * Sanitiza mensagens de erro e logs para impedir qualquer vazamento
+ * de senhas, passphrases, chaves privadas ou certificados
+ */
+export function sanitizarMensagemErro(msg: string): string {
+  if (!msg || typeof msg !== 'string') return '';
+  return msg
+    .replace(/(password|passphrase|senha|secret|token)[:=\s]+[^\s,;&]+/gi, '$1: [REDACTED]')
+    .replace(/-----BEGIN[A-Z\s]+PRIVATE KEY-----[\s\S]*?-----END[A-Z\s]+PRIVATE KEY-----/gi, '[PRIVATE KEY REDACTED]')
+    .replace(/MIIG[A-Za-z0-9+/=]{30,}/g, '[CERTIFICATE BASE64 REDACTED]');
+}
+
+/**
+ * Limpa e padroniza strings Base64 de Certificados Digitais A1 (.pfx)
+ * Remove cabeçalhos data URI, aspas, quebras de linha e espaços em branco
+ */
+export function limparCertificadoBase64(raw: string | undefined): string {
+  if (!raw || typeof raw !== 'string') return '';
+  return raw
+    .trim()
+    .replace(/^["']|["']$/g, '')
+    .replace(/^data:[^;]+;base64,/i, '')
+    .replace(/\\r/g, '')
+    .replace(/\\n/g, '')
+    .replace(/[\r\n\s]/g, '');
+}
+
+/**
+ * Limpa a senha do certificado removendo aspas acidentais vindas do .env do Vercel
+ */
+export function limparSenhaCertificado(raw: string | undefined): string {
+  if (!raw || typeof raw !== 'string') return '';
+  return raw
+    .trim()
+    .replace(/^["']|["']$/g, '');
+}
+
+/**
+ * Formata certificados e chaves em formato PEM, convertendo \n literais para quebras reais
+ */
+export function formatarPem(raw: string | undefined): string | undefined {
+  if (!raw || typeof raw !== 'string') return undefined;
+  let clean = raw.trim().replace(/^["']|["']$/g, '');
+  if (clean.includes('\\n')) {
+    clean = clean.replace(/\\n/g, '\n');
+  }
+  return clean;
+}
 
 /**
  * URLs oficiais dos WebServices da SEFAZ-SP (NF-e v4.00 - Modelo 55)
@@ -54,19 +139,27 @@ export function sendJson(res: any, statusCode: number, data: any): void {
 }
 
 /**
- * Cria e configura o Agente HTTPS com suporte a Certificado Digital A1/A3 e TLS 1.2
- * para comunicação oficial com os WebServices da SEFAZ (Receita Estadual - SP e Nacional).
+ * Cria e configura o Agente HTTPS com suporte a Certificado Digital A1 e TLS 1.2
+ * para comunicação oficial com os WebServices da SEFAZ (mTLS).
  */
 export function criarAgenteHttpsSefaz(certOverride?: {
   pfxBase64?: string;
   pfxPassword?: string;
+  certificadoBase64?: string;
+  senhaCertificado?: string;
+  senha?: string;
+  password?: string;
+  passphrase?: string;
   certPem?: string;
   keyPem?: string;
-}): https.Agent {
+}): { agent: https.Agent; hasCert: boolean; certType: string } {
+  const SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION = (crypto.constants as any).SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION || 0x00040000;
+  const SSL_OP_LEGACY_SERVER_CONNECT = crypto.constants.SSL_OP_LEGACY_SERVER_CONNECT || 0x00000004;
+
   const agentOptions: https.AgentOptions = {
     rejectUnauthorized: false,
     minVersion: 'TLSv1.2',
-    secureOptions: crypto.constants.SSL_OP_LEGACY_SERVER_CONNECT,
+    secureOptions: SSL_OP_LEGACY_SERVER_CONNECT | SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION,
     ciphers: [
       'ECDHE-RSA-AES128-GCM-SHA256',
       'ECDHE-RSA-AES256-GCM-SHA384',
@@ -74,6 +167,7 @@ export function criarAgenteHttpsSefaz(certOverride?: {
       'ECDHE-ECDSA-AES256-GCM-SHA384',
       'AES128-GCM-SHA256',
       'AES256-GCM-SHA384',
+      'DEFAULT@SECLEVEL=1',
       'HIGH',
       '!aNULL',
       '!eNULL',
@@ -90,10 +184,16 @@ export function criarAgenteHttpsSefaz(certOverride?: {
   };
 
   const pfxBase64 = certOverride?.pfxBase64 || 
+                    certOverride?.certificadoBase64 ||
                     process.env.NFE_CERT_BASE64 || 
                     process.env.SEFAZ_CERT_BASE64 || 
                     process.env.CERTIFICADO_A1_BASE64;
+
   const pfxPassword = certOverride?.pfxPassword || 
+                      certOverride?.senhaCertificado ||
+                      certOverride?.senha ||
+                      certOverride?.password ||
+                      certOverride?.passphrase ||
                       process.env.NFE_CERT_PASSWORD || 
                       process.env.SEFAZ_CERT_PASSWORD || 
                       process.env.CERTIFICADO_A1_SENHA || 
@@ -101,34 +201,56 @@ export function criarAgenteHttpsSefaz(certOverride?: {
 
   const certPath = process.env.NFE_CERT_PATH || process.env.SEFAZ_CERT_PATH;
 
+  let hasCert = false;
+  let certType = 'Nenhum';
+
   if (pfxBase64 && pfxBase64.trim().length > 20) {
     try {
-      const cleanBase64 = pfxBase64.replace(/^data:[^;]+;base64,/, '').trim();
-      agentOptions.pfx = Buffer.from(cleanBase64, 'base64');
-      agentOptions.passphrase = pfxPassword;
-      console.log('[SEFAZ HTTPS Agent] Certificado Digital A1 carregado via Base64.');
+      const cleanBase64 = limparCertificadoBase64(pfxBase64);
+      const cleanPassword = limparSenhaCertificado(pfxPassword);
+      const pfxBuffer = Buffer.from(cleanBase64, 'base64');
+
+      if (pfxBuffer.length < 50) {
+        console.warn(`[SEFAZ HTTPS Agent] Buffer do certificado muito pequeno (${pfxBuffer.length} bytes). Verifique se o conteúdo Base64 é válido.`);
+      } else {
+        agentOptions.pfx = pfxBuffer;
+        agentOptions.passphrase = cleanPassword;
+        hasCert = true;
+        certType = 'A1_PKCS12_Base64';
+        console.log(`[SEFAZ HTTPS Agent] Certificado Digital A1 carregado via Base64 (${pfxBuffer.length} bytes).`);
+      }
     } catch (e: any) {
-      console.warn('[SEFAZ HTTPS Agent] Falha ao decodificar certificado Base64:', e?.message || e);
+      console.warn('[SEFAZ HTTPS Agent] Falha ao decodificar certificado Base64:', sanitizarMensagemErro(e?.message || String(e)));
     }
   } else if (certPath && fs.existsSync(certPath)) {
     try {
       agentOptions.pfx = fs.readFileSync(certPath);
-      agentOptions.passphrase = pfxPassword;
-      console.log(`[SEFAZ HTTPS Agent] Certificado Digital carregado do arquivo: ${certPath}`);
+      agentOptions.passphrase = limparSenhaCertificado(pfxPassword);
+      hasCert = true;
+      certType = 'A1_Arquivo_Local';
+      console.log(`[SEFAZ HTTPS Agent] Certificado Digital carregado do arquivo local: ${certPath}`);
     } catch (e: any) {
-      console.warn(`[SEFAZ HTTPS Agent] Falha ao ler certificado do arquivo ${certPath}:`, e?.message || e);
+      console.warn(`[SEFAZ HTTPS Agent] Falha ao ler certificado do arquivo ${certPath}:`, sanitizarMensagemErro(e?.message || String(e)));
     }
   } else if (certOverride?.certPem && certOverride?.keyPem) {
-    agentOptions.cert = certOverride.certPem;
-    agentOptions.key = certOverride.keyPem;
+    agentOptions.cert = formatarPem(certOverride.certPem);
+    agentOptions.key = formatarPem(certOverride.keyPem);
+    hasCert = true;
+    certType = 'PEM_Override';
     console.log('[SEFAZ HTTPS Agent] Certificado e Chave Privada carregados via PEM.');
   } else if (process.env.NFE_CERT_PEM && process.env.NFE_KEY_PEM) {
-    agentOptions.cert = process.env.NFE_CERT_PEM;
-    agentOptions.key = process.env.NFE_KEY_PEM;
+    agentOptions.cert = formatarPem(process.env.NFE_CERT_PEM);
+    agentOptions.key = formatarPem(process.env.NFE_KEY_PEM);
+    hasCert = true;
+    certType = 'PEM_Env';
     console.log('[SEFAZ HTTPS Agent] Certificado e Chave Privada carregados via variáveis de ambiente PEM.');
   }
 
-  return new https.Agent(agentOptions);
+  if (!hasCert) {
+    console.warn('[SEFAZ HTTPS Agent] ATENÇÃO: Nenhum Certificado Digital A1 foi detectado. As requisições mTLS para a SEFAZ serão rejeitadas com HTTP 403 Forbidden.');
+  }
+
+  return { agent: new https.Agent(agentOptions), hasCert, certType };
 }
 
 /**
@@ -175,8 +297,8 @@ export function assinarXmlSefazServer(xmlString: string, certOverride?: any): st
   let signatureValue = '';
   let x509Cert = '';
 
-  const certPrivateKey = certOverride?.keyPem || process.env.NFE_KEY_PEM || process.env.SEFAZ_KEY_PEM || process.env.NFE_PRIVATE_KEY;
-  const certPublicPem = certOverride?.certPem || process.env.NFE_CERT_PEM || process.env.SEFAZ_CERT_PEM;
+  const certPrivateKey = formatarPem(certOverride?.keyPem || process.env.NFE_KEY_PEM || process.env.SEFAZ_KEY_PEM || process.env.NFE_PRIVATE_KEY);
+  const certPublicPem = formatarPem(certOverride?.certPem || process.env.NFE_CERT_PEM || process.env.SEFAZ_CERT_PEM);
 
   if (certPrivateKey) {
     try {
@@ -184,7 +306,7 @@ export function assinarXmlSefazServer(xmlString: string, certOverride?: any): st
       signer.update(signedInfo);
       signatureValue = signer.sign(certPrivateKey, 'base64');
     } catch (e: any) {
-      console.warn('[SEFAZ Assinatura] Aviso ao assinar com chave privada PEM:', e?.message || e);
+      console.warn('[SEFAZ Assinatura] Aviso ao assinar com chave privada PEM:', sanitizarMensagemErro(e?.message || String(e)));
     }
   }
 
@@ -218,14 +340,14 @@ export function formatarErroConexaoSefaz(err: any, endpoint: string): {
   sugestao: string;
 } {
   const code = String(err?.code || err?.errno || err?.name || 'ERRO_DESCONHECIDO').toUpperCase();
-  const rawMsg = String(err?.message || err || '');
+  const rawMsg = sanitizarMensagemErro(String(err?.message || err || ''));
 
   if (code.includes('ECONNRESET')) {
     return {
       codigo: 'ECONNRESET',
       mensagem: `Conexão resetada pelo servidor da SEFAZ (${endpoint}).`,
-      detalhe: `O firewall ou servidor do fisco encerrou a conexão abruptamente (Connection Reset). Causa comum: ausência de certificado digital A1/A3 válido ou rejeição de handshake TLS pelo gateway da SEFAZ.`,
-      sugestao: 'Certifique-se de que o certificado A1 (.pfx) esteja ativo e que a SEFAZ-SP não esteja passando por oscilação.'
+      detalhe: `O firewall ou servidor do fisco encerrou a conexão abruptamente (Connection Reset). Causa comum: ausência de certificado digital A1 válido ou rejeição de handshake TLS pelo gateway da SEFAZ.`,
+      sugestao: 'Certifique-se de que o certificado A1 (.pfx) esteja ativo nas variáveis de ambiente do Vercel e que a SEFAZ-SP não esteja passando por oscilação.'
     };
   }
 
@@ -252,7 +374,7 @@ export function formatarErroConexaoSefaz(err: any, endpoint: string): {
       codigo: 'CERT_HAS_EXPIRED',
       mensagem: 'Certificado digital vencido ou expirado.',
       detalhe: `O certificado digital ICP-Brasil utilizado para autenticar a conexão com a SEFAZ está com a data de validade expirada.`,
-      sugestao: 'Renove o certificado A1 da empresa e atualize a chave no ERP.'
+      sugestao: 'Renove o certificado A1 da empresa e atualize a chave NFE_CERT_BASE64 no Vercel.'
     };
   }
 
@@ -274,8 +396,8 @@ export function formatarErroConexaoSefaz(err: any, endpoint: string): {
     return {
       codigo: 'SSL_HANDSHAKE_ERROR',
       mensagem: `Falha no protocolo de segurança SSL/TLS com a SEFAZ (${endpoint}).`,
-      detalhe: `O webservice da SEFAZ exigiu autenticação mTLS (mútua) com Certificado Digital A1/A3 válido. Mensagem original: ${rawMsg}`,
-      sugestao: 'Configure o arquivo do Certificado Digital A1 (.pfx) e sua respectiva senha nas configurações do ERP.'
+      detalhe: `O webservice da SEFAZ exigiu autenticação mTLS (mútua) com Certificado Digital A1 válido. Mensagem: ${rawMsg}`,
+      sugestao: 'Configure o arquivo do Certificado Digital A1 (.pfx em Base64) e a senha nas variáveis de ambiente NFE_CERT_BASE64 e NFE_CERT_PASSWORD.'
     };
   }
 
@@ -284,7 +406,7 @@ export function formatarErroConexaoSefaz(err: any, endpoint: string): {
       codigo: 'DNS_ERROR',
       mensagem: `Não foi possível resolver o endereço da SEFAZ (${endpoint}).`,
       detalhe: `Falha na consulta DNS do domínio da SEFAZ.`,
-      sugestao: 'Verifique a conexão de internet e a configuração de servidores DNS.'
+      sugestao: 'Verifique a conexão de rede e a disponibilidade dos servidores de DNS.'
     };
   }
 
@@ -802,7 +924,7 @@ export function extrairDadosRequisicaoSefaz(req: any): {
 }
 
 /**
- * Executa a requisição SOAP via HTTPS nativo do Node.js com o Agente configurado
+ * Executa a requisição SOAP via HTTPS nativo do Node.js com o Agente mTLS configurado
  */
 export function executarRequisicaoSoapNode(
   endpointUrl: string,
@@ -810,12 +932,12 @@ export function executarRequisicaoSoapNode(
   soapEnvelope: string,
   timeoutMs: number = 15000,
   certOverride?: any
-): Promise<{ status: number; data: string; headers: http.IncomingHttpHeaders }> {
+): Promise<{ status: number; data: string; headers: http.IncomingHttpHeaders; hasCert: boolean; certType: string }> {
   return new Promise((resolve, reject) => {
     try {
       const parsedUrl = new URL(endpointUrl);
       const isHttps = parsedUrl.protocol === 'https:';
-      const agent = isHttps ? criarAgenteHttpsSefaz(certOverride) : undefined;
+      const { agent, hasCert, certType } = isHttps ? criarAgenteHttpsSefaz(certOverride) : { agent: undefined, hasCert: false, certType: 'HTTP' };
 
       const bodyBuffer = Buffer.from(soapEnvelope, 'utf-8');
 
@@ -823,6 +945,8 @@ export function executarRequisicaoSoapNode(
         'Content-Type': `application/soap+xml; charset=utf-8; action="${soapAction}"`,
         'Accept': 'application/soap+xml, application/xml, text/xml',
         'Content-Length': bodyBuffer.length,
+        'SOAPAction': soapAction,
+        'Host': parsedUrl.host,
         'User-Agent': 'UsiCorte-ERP/1.0 (Node.js/SEFAZ-SP Client)'
       };
 
@@ -845,7 +969,9 @@ export function executarRequisicaoSoapNode(
           resolve({
             status: res.statusCode || 200,
             data: responseBody,
-            headers: res.headers
+            headers: res.headers,
+            hasCert,
+            certType
           });
         });
       });
@@ -904,7 +1030,7 @@ export default async function handler(req: any, res: any): Promise<void> {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Origin, X-Requested-With, Accept, SOAPAction, action, x-custom-header, *');
   res.setHeader('Access-Control-Max-Age', '86400');
 
-  // Requisições OPTIONS (Preflight) retornam 200 OK conforme exigido
+  // Requisições OPTIONS (Preflight) retornam 200 OK
   if (req.method === 'OPTIONS') {
     res.statusCode = 200;
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
@@ -912,66 +1038,55 @@ export default async function handler(req: any, res: any): Promise<void> {
     return res.end();
   }
 
+  const hasCertEnv = !!(
+    (process.env.NFE_CERT_BASE64 && process.env.NFE_CERT_BASE64.trim().length > 20) ||
+    (process.env.SEFAZ_CERT_BASE64 && process.env.SEFAZ_CERT_BASE64.trim().length > 20) ||
+    (process.env.CERTIFICADO_A1_BASE64 && process.env.CERTIFICADO_A1_BASE64.trim().length > 20) ||
+    (process.env.NFE_CERT_PATH && fs.existsSync(process.env.NFE_CERT_PATH)) ||
+    (process.env.NFE_CERT_PEM && process.env.NFE_KEY_PEM)
+  );
+
   // 2. Diagnóstico / Status via GET
   if (req.method === 'GET') {
-    const hasCert = !!(
-      process.env.NFE_CERT_BASE64 ||
-      process.env.SEFAZ_CERT_BASE64 ||
-      process.env.CERTIFICADO_A1_BASE64 ||
-      process.env.NFE_CERT_PATH ||
-      process.env.NFE_CERT_PEM
-    );
-
     const isStatusCheck = String(req.url || '').includes('status');
 
-    if (isStatusCheck) {
-      sendJson(res, 200, {
-        status: 'online',
-        ambiente: 'producao',
-        tpAmb: 1,
-        certificadoConfigurado: hasCert,
+    const diagnostico = {
+      status: 'online',
+      servico: 'Proxy SEFAZ-SP SOAP / NF-e v4.00 (Vercel Serverless Function)',
+      ambientePadrao: 'producao (tpAmb = 1)',
+      tpAmb: 1,
+      certificadoConfigurado: hasCertEnv,
+      certificadoTipo: hasCertEnv ? (process.env.NFE_CERT_BASE64 || process.env.SEFAZ_CERT_BASE64 ? 'A1_PKCS12_Base64' : (process.env.NFE_CERT_PEM ? 'PEM' : 'Arquivo')) : 'Nenhum',
+      tls: {
         rejectUnauthorized: false,
-        tlsMinVersion: 'TLSv1.2',
-        ciphersAtivas: 'Compatível SEFAZ-SP / ICP-Brasil',
-        ambientes: {
-          '1': { nome: 'Produção Oficial', urls: WEBSERVICES_SEFAZ_SP[1] },
-          '2': { nome: 'Homologação / Testes', urls: WEBSERVICES_SEFAZ_SP[2] }
-        },
-        timestamp: new Date().toISOString()
-      });
+        minVersion: 'TLSv1.2',
+        ciphers: 'Compatível SEFAZ-SP / ICP-Brasil (mTLS)'
+      },
+      ambientes: {
+        '1': { nome: 'Produção Oficial', urls: WEBSERVICES_SEFAZ_SP[1] },
+        '2': { nome: 'Homologação / Testes', urls: WEBSERVICES_SEFAZ_SP[2] }
+      },
+      orientacoesVercel: hasCertEnv
+        ? 'Certificado digital A1 configurado no ambiente de execução.'
+        : 'Para emissão em produção, configure as variáveis NFE_CERT_BASE64 e NFE_CERT_PASSWORD no painel de configurações de ambiente da Vercel.',
+      timestamp: new Date().toISOString()
+    };
+
+    if (isStatusCheck) {
+      sendJson(res, 200, diagnostico);
       return;
     }
 
     sendJson(res, 200, {
-      status: 'online',
-      servico: 'Proxy SEFAZ-SP SOAP / NF-e v4.00 (Vercel Serverless Function)',
+      ...diagnostico,
       mensagem: 'Rota de transmissão SOAP ativa e operacional. Envie requisições POST com a chave de acesso, dados da NF-e ou XML assinado.',
-      ambientePadrao: 'producao (tpAmb = 1)',
-      ambientes: {
-        '1': {
-          nome: 'Produção Oficial',
-          tpAmb: 1,
-          urls: WEBSERVICES_SEFAZ_SP[1]
-        },
-        '2': {
-          nome: 'Homologação / Testes',
-          tpAmb: 2,
-          urls: WEBSERVICES_SEFAZ_SP[2]
-        }
-      },
-      certificadoConfigurado: hasCert,
-      tls: {
-        rejectUnauthorized: false,
-        minVersion: 'TLSv1.2',
-        ciphers: 'Compatível SEFAZ-SP / ICP-Brasil'
-      },
       instrucoesUso: {
         metodo: 'POST',
         corpoJson: {
           chaveAcesso: 'Chave de 44 dígitos da NF-e (opcional se XML já montado)',
           xml: '<enviNFe ...>...</enviNFe> ou Envelope SOAP completo (opcional)',
           tpAmb: '1 para Produção ou 2 para Homologação (padrão oficial: 1)',
-          servico: 'autorizacao | retAutorizacao | evento | consultaProtocolo | statusServico (detectado automaticamente)'
+          servico: 'autorizacao | retAutorizacao | evento | consultaProtocolo | statusServico'
         }
       }
     });
@@ -986,6 +1101,7 @@ export default async function handler(req: any, res: any): Promise<void> {
     if (!dadosReq.soapEnvelope && !dadosReq.xmlConteudo && !dadosReq.chaveAcesso) {
       sendJson(res, 400, {
         ok: false,
+        statusHttp: 400,
         codigo: 'REQUISICAO_INVALIDA',
         cStat: 'REQUISICAO_INVALIDA',
         mensagem: 'Dados da NF-e, chave de acesso ou Envelope SOAP não informados na requisição.',
@@ -1001,23 +1117,28 @@ export default async function handler(req: any, res: any): Promise<void> {
 
     const response = await executarRequisicaoSoapNode(endpoint!, soapAction!, soapEnvelope!, timeoutMs, certificado);
 
-    console.log(`[SEFAZ Proxy Vercel] Resposta recebida da SEFAZ: HTTP ${response.status} (${response.data.length} bytes).`);
+    console.log(`[SEFAZ Proxy Vercel] Resposta recebida da SEFAZ: HTTP ${response.status} (${response.data.length} bytes, hasCert: ${response.hasCert}).`);
 
     const dadosEstruturados = extrairDadosRetornoSefazXmlServer(response.data);
 
-    // Se a SEFAZ recusou o acesso mTLS (HTTP 403 Forbidden por ausência/rejeição do certificado A1),
-    // devolvemos resposta com formato informativo explicando a necessidade do certificado digital,
-    // com status HTTP 200 no proxy para que o frontend exiba a mensagem amigável sem quebra no console de rede.
+    // Se a SEFAZ recusou o acesso com HTTP 403 (mTLS exigido / certificado ausente ou rejeitado),
+    // PRESERVA RIGOROSAMENTE o status HTTP 403 (NUNCA devolve 200 OK para falha)
     if (response.status === 403) {
-      sendJson(res, 200, {
+      const detalheErro = response.hasCert
+        ? 'A SEFAZ-SP recusou o certificado digital apresentado (HTTP 403 Forbidden: Access is denied). Verifique se o certificado A1 (.pfx) é emitido sob a hierarquia ICP-Brasil, se não está revogado/expirado, e se a senha configurada no Vercel está correta.'
+        : 'Nenhum Certificado Digital A1 foi detectado no ambiente do Vercel. A SEFAZ-SP exige autenticação mTLS com certificado ICP-Brasil para autorização de NF-e.';
+
+      sendJson(res, 403, {
         ok: false,
         statusHttp: 403,
         codigo: 'SEFAZ_403_CERTIFICADO_EXIGIDO',
         cStat: '403',
-        xMotivo: 'Acesso recusado pela SEFAZ (403 Forbidden). O Certificado Digital A1 (.pfx) é obrigatório para autenticar a conexão com a SEFAZ-SP.',
-        mensagem: 'Acesso recusado pela SEFAZ (403 Forbidden). O Certificado Digital A1 (.pfx) é obrigatório para autenticar a conexão com a SEFAZ-SP.',
-        detalhe: 'A SEFAZ-SP exige autenticação mTLS com certificado digital ICP-Brasil válido emitido para o CNPJ 25.038.430/0001-23. Resposta original da SEFAZ: 403 Forbidden: Access is denied.',
-        sugestao: 'Configure o arquivo do Certificado Digital A1 (.pfx) e a senha correspondente nas Configurações da Empresa no ERP.',
+        xMotivo: 'Acesso recusado pela SEFAZ (403 Forbidden). O Certificado Digital A1 (.pfx) é obrigatório para autenticar a conexão mTLS com a SEFAZ-SP.',
+        mensagem: 'Acesso recusado pela SEFAZ (403 Forbidden). O Certificado Digital A1 (.pfx) é obrigatório para autenticar a conexão mTLS com a SEFAZ-SP.',
+        detalhe: detalheErro,
+        sugestao: 'Cadastre as variáveis NFE_CERT_BASE64 (arquivo .pfx convertido em Base64 de linha única) e NFE_CERT_PASSWORD (senha do certificado) nas variáveis de ambiente da Vercel.',
+        certificadoConfigurado: response.hasCert,
+        certificadoTipo: response.certType,
         tpAmb,
         ambiente: tpAmb === 1 ? 'producao' : 'homologacao',
         servico,
@@ -1030,8 +1151,11 @@ export default async function handler(req: any, res: any): Promise<void> {
       return;
     }
 
+    // Para outros status HTTP (200, 500, etc.), preserva o status real recebido
+    const isSucessoHttp = response.status >= 200 && response.status < 300;
+
     sendJson(res, response.status, {
-      ok: response.status >= 200 && response.status < 300,
+      ok: isSucessoHttp && dadosEstruturados.isAutorizada !== false,
       statusHttp: response.status,
       tpAmb,
       ambiente: tpAmb === 1 ? 'producao' : 'homologacao',
@@ -1062,7 +1186,7 @@ export default async function handler(req: any, res: any): Promise<void> {
       mensagem: erroFormatado.mensagem,
       detalhe: erroFormatado.detalhe,
       sugestao: erroFormatado.sugestao,
-      rawError: err?.message || String(err)
+      rawError: sanitizarMensagemErro(err?.message || String(err))
     });
   }
 }
