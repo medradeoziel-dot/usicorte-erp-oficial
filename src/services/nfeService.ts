@@ -2074,7 +2074,7 @@ export async function enviarSoapSefaz(
       body: JSON.stringify({
         endpoint: endpointSefaz,
         soapAction,
-        soapEnvelope: compactarXmlSefaz(soapEnvelope),
+        soapEnvelope,
         timeoutMs
       }),
       signal: AbortSignal.timeout(timeoutMs + 3000)
