@@ -915,7 +915,7 @@ export interface LucratividadeItem {
 
 export async function calcularLucratividadeDb(): Promise<LucratividadeItem[]> {
   const [cotacoesDb, materiaisDb] = await Promise.all([
-    fetchCotacoesDb(),
+    fetchCotacoesDb(undefined, 'todas'),
     fetchMateriaisEstoqueDb()
   ]);
 
@@ -1157,6 +1157,53 @@ export function gerarContasReceberPorOS(os: OrdemServico): LancamentoFinanceiro 
 // ==========================================
 // 7. FECHAMENTO & EXTRATO DE COTAÇÕES NO SUPABASE
 // ==========================================
+
+/**
+ * Consulta de cotações para a tela de Fechamento & Extrato de Cobrança:
+ * Carrega as cotações sem travar em .eq('status_pagamento', 'pendente'),
+ * permitindo que o extrato do cliente traga todas as cotações (com todos os status).
+ * Se filtroClienteId for fornecido, aplica busca por cliente_nome com ilike.
+ */
+export async function carregarExtratoCotacoes(filtroClienteId?: string): Promise<SupabaseCotacao[]> {
+  try {
+    let query = db
+      .from('cotacoes')
+      .select('*, cotacao_itens(*)')
+      .order('created_at', { ascending: false });
+
+    // Aplica o filtro de cliente apenas se houver termo digitado, sem travar outros status
+    if (filtroClienteId && filtroClienteId.trim()) {
+      query = query.ilike('cliente_nome', `%${filtroClienteId.trim()}%`);
+    }
+
+    // Remova qualquer .eq('status_pagamento', 'pendente') fixo que limite a listagem geral,
+    // permitindo que o componente traga todas as cotações para o extrato do cliente.
+
+    const { data, error } = await query;
+    if (error) {
+      console.warn('Aviso ao consultar cotacoes com cotacao_itens, tentando select(*):', error.message || error);
+      let fallbackQuery = db
+        .from('cotacoes')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (filtroClienteId && filtroClienteId.trim()) {
+        fallbackQuery = fallbackQuery.ilike('cliente_nome', `%${filtroClienteId.trim()}%`);
+      }
+
+      const { data: fallbackData, error: fallbackError } = await fallbackQuery;
+      if (fallbackError) {
+        console.error('Erro ao carregar extrato de cotações:', fallbackError);
+        return [];
+      }
+      return (fallbackData || []) as SupabaseCotacao[];
+    }
+    return (data || []) as SupabaseCotacao[];
+  } catch (err) {
+    console.error('Erro ao carregar extrato de cotações:', err);
+    return [];
+  }
+}
 
 export interface RegistroPagamentoCotacao {
   status: 'Pendente' | 'Pago';

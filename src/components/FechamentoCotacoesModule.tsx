@@ -14,7 +14,8 @@ import {
   getPagamentosCotacoesMap, 
   darBaixaMultiplasCotacoesDb,
   salvarPagamentosCotacoesMap,
-  RegistroPagamentoCotacao
+  RegistroPagamentoCotacao,
+  carregarExtratoCotacoes
 } from '../services/inventoryFinanceService';
 import ExtratoCobrancaPrint, { ExtratoCotacaoItem, ExtratoCotacaoItemDetalhado } from './ExtratoCobrancaPrint';
 import EmissaoNfeModal from './EmissaoNfeModal';
@@ -127,8 +128,8 @@ export default function FechamentoCotacoesModule({
     return Array.from(map.values()).sort((a, b) => a.nome.localeCompare(b.nome));
   }, [clients, allQuotes]);
 
-  // Carrega todas as cotações e status de pagamento
-  const loadQuotesData = async () => {
+  // Carrega todas as cotações e status de pagamento para o Extrato e Fechamento (sem restrição fixa de status)
+  const loadQuotesData = async (filtroClienteId?: string) => {
     setIsLoading(true);
     const resultList: ExtratoCotacaoItem[] = [];
     const seenKeys = new Set<string>();
@@ -148,9 +149,9 @@ export default function FechamentoCotacoesModule({
       if (lq.id) localQuotesMap.set(lq.id.trim().toLowerCase(), lq);
     });
 
-    // 1. Carrega do Supabase
+    // 1. Carrega do Supabase usando query de extrato sem travar status_pagamento = 'pendente'
     try {
-      const dbQuotes = await fetchCotacoesDb();
+      const dbQuotes = await carregarExtratoCotacoes(filtroClienteId);
       if (dbQuotes && dbQuotes.length > 0) {
         dbQuotes.forEach(q => {
           const numKey = (q.numero || q.id || '').trim().toLowerCase();
@@ -1375,7 +1376,7 @@ export default function FechamentoCotacoesModule({
           </div>
 
           <button
-            onClick={loadQuotesData}
+            onClick={() => loadQuotesData()}
             className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5"
           >
             <RotateCcw className="w-3.5 h-3.5" /> Atualizar
