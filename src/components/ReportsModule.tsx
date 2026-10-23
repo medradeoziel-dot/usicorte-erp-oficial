@@ -1168,17 +1168,16 @@ export default function ReportsModule({
 
       // CONSULTA INTEGRAL NO SUPABASE: Busca SEM LIMITES todos os itens pertencentes a esta cotação na tabela cotacao_itens
       let allDbItems: any[] = [];
-      if (item.cotacaoId) {
-        allDbItems = await fetchItensByCotacaoId(String(item.cotacaoId));
-      }
-      if (allDbItems.length === 0 && item.cotacao) {
-        allDbItems = await fetchItensByCotacaoId(String(item.cotacao));
-      }
-      if (allDbItems.length === 0 && quoteObj?.id) {
-        allDbItems = await fetchItensByCotacaoId(String(quoteObj.id));
-      }
-      if (allDbItems.length === 0 && quoteObj?.quoteNumber) {
-        allDbItems = await fetchItensByCotacaoId(String(quoteObj.quoteNumber));
+      const triedCandidateIds = new Set<string>();
+      const candidateList = [item.cotacaoId, item.cotacao, quoteObj?.id, quoteObj?.quoteNumber];
+      for (const cand of candidateList) {
+        if (!cand) continue;
+        const strCand = String(cand).trim();
+        if (strCand && !triedCandidateIds.has(strCand)) {
+          triedCandidateIds.add(strCand);
+          allDbItems = await fetchItensByCotacaoId(strCand);
+          if (allDbItems.length > 0) break;
+        }
       }
 
       if (allDbItems && allDbItems.length > 0) {

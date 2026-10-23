@@ -251,10 +251,10 @@ export default function EmissaoNfeModal({
       try {
         setIsLoadingItems(true);
         let dbItens = await fetchItensByCotacaoId(String(targetId));
-        if ((!dbItens || dbItens.length === 0) && quote.quoteNumber) {
+        if ((!dbItens || dbItens.length === 0) && quote.quoteNumber && String(quote.quoteNumber) !== String(targetId)) {
           dbItens = await fetchItensByCotacaoId(String(quote.quoteNumber));
         }
-        if ((!dbItens || dbItens.length === 0) && quote.id) {
+        if ((!dbItens || dbItens.length === 0) && quote.id && String(quote.id) !== String(targetId)) {
           dbItens = await fetchItensByCotacaoId(String(quote.id));
         }
 

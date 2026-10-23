@@ -166,7 +166,7 @@ export async function fetchEstoqueMovimentacoesDb(): Promise<any[]> {
 
 /* ---- helper: só aceita UUID de verdade ---- */
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-export const isUuid = (v?: string | null): v is string => !!v && UUID_RE.test(v.trim());
+export const isUuid = (v?: string | null): boolean => !!v && UUID_RE.test(v.trim());
 
 /**
  * Resolve o UUID de uma cotação no Supabase caso seja passado o número de cotação
@@ -176,13 +176,39 @@ export async function resolveCotacaoUuid(cotacaoIdOrNumero?: string): Promise<st
   const clean = cotacaoIdOrNumero.trim();
   if (isUuid(clean)) return clean;
   try {
-    const { data } = await db
+    // 1. Tenta correspondência exata em cotacoes.numero
+    const { data: byNumero } = await db
       .from('cotacoes')
       .select('id')
       .eq('numero', clean)
       .limit(1)
       .maybeSingle();
-    return data?.id || null;
+    if (byNumero?.id) return byNumero.id;
+
+    // 2. Tenta correspondência exata em cotacoes.numero_cotacao
+    const { data: byNumCot } = await db
+      .from('cotacoes')
+      .select('id')
+      .eq('numero_cotacao', clean)
+      .limit(1)
+      .maybeSingle();
+    if (byNumCot?.id) return byNumCot.id;
+
+    // 3. Se contiver dígitos (ex: 28, 00028, 1083), busca por sufixo ou padding
+    const digitsOnly = clean.replace(/\D/g, '');
+    if (digitsOnly) {
+      const padded6 = digitsOnly.padStart(6, '0');
+      const padded5 = digitsOnly.padStart(5, '0');
+      const { data: byDigits } = await db
+        .from('cotacoes')
+        .select('id')
+        .or(`numero.ilike.%-${padded6},numero.ilike.%-${padded5},numero.ilike.%-${digitsOnly},numero.eq.${clean}`)
+        .limit(1)
+        .maybeSingle();
+      if (byDigits?.id) return byDigits.id;
+    }
+
+    return null;
   } catch {
     return null;
   }
@@ -2033,9 +2059,12 @@ export async function carregarExtratoCotacoes(
       const numInt = parseInt(digitsOnly, 10);
 
       orConditions.push(`numero.ilike.%${cleanTerm}%`);
-      orConditions.push(`numero_cotacao.ilike.%${cleanTerm}%`);
-      orConditions.push(`id.ilike.%${cleanTerm}%`);
       orConditions.push(`observacoes.ilike.%${cleanTerm}%`);
+
+      // Se o termo for um UUID válido, permite busca exata por ID (sem usar ilike em coluna UUID)
+      if (isUuid(cleanTerm)) {
+        orConditions.push(`id.eq.${cleanTerm}`);
+      }
 
       if (!isNaN(numInt) && numInt > 0) {
         const p3 = String(numInt).padStart(3, '0');
@@ -2058,14 +2087,18 @@ export async function carregarExtratoCotacoes(
           .from('cotacao_itens')
           .select('cotacao_id')
           .or(`produto.ilike.%${cleanTerm}%,descricao.ilike.%${cleanTerm}%,medida.ilike.%${cleanTerm}%,observacao.ilike.%${cleanTerm}%`)
-          .limit(500);
+          .limit(300);
 
         if (itensMatch && itensMatch.length > 0) {
-          const itemCotIds = Array.from(new Set(itensMatch.map((it: any) => it.cotacao_id).filter(Boolean)));
-          if (itemCotIds.length > 0) {
-            const safeIds = itemCotIds.slice(0, 80);
-            orConditions.push(`id.in.(${safeIds.join(',')})`);
-            orConditions.push(`numero.in.(${safeIds.join(',')})`);
+          const itemCotIds = Array.from(new Set(itensMatch.map((it: any) => String(it.cotacao_id || '')).filter(Boolean)));
+          const validUuids = itemCotIds.filter(id => isUuid(id)).slice(0, 50);
+          const textNumbers = itemCotIds.filter(id => !isUuid(id)).slice(0, 50);
+
+          if (validUuids.length > 0) {
+            orConditions.push(`id.in.(${validUuids.join(',')})`);
+          }
+          if (textNumbers.length > 0) {
+            orConditions.push(`numero.in.(${textNumbers.join(',')})`);
           }
         }
       } catch (errItens) {
@@ -2774,20 +2807,24 @@ export async function fetchItensByCotacaoId(cotacaoIdOrNumero: string): Promise<
     if (!cotacaoIdOrNumero) return [];
     const clean = String(cotacaoIdOrNumero).trim();
 
-    const buscarItensSemLimite = async (campo: string, valor: string): Promise<SupabaseCotacaoItem[]> => {
+    // Helper interno para buscar sem limite na tabela 'cotacao_itens'
+    // A chave estrangeira oficial na tabela 'cotacao_itens' é 'cotacao_id' (tipo UUID).
+    // A coluna 'cotacao_numero' NÃO existe na tabela cotacao_itens e gera HTTP 400 se consultada.
+    const buscarItensPorCotacaoId = async (uuidVal: string): Promise<SupabaseCotacaoItem[]> => {
+      if (!isUuid(uuidVal)) return [];
       try {
         let res = await db
           .from('cotacao_itens')
           .select('*')
-          .eq(campo, valor)
+          .eq('cotacao_id', uuidVal)
           .order('ordem', { ascending: true });
         if (!res.error && res.data && res.data.length > 0) return res.data;
 
-        // Fallback sem order para suportar esquemas sem coluna ordem
+        // Fallback sem order para esquemas sem a coluna ordem
         const fb = await db
           .from('cotacao_itens')
           .select('*')
-          .eq(campo, valor);
+          .eq('cotacao_id', uuidVal);
         if (!fb.error && fb.data && fb.data.length > 0) return fb.data;
       } catch {}
       return [];
@@ -2795,47 +2832,39 @@ export async function fetchItensByCotacaoId(cotacaoIdOrNumero: string): Promise<
 
     let itens: SupabaseCotacaoItem[] = [];
 
-    // 1. Se clean já for um UUID válido, busca direto por cotacao_id
+    // 1. Se clean já for um UUID válido, busca direto pela chave estrangeira cotacao_id
     if (isUuid(clean)) {
-      itens = await buscarItensSemLimite('cotacao_id', clean);
+      itens = await buscarItensPorCotacaoId(clean);
       if (itens && itens.length > 0) {
         return itens;
       }
     } else {
-      // 2. Se clean for código textual (ex: COT-2026-000983), resolve PRIMEIRO o UUID da cotação!
-      // O campo cotacao_id na tabela cotacao_itens é do tipo UUID no PostgreSQL.
-      // Passar uma string como "COT-2026-000983" diretamente no eq('cotacao_id', ...) gerava Erro 400.
-      const uuid = await resolveCotacaoUuid(clean);
-      if (uuid && isUuid(uuid)) {
-        itens = await buscarItensSemLimite('cotacao_id', uuid);
+      // 2. Se clean for número/código formatado (ex: COT-2026-000615 ou 615 ou 00028):
+      // Resolve PRIMEIRO o UUID da cotação no Supabase antes de consultar cotacao_itens.
+      const resolvedUuid = await resolveCotacaoUuid(clean);
+      if (resolvedUuid && isUuid(resolvedUuid)) {
+        itens = await buscarItensPorCotacaoId(resolvedUuid);
         if (itens && itens.length > 0) {
           return itens;
         }
       }
     }
 
-    // 4. Fallback por cotacao_numero caso a coluna alternativa seja usada
-    try {
-      const { data: altCols } = await db
-        .from('cotacao_itens')
-        .select('*')
-        .eq('cotacao_numero', clean);
-      if (altCols && altCols.length > 0) return altCols;
-    } catch {}
-
-    // 5. Fallback por localStorage ('s_orcamentos') garantindo todos os itens em modo offline/local
+    // 3. Fallback por localStorage ('s_orcamentos') para suportar modo offline ou cotações locais
     try {
       const saved = localStorage.getItem('s_orcamentos');
       if (saved) {
         const parsed = JSON.parse(saved);
+        const digitsClean = clean.replace(/\D/g, '');
         const found = parsed.find((q: any) => 
           (q.id && String(q.id).trim() === clean) ||
-          (q.quoteNumber && String(q.quoteNumber).trim().toLowerCase() === clean.toLowerCase())
+          (q.quoteNumber && String(q.quoteNumber).trim().toLowerCase() === clean.toLowerCase()) ||
+          (digitsClean && q.quoteNumber && String(q.quoteNumber).replace(/\D/g, '').endsWith(digitsClean))
         );
         if (found && Array.isArray(found.items) && found.items.length > 0) {
           return found.items.map((it: any, idx: number) => ({
             id: it.id || idx + 1,
-            cotacao_id: clean,
+            cotacao_id: isUuid(clean) ? clean : (found.id && isUuid(found.id) ? found.id : ''),
             ordem: idx,
             produto: it.constantName || it.constanteNome || it.material || 'MATERIAL',
             material: it.material || it.constantName || '',
@@ -2861,7 +2890,7 @@ export async function fetchItensByCotacaoId(cotacaoIdOrNumero: string): Promise<
 
     return [];
   } catch (err) {
-    console.error("Erro na busca de itens por cotação ID:", err);
+    console.warn("Erro ao buscar itens por ID/número da cotação:", err);
     return [];
   }
 }

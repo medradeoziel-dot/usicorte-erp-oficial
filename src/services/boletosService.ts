@@ -16,13 +16,39 @@ export async function resolveCotacaoUuid(cotacaoIdOrNumero?: string): Promise<st
   const clean = cotacaoIdOrNumero.trim();
   if (isUuid(clean)) return clean;
   try {
-    const { data } = await db
+    // 1. Tenta correspondência exata em cotacoes.numero
+    const { data: byNumero } = await db
       .from('cotacoes')
       .select('id')
       .eq('numero', clean)
       .limit(1)
       .maybeSingle();
-    return data?.id || null;
+    if (byNumero?.id) return byNumero.id;
+
+    // 2. Tenta correspondência exata em cotacoes.numero_cotacao
+    const { data: byNumCot } = await db
+      .from('cotacoes')
+      .select('id')
+      .eq('numero_cotacao', clean)
+      .limit(1)
+      .maybeSingle();
+    if (byNumCot?.id) return byNumCot.id;
+
+    // 3. Se contiver dígitos (ex: 28, 00028, 1083), busca por sufixo ou padding
+    const digitsOnly = clean.replace(/\D/g, '');
+    if (digitsOnly) {
+      const padded6 = digitsOnly.padStart(6, '0');
+      const padded5 = digitsOnly.padStart(5, '0');
+      const { data: byDigits } = await db
+        .from('cotacoes')
+        .select('id')
+        .or(`numero.ilike.%-${padded6},numero.ilike.%-${padded5},numero.ilike.%-${digitsOnly},numero.eq.${clean}`)
+        .limit(1)
+        .maybeSingle();
+      if (byDigits?.id) return byDigits.id;
+    }
+
+    return null;
   } catch {
     return null;
   }

@@ -1202,9 +1202,12 @@ export async function carregarExtratoCotacoes(
       const numInt = parseInt(digitsOnly, 10);
 
       orConditions.push(`numero.ilike.%${cleanTerm}%`);
-      orConditions.push(`numero_cotacao.ilike.%${cleanTerm}%`);
-      orConditions.push(`id.ilike.%${cleanTerm}%`);
       orConditions.push(`observacoes.ilike.%${cleanTerm}%`);
+
+      // Se o termo for um UUID válido, permite busca exata por ID (sem usar ilike em coluna UUID)
+      if (isUuid(cleanTerm)) {
+        orConditions.push(`id.eq.${cleanTerm}`);
+      }
 
       if (!isNaN(numInt) && numInt > 0) {
         const p3 = String(numInt).padStart(3, '0');
@@ -1227,14 +1230,18 @@ export async function carregarExtratoCotacoes(
           .from('cotacao_itens')
           .select('cotacao_id')
           .or(`produto.ilike.%${cleanTerm}%,descricao.ilike.%${cleanTerm}%,medida.ilike.%${cleanTerm}%,observacao.ilike.%${cleanTerm}%`)
-          .limit(500);
+          .limit(300);
 
         if (itensMatch && itensMatch.length > 0) {
-          const itemCotIds = Array.from(new Set(itensMatch.map((it: any) => it.cotacao_id).filter(Boolean)));
-          if (itemCotIds.length > 0) {
-            const safeIds = itemCotIds.slice(0, 80);
-            orConditions.push(`id.in.(${safeIds.join(',')})`);
-            orConditions.push(`numero.in.(${safeIds.join(',')})`);
+          const itemCotIds = Array.from(new Set(itensMatch.map((it: any) => String(it.cotacao_id || '')).filter(Boolean)));
+          const validUuids = itemCotIds.filter(id => isUuid(id)).slice(0, 50);
+          const textNumbers = itemCotIds.filter(id => !isUuid(id)).slice(0, 50);
+
+          if (validUuids.length > 0) {
+            orConditions.push(`id.in.(${validUuids.join(',')})`);
+          }
+          if (textNumbers.length > 0) {
+            orConditions.push(`numero.in.(${textNumbers.join(',')})`);
           }
         }
       } catch (errItens) {
