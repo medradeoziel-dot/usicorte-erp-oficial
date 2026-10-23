@@ -1553,6 +1553,19 @@ export function extrairDadosRequisicaoSefaz(req: any): {
     }
   }
 
+  // A tela exibe a chave em grupos ("3526 1025 ..."); se o XML do evento vier
+  // do navegador com esses espacos, o Id da assinatura fica invalido.
+  let chave44 = chaveAcesso;
+  if (chave44.length !== 44) {
+    const fonte = `${xmlFinal} ${body?.soapEnvelope || body?.soap_envelope || ''}`.replace(/[\s ]*/g, '');
+    const m = fonte.match(/(?:chNFe>|ID110111|Id="NFe)(\d{44})/);
+    if (m) chave44 = m[1];
+  }
+  if (chave44.length === 44) {
+    const chaveComEspacos = new RegExp(chave44.split('').join('[\\s ]*'), 'g');
+    xmlFinal = xmlFinal.replace(chaveComEspacos, chave44);
+  }
+
   let endpoint = body?.endpoint || body?.endpoint_sefaz;
   if (!endpoint || typeof endpoint !== 'string' || !endpoint.startsWith('http')) {
     endpoint = WEBSERVICES_SEFAZ_SP[tpAmb][servico as keyof typeof WEBSERVICES_SEFAZ_SP[1]] || WEBSERVICES_SEFAZ_SP[tpAmb].autorizacao;
@@ -1565,6 +1578,10 @@ export function extrairDadosRequisicaoSefaz(req: any): {
   }
 
   let soapEnvelope = body?.soapEnvelope || body?.soap_envelope;
+  if (typeof soapEnvelope === 'string' && chave44.length === 44) {
+    const chaveComEspacos = new RegExp(chave44.split('').join('[\\s ]*'), 'g');
+    soapEnvelope = soapEnvelope.replace(chaveComEspacos, chave44);
+  }
   const headers = req.headers || {};
   let soapAction = body?.soapAction || body?.soap_action || headers['soapaction'] || headers['action'];
   if (Array.isArray(soapAction)) soapAction = soapAction[0];
