@@ -24,7 +24,8 @@ import {
   consultarStatusOuReciboNfe,
   obterReciboLocal,
   fetchClienteCompletoParaDanfe,
-  ClienteDanfeDestinatario
+  ClienteDanfeDestinatario,
+  getMotivoText
 } from '../services/nfeService';
 import CancelarNfeModal from './CancelarNfeModal';
 import DanfeEspelhoA4Modal from './DanfeEspelhoA4Modal';
@@ -123,8 +124,16 @@ export default function EmissaoNfeModal({
   // Detecta a rejeição 656 em qualquer resposta ou erro e registra o bloqueio
   const registrarBloqueioSeHouver = (obj: any): boolean => {
     if (!obj) return false;
-    const texto = [obj.cStat, obj.codigo, obj.codigoErro, obj.xMotivo, obj.mensagemErro, obj.mensagem, obj.message, obj.tipoResposta]
-      .filter(Boolean).join(' ').toLowerCase();
+    const texto = [
+      obj.cStat, 
+      obj.codigo, 
+      obj.codigoErro, 
+      getMotivoText(obj.xMotivo), 
+      getMotivoText(obj.mensagemErro), 
+      getMotivoText(obj.mensagem), 
+      getMotivoText(obj.message), 
+      obj.tipoResposta
+    ].filter(Boolean).map(v => getMotivoText(v).toLowerCase()).join(' ');
     const is656 = obj.isConsumoIndevido === true || String(obj.cStat || '') === '656' || String(obj.statusHttp || '') === '429' ||
       String(obj.codigoErro || '').includes('656') ||
       texto.includes('656') || texto.includes('consumo indevido') || texto.includes('consumo_indevido') ||
@@ -585,7 +594,7 @@ export default function EmissaoNfeModal({
       } else if (res.statusNfe === 'Pendente') {
         // Status Pendente (cStat 103/105 ou Timeout): Mantém número/chave reservados e avisa operador
         setTransmissionResult(res);
-        const msgPendente = res.xMotivo || res.mensagemErro || 'Lote recebido e em processamento na SEFAZ. O recibo foi salvo para consulta posterior.';
+        const msgPendente = getMotivoText(res.xMotivo) || getMotivoText(res.mensagemErro) || 'Lote recebido e em processamento na SEFAZ. O recibo foi salvo para consulta posterior.';
         setErrorMessage(msgPendente);
         const pendenteQuote: Quote = {
           ...currentQuoteState,
@@ -599,7 +608,7 @@ export default function EmissaoNfeModal({
         setCurrentQuoteState(pendenteQuote);
       } else {
         // 4. Rejeição/Erro: Salva o erro em mensagem_erro_nfe e exibe o alerta explicativo na tela
-        const msg = res.mensagemErro || res.xMotivo || 'Rejeição desconhecida pela SEFAZ.';
+        const msg = getMotivoText(res.mensagemErro) || getMotivoText(res.xMotivo) || 'Rejeição desconhecida pela SEFAZ.';
         setErrorMessage(msg);
         try {
           await updateCotacaoNfeStatusDb(currentQuoteState.id || currentQuoteState.quoteNumber, {
@@ -692,11 +701,11 @@ export default function EmissaoNfeModal({
           }
         } catch {}
       } else if (res.statusNfe === 'Pendente') {
-        const msg = res.xMotivo || res.mensagemErro || 'Lote ainda em processamento na SEFAZ.';
+        const msg = getMotivoText(res.xMotivo) || getMotivoText(res.mensagemErro) || 'Lote ainda em processamento na SEFAZ.';
         setErrorMessage(msg);
         setTransmissionResult(res);
       } else {
-        const msg = res.mensagemErro || res.xMotivo || 'Situação não autorizada pela SEFAZ.';
+        const msg = getMotivoText(res.mensagemErro) || getMotivoText(res.xMotivo) || 'Situação não autorizada pela SEFAZ.';
         setErrorMessage(msg);
       }
     } catch (err: any) {

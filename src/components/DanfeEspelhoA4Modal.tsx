@@ -19,7 +19,8 @@ import {
   downloadXmlCancelamento,
   obterNomePadraoDanfePdf,
   transmitirNfeSefaz,
-  emitirNFe
+  emitirNFe,
+  getMotivoText
 } from '../services/nfeService';
 import CancelarNfeModal from './CancelarNfeModal';
 import { formatCurrency, formatSafeDate } from '../utils/calculator';
@@ -289,7 +290,7 @@ export default function DanfeEspelhoA4Modal({
           protocolo: res.protocolo
         });
       } else {
-        const msg = res.mensagemErro || res.xMotivo || 'Rejeição na emissão pela SEFAZ.';
+        const msg = getMotivoText(res.mensagemErro) || getMotivoText(res.xMotivo) || 'Rejeição na emissão pela SEFAZ.';
         setSefazFeedback({
           tipo: 'erro',
           mensagem: msg

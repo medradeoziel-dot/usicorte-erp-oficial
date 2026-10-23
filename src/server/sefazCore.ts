@@ -981,6 +981,26 @@ export function formatarErroConexaoSefaz(err: any, endpoint: string): {
 }
 
 /**
+ * Função auxiliar segura para extração de texto de nós XML parseados ou respostas SEFAZ (xMotivo, cStat, etc.)
+ * Evita o erro "(i.xMotivo || '').toLowerCase is not a function" quando xMotivo vem como nó XML, objeto ou primitivo.
+ */
+export const getMotivoText = (val: any): string => {
+  if (!val) return "";
+  if (typeof val === "string") return val;
+  if (typeof val === "number") return String(val);
+  if (typeof val === "object") {
+    const textVal = val._ || val.text || val["#text"] || (Array.isArray(val) ? val.map(getMotivoText).join("; ") : null);
+    if (textVal !== null && textVal !== undefined) return typeof textVal === 'string' ? textVal : String(textVal);
+    try {
+      return JSON.stringify(val);
+    } catch {
+      return String(val);
+    }
+  }
+  return String(val);
+};
+
+/**
  * Extrai dados estruturados de respostas XML retornadas pela SEFAZ (NF-e v4.00)
  */
 export function extrairDadosRetornoSefazXmlServer(xmlString: string) {
@@ -1033,7 +1053,8 @@ export function extrairDadosRetornoSefazXmlServer(xmlString: string) {
   if (infProtMatch) {
     const infProtXml = infProtMatch[1];
     cStatNota = infProtXml.match(/<cStat>(\d+)<\/cStat>/i)?.[1];
-    xMotivoNota = infProtXml.match(/<xMotivo>([^<]+)<\/xMotivo>/i)?.[1]?.trim();
+    const xMotMatch = infProtXml.match(/<(?:\w+:)?xMotivo[^>]*>([\s\S]*?)<\/(?:\w+:)?xMotivo>/i);
+    if (xMotMatch) xMotivoNota = getMotivoText(xMotMatch[1].replace(/<[^>]+>/g, '').trim());
     nProt = infProtXml.match(/<nProt>(\d+)<\/nProt>/i)?.[1];
     chNFe = infProtXml.match(/<chNFe>(\d+)<\/chNFe>/i)?.[1];
     dhRecbto = infProtXml.match(/<dhRecbto>([^<]+)<\/dhRecbto>/i)?.[1];
@@ -1047,7 +1068,8 @@ export function extrairDadosRetornoSefazXmlServer(xmlString: string) {
     if (infEventoMatch) {
       const infEventoXml = infEventoMatch[1];
       cStatNota = infEventoXml.match(/<cStat>(\d+)<\/cStat>/i)?.[1] || cStatNota;
-      xMotivoNota = infEventoXml.match(/<xMotivo>([^<]+)<\/xMotivo>/i)?.[1]?.trim() || xMotivoNota;
+      const xMotEventoMatch = infEventoXml.match(/<(?:\w+:)?xMotivo[^>]*>([\s\S]*?)<\/(?:\w+:)?xMotivo>/i);
+      if (xMotEventoMatch && !xMotivoNota) xMotivoNota = getMotivoText(xMotEventoMatch[1].replace(/<[^>]+>/g, '').trim());
       nProt = infEventoXml.match(/<nProt>(\d+)<\/nProt>/i)?.[1];
       chNFe = infEventoXml.match(/<chNFe>(\d+)<\/chNFe>/i)?.[1] || chNFe;
     }
@@ -1055,18 +1077,19 @@ export function extrairDadosRetornoSefazXmlServer(xmlString: string) {
 
   const xmlSemProt = xmlString.replace(/<protNFe[\s\S]*?<\/protNFe>/gi, '');
   const cStatLote = xmlSemProt.match(/<cStat>(\d+)<\/cStat>/i)?.[1];
-  const xMotivoLote = xmlSemProt.match(/<xMotivo>([^<]+)<\/xMotivo>/i)?.[1]?.trim();
+  const xMotLoteMatch = xmlSemProt.match(/<(?:\w+:)?xMotivo[^>]*>([\s\S]*?)<\/(?:\w+:)?xMotivo>/i);
+  const xMotivoLote = xMotLoteMatch ? getMotivoText(xMotLoteMatch[1].replace(/<[^>]+>/g, '').trim()) : undefined;
   const nRec = xmlString.match(/<nRec>(\d+)<\/nRec>/i)?.[1];
   if (!tpAmb) {
     tpAmb = xmlString.match(/<tpAmb>(\d+)<\/tpAmb>/i)?.[1];
   }
 
   let effectiveCStat = cStatNota || cStatLote;
-  let effectiveXMotivo = xMotivoNota || xMotivoLote;
+  let effectiveXMotivo = getMotivoText(xMotivoNota || xMotivoLote);
 
   if (isFault && (!effectiveCStat || effectiveCStat === '100')) {
     effectiveCStat = faultCode || 'SOAP_FAULT';
-    effectiveXMotivo = faultString || effectiveXMotivo || 'Falha SOAP na comunicação com a SEFAZ';
+    effectiveXMotivo = getMotivoText(faultString || effectiveXMotivo || 'Falha SOAP na comunicação com a SEFAZ');
   }
 
   if (!nProt && (xMotivoNota || xMotivoLote || xmlString)) {
@@ -1096,11 +1119,11 @@ export function extrairDadosRetornoSefazXmlServer(xmlString: string) {
 
   return {
     cStat: effectiveCStat,
-    xMotivo: effectiveXMotivo,
+    xMotivo: getMotivoText(effectiveXMotivo),
     cStatNota,
-    xMotivoNota,
+    xMotivoNota: getMotivoText(xMotivoNota),
     cStatLote,
-    xMotivoLote,
+    xMotivoLote: getMotivoText(xMotivoLote),
     nRec,
     nProt,
     chNFe,

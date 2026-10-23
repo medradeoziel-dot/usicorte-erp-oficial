@@ -2095,7 +2095,7 @@ export async function enviarSoapSefaz(
           statusHttp: statusHttp,
           xml: xmlCorpo,
           codigoErro: jsonRes.cStat || jsonRes.codigo,
-          mensagemErro: jsonRes.xMotivo || jsonRes.mensagem,
+          mensagemErro: getMotivoText(jsonRes.xMotivo || jsonRes.mensagem),
           detalheErro: jsonRes.detalhe || jsonRes.rawError,
           sugestao: jsonRes.sugestao
         };
@@ -2106,7 +2106,7 @@ export async function enviarSoapSefaz(
         statusHttp: statusHttp,
         xml: xmlCorpo,
         codigoErro: jsonRes.codigo || jsonRes.cStat || `HTTP_${statusHttp}`,
-        mensagemErro: jsonRes.mensagem || jsonRes.xMotivo || jsonRes.error || `Erro HTTP ${statusHttp} retornado pela SEFAZ`,
+        mensagemErro: getMotivoText(jsonRes.mensagem || jsonRes.xMotivo || jsonRes.error || `Erro HTTP ${statusHttp} retornado pela SEFAZ`),
         detalheErro: jsonRes.detalhe || jsonRes.rawError || jsonRes.error || res.statusText,
         sugestao: jsonRes.sugestao
       };
@@ -2132,17 +2132,10 @@ export async function enviarSoapSefaz(
       mensagemErro: !res.ok ? `Erro HTTP ${res.status}: ${res.statusText}` : undefined
     };
   } catch (err: any) {
-    // Tratamento seguro para extrair a mensagem de erro independentemente do formato
-    const errorMessage = typeof err === 'object' && err !== null 
-        ? (err.message || err.toString() || '') 
-        : String(err || '');
-        
-    const errLower = errorMessage.toLowerCase();
-    const isTimeout = err?.name === 'TimeoutError' || errLower.includes('timeout') || errLower.includes('timed out');
-    
-    const msg = isTimeout
-        ? `Timeout de conexão (${timeoutMs}ms) aguardando resposta da SEFAZ.`
-        : (errorMessage || 'Falha na conexão com o servidor proxy SEFAZ.');
+    const isTimeout = err?.name === 'TimeoutError' || err?.message?.toLowerCase().includes('timeout') || err?.message?.toLowerCase().includes('abort');
+    const msg = isTimeout 
+      ? `Timeout de conexão (${timeoutMs}ms) aguardando resposta da SEFAZ.` 
+      : (err?.message || 'Falha na conexão com o servidor proxy SEFAZ.');
 
     return {
       sucessoHttp: false,
@@ -2192,6 +2185,26 @@ export type TipoRespostaSefaz =
   | 'soap_fault' 
   | 'resposta_vazia' 
   | 'desconhecido';
+
+/**
+ * Função auxiliar segura para extração de texto de nós XML parseados ou respostas SEFAZ (xMotivo, cStat, etc.)
+ * Evita o erro "(i.xMotivo || '').toLowerCase is not a function" quando xMotivo vem como nó XML, objeto ou primitivo.
+ */
+export const getMotivoText = (val: any): string => {
+  if (!val) return "";
+  if (typeof val === "string") return val;
+  if (typeof val === "number") return String(val);
+  if (typeof val === "object") {
+    const textVal = val._ || val.text || val["#text"] || (Array.isArray(val) ? val.map(getMotivoText).join("; ") : null);
+    if (textVal !== null && textVal !== undefined) return typeof textVal === 'string' ? textVal : String(textVal);
+    try {
+      return JSON.stringify(val);
+    } catch {
+      return String(val);
+    }
+  }
+  return String(val);
+};
 
 export interface DadosRetornoSefaz {
   cStat?: string;
@@ -2268,7 +2281,7 @@ export function extrairDadosRetornoSefazXml(xmlString: string): DadosRetornoSefa
   if (infProtMatch) {
     const infProtXml = infProtMatch[1];
     const cStatMatch = infProtXml.match(/<cStat>(\d+)<\/cStat>/i);
-    const xMotivoMatch = infProtXml.match(/<xMotivo>([^<]+)<\/xMotivo>/i);
+    const xMotivoMatch = infProtXml.match(/<(?:\w+:)?xMotivo[^>]*>([\s\S]*?)<\/(?:\w+:)?xMotivo>/i);
     const nProtMatch = infProtXml.match(/<nProt>(\d+)<\/nProt>/i);
     const chNFeMatch = infProtXml.match(/<chNFe>(\d+)<\/chNFe>/i);
     const dhRecbtoMatch = infProtXml.match(/<dhRecbto>([^<]+)<\/dhRecbto>/i);
@@ -2276,7 +2289,7 @@ export function extrairDadosRetornoSefazXml(xmlString: string): DadosRetornoSefa
     const tpAmbMatch = infProtXml.match(/<tpAmb>(\d+)<\/tpAmb>/i);
 
     if (cStatMatch) cStatNota = cStatMatch[1];
-    if (xMotivoMatch) xMotivoNota = xMotivoMatch[1].trim();
+    if (xMotivoMatch) xMotivoNota = getMotivoText(xMotivoMatch[1].replace(/<[^>]+>/g, '').trim());
     if (nProtMatch) nProt = nProtMatch[1];
     if (chNFeMatch) chNFe = chNFeMatch[1];
     if (dhRecbtoMatch) dhRecbto = dhRecbtoMatch[1];
@@ -2290,12 +2303,12 @@ export function extrairDadosRetornoSefazXml(xmlString: string): DadosRetornoSefa
     if (infEventoMatch) {
       const infEventoXml = infEventoMatch[1];
       const cStatEventoMatch = infEventoXml.match(/<cStat>(\d+)<\/cStat>/i);
-      const xMotivoEventoMatch = infEventoXml.match(/<xMotivo>([^<]+)<\/xMotivo>/i);
+      const xMotivoEventoMatch = infEventoXml.match(/<(?:\w+:)?xMotivo[^>]*>([\s\S]*?)<\/(?:\w+:)?xMotivo>/i);
       const nProtEventoMatch = infEventoXml.match(/<nProt>(\d+)<\/nProt>/i);
       const chNFeEventoMatch = infEventoXml.match(/<chNFe>(\d+)<\/chNFe>/i);
 
       if (cStatEventoMatch && !cStatNota) cStatNota = cStatEventoMatch[1];
-      if (xMotivoEventoMatch && !xMotivoNota) xMotivoNota = xMotivoEventoMatch[1].trim();
+      if (xMotivoEventoMatch && !xMotivoNota) xMotivoNota = getMotivoText(xMotivoEventoMatch[1].replace(/<[^>]+>/g, '').trim());
       if (nProtEventoMatch) nProt = nProtEventoMatch[1];
       if (chNFeEventoMatch && !chNFe) chNFe = chNFeEventoMatch[1];
     }
@@ -2312,9 +2325,9 @@ export function extrairDadosRetornoSefazXml(xmlString: string): DadosRetornoSefa
     cStatLote = cStatLoteMatch[1];
   }
 
-  const xMotivoLoteMatch = xmlSemProt.match(/<xMotivo>([^<]+)<\/xMotivo>/i);
+  const xMotivoLoteMatch = xmlSemProt.match(/<(?:\w+:)?xMotivo[^>]*>([\s\S]*?)<\/(?:\w+:)?xMotivo>/i);
   if (xMotivoLoteMatch) {
-    xMotivoLote = xMotivoLoteMatch[1].trim();
+    xMotivoLote = getMotivoText(xMotivoLoteMatch[1].replace(/<[^>]+>/g, '').trim());
   }
 
   const nRecMatch = xmlString.match(/<nRec>(\d+)<\/nRec>/i);
@@ -2328,11 +2341,11 @@ export function extrairDadosRetornoSefazXml(xmlString: string): DadosRetornoSefa
   }
 
   let effectiveCStat = cStatNota || cStatLote;
-  let effectiveXMotivo = xMotivoNota || xMotivoLote;
+  let effectiveXMotivo = getMotivoText(xMotivoNota || xMotivoLote);
 
   if (isFault && (!effectiveCStat || effectiveCStat === '100')) {
     effectiveCStat = faultCode || 'SOAP_FAULT';
-    effectiveXMotivo = faultString || effectiveXMotivo || 'Falha SOAP na comunicação com a SEFAZ';
+    effectiveXMotivo = getMotivoText(faultString || effectiveXMotivo || 'Falha SOAP na comunicação com a SEFAZ');
   }
 
   if (!nProt && (xMotivoNota || xMotivoLote || xmlString)) {
@@ -2360,11 +2373,11 @@ export function extrairDadosRetornoSefazXml(xmlString: string): DadosRetornoSefa
 
   return {
     cStat: effectiveCStat,
-    xMotivo: effectiveXMotivo,
+    xMotivo: getMotivoText(effectiveXMotivo),
     cStatNota,
-    xMotivoNota,
+    xMotivoNota: getMotivoText(xMotivoNota),
     cStatLote,
-    xMotivoLote,
+    xMotivoLote: getMotivoText(xMotivoLote),
     nRec,
     nProt,
     chNFe,
@@ -2414,7 +2427,7 @@ export async function consultarSituacaoNfeSefaz(
         isAutorizada: false,
         isLotePendente: false,
         cStat: resSoap.codigoErro || 'ERRO_CONEXAO',
-        xMotivo: resSoap.mensagemErro || 'Falha na comunicação com a SEFAZ',
+        xMotivo: getMotivoText(resSoap.mensagemErro) || 'Falha na comunicação com a SEFAZ',
         error: resSoap.detalheErro || resSoap.mensagemErro
       };
     }
@@ -2470,7 +2483,7 @@ export async function consultarReciboLoteSefaz(
         isAutorizada: false,
         isLotePendente: false,
         cStat: resSoap.codigoErro || 'ERRO_CONEXAO',
-        xMotivo: resSoap.mensagemErro || 'Falha na consulta de recibo na SEFAZ',
+        xMotivo: getMotivoText(resSoap.mensagemErro) || 'Falha na consulta de recibo na SEFAZ',
         error: resSoap.detalheErro || resSoap.mensagemErro,
         rawXml: ''
       };
@@ -3329,7 +3342,7 @@ export async function transmitirNfeSefaz(
           serie_nfe: quote.serie_nfe || chaveExistente.slice(22, 25)
         }, client);
       } else if (consultaChavePrevia.cStat === '204') {
-        const matchP = (consultaChavePrevia.xMotivo || '').match(/(?:nProt|protocolo)[:\s=]*(\d{15})/i);
+        const matchP = getMotivoText(consultaChavePrevia.xMotivo).match(/(?:nProt|protocolo)[:\s=]*(\d{15})/i);
         if (matchP) {
           console.log(`[SEFAZ Anti-Duplicidade] Protocolo ${matchP[1]} recuperado do retorno de duplicidade da chave ${chaveExistente}!`);
           return await consultarStatusOuReciboNfe({
@@ -3390,7 +3403,7 @@ export async function transmitirNfeSefaz(
         serie_nfe: serie
       }, client);
     } else if (checkNova.cStat === '204') {
-      const matchP = (checkNova.xMotivo || '').match(/(?:nProt|protocolo)[:\s=]*(\d{15})/i);
+      const matchP = getMotivoText(checkNova.xMotivo).match(/(?:nProt|protocolo)[:\s=]*(\d{15})/i);
       if (matchP) {
         return await consultarStatusOuReciboNfe({
           ...quote,
@@ -3491,7 +3504,7 @@ export async function transmitirNfeSefaz(
         if (resSoap.xml) {
           const dadosFault = extrairDadosRetornoSefazXml(resSoap.xml);
           if (dadosFault.isFault || (dadosFault.cStat && dadosFault.cStat !== '100')) {
-            const faultMotivo = dadosFault.xMotivo || 'Rejeição SOAP reportada pela SEFAZ';
+            const faultMotivo = getMotivoText(dadosFault.xMotivo) || 'Rejeição SOAP reportada pela SEFAZ';
             const faultCode = dadosFault.cStat || `HTTP_${resSoap.statusHttp}`;
             const errMsg = `Rejeição SOAP SEFAZ [${faultCode}]: ${faultMotivo}`;
             console.warn(`[SEFAZ-SP SOAP Fault] ❌ ${errMsg}`);
@@ -3532,7 +3545,7 @@ export async function transmitirNfeSefaz(
       // =========================================================================================
       if (dadosRetorno.isFault) {
         const cStatFault = dadosRetorno.cStat || 'SOAP_FAULT';
-        const xMotivoFault = dadosRetorno.xMotivo || 'Falha no envelope SOAP informada pela SEFAZ';
+        const xMotivoFault = getMotivoText(dadosRetorno.xMotivo) || 'Falha no envelope SOAP informada pela SEFAZ';
         const errMsg = `Rejeição SOAP SEFAZ [${cStatFault}]: ${xMotivoFault}`;
         console.warn(`[SEFAZ-SP Rejeição SOAP] ❌ ${errMsg}`);
         try {
@@ -3587,7 +3600,8 @@ export async function transmitirNfeSefaz(
           autorizacaoConfirmadaSefaz = true;
           origemRecuperacao = 'consulta_recibo';
         } else {
-          const msgPendente = `Lote recebido com sucesso pela SEFAZ e atualmente em processamento (cStat ${consultaRecibo.cStat || dadosRetorno.cStatLote}: ${consultaRecibo.xMotivo || dadosRetorno.xMotivoLote || 'Lote em processamento'}). Recibo Nº ${nRecibo}. O recibo foi salvo e o status gravado como Pendente. Utilize "Consultar Recibo / Situação" para obter a autorização final sem duplicidade.`;
+          const motivoRecibo = getMotivoText(consultaRecibo.xMotivo) || getMotivoText(dadosRetorno.xMotivoLote) || 'Lote em processamento';
+          const msgPendente = `Lote recebido com sucesso pela SEFAZ e atualmente em processamento (cStat ${consultaRecibo.cStat || dadosRetorno.cStatLote}: ${motivoRecibo}). Recibo Nº ${nRecibo}. O recibo foi salvo e o status gravado como Pendente. Utilize "Consultar Recibo / Situação" para obter a autorização final sem duplicidade.`;
           try {
             await updateCotacaoNfeStatusDb(quoteIdOrNum, {
               status_nfe: 'Pendente',
@@ -3616,7 +3630,7 @@ export async function transmitirNfeSefaz(
       // CASO 2: Lote rejeitado na raiz (ex: schema inválido, erro de certificado, cStat != 100 e != 104)
       if (!autorizacaoConfirmadaSefaz && dadosRetorno.cStatLote && dadosRetorno.cStatLote !== '100' && dadosRetorno.cStatLote !== '104') {
         const cStatLote = dadosRetorno.cStatLote;
-        const xMotivoLote = dadosRetorno.xMotivoLote || 'Rejeição no lote da NF-e na SEFAZ';
+        const xMotivoLote = getMotivoText(dadosRetorno.xMotivoLote) || 'Rejeição no lote da NF-e na SEFAZ';
         const errMsg = `Rejeição do Lote SEFAZ ${cStatLote}: ${xMotivoLote}`;
         try {
           await updateCotacaoNfeStatusDb(quoteIdOrNum, {
@@ -3635,7 +3649,7 @@ export async function transmitirNfeSefaz(
 
       // CASO 2.5: Verificação especial para Duplicidade (cStat 204 ou 539)
       const cStatCheck = dadosRetorno.cStatNota || dadosRetorno.cStatLote || dadosRetorno.cStat;
-      const xMotivoCheck = dadosRetorno.xMotivoNota || dadosRetorno.xMotivoLote || dadosRetorno.xMotivo || '';
+      const xMotivoCheck = getMotivoText(dadosRetorno.xMotivoNota || dadosRetorno.xMotivoLote || dadosRetorno.xMotivo);
       if (!autorizacaoConfirmadaSefaz && (cStatCheck === '204' || cStatCheck === '539' || xMotivoCheck.toLowerCase().includes('duplicidade'))) {
         console.log(`[SEFAZ Anti-Duplicidade] SEFAZ retornou duplicidade (cStat ${cStatCheck}). Recuperando protocolo oficial da nota já autorizada...`);
         const matchProt = xMotivoCheck.match(/(?:nProt|protocolo)[:\s=]*(\d{15})/i);
@@ -3660,7 +3674,7 @@ export async function transmitirNfeSefaz(
       // CASO 3: Rejeição da Nota específica dentro de <infProt> (diferente de 100, 150 e 204)
       if (!autorizacaoConfirmadaSefaz && dadosRetorno.cStatNota && dadosRetorno.cStatNota !== '100' && dadosRetorno.cStatNota !== '150') {
         const cStatNota = dadosRetorno.cStatNota;
-        const xMotivoNota = dadosRetorno.xMotivoNota || 'Nota fiscal rejeitada pela SEFAZ';
+        const xMotivoNota = getMotivoText(dadosRetorno.xMotivoNota) || 'Nota fiscal rejeitada pela SEFAZ';
         const errMsg = `Rejeição SEFAZ ${cStatNota}: ${xMotivoNota}`;
         try {
           await updateCotacaoNfeStatusDb(quoteIdOrNum, {
@@ -3680,7 +3694,7 @@ export async function transmitirNfeSefaz(
       // CASO 4: Validação rigorosa de Autorização Oficial (cStat == 100 ou 150)
       if (!autorizacaoConfirmadaSefaz && !dadosRetorno.isAutorizada && dadosRetorno.cStat !== '100' && dadosRetorno.cStat !== '150') {
         const cStatFinal = dadosRetorno.cStat || 'NAO_AUTORIZADO';
-        const xMotivoFinal = dadosRetorno.xMotivo || 'A SEFAZ não autorizou a NF-e';
+        const xMotivoFinal = getMotivoText(dadosRetorno.xMotivo) || 'A SEFAZ não autorizou a NF-e';
         const errMsg = `Nota não autorizada na SEFAZ (cStat: ${cStatFinal} - ${xMotivoFinal}).`;
         try {
           await updateCotacaoNfeStatusDb(quoteIdOrNum, {
@@ -3739,7 +3753,7 @@ export async function transmitirNfeSefaz(
           autorizacaoConfirmadaSefaz = true;
           origemRecuperacao = 'timeout_consulta';
         } else if (consultaTimeout.cStat === '204') {
-          const matchP = (consultaTimeout.xMotivo || '').match(/(?:nProt|protocolo)[:\s=]*(\d{15})/i);
+          const matchP = getMotivoText(consultaTimeout.xMotivo).match(/(?:nProt|protocolo)[:\s=]*(\d{15})/i);
           if (matchP) {
             protocolo = matchP[1];
             autorizacaoConfirmadaSefaz = true;
@@ -3915,8 +3929,9 @@ export async function transmitirNfeSefaz(
       }
 
       // Verificação de Duplicidade (204 / 539) no Proxy
-      if (!autorizacaoConfirmadaSefaz && (cStatProxy === '204' || cStatProxy === '539' || String(sefazData.xMotivo || '').toLowerCase().includes('duplicidade'))) {
-        const matchProt = String(sefazData.xMotivo || '').match(/(?:nProt|protocolo)[:\s=]*(\d{15})/i);
+      const proxyMotivo = getMotivoText(sefazData?.xMotivo || sefazData?.mensagem);
+      if (!autorizacaoConfirmadaSefaz && (cStatProxy === '204' || cStatProxy === '539' || proxyMotivo.toLowerCase().includes('duplicidade'))) {
+        const matchProt = proxyMotivo.match(/(?:nProt|protocolo)[:\s=]*(\d{15})/i);
         if (matchProt) {
           protocolo = matchProt[1];
           autorizacaoConfirmadaSefaz = true;
@@ -3936,7 +3951,7 @@ export async function transmitirNfeSefaz(
       // Validação estrita de autorização (cStat == 100 ou 150)
       if (!autorizacaoConfirmadaSefaz && cStatProxy !== '100' && cStatProxy !== '150') {
         const cStatRet = cStatProxy || 'REJEICAO';
-        const xMotivoRet = sefazData.xMotivo || sefazData.mensagem || 'Rejeição na SEFAZ';
+        const xMotivoRet = getMotivoText(sefazData?.xMotivo || sefazData?.mensagem) || 'Rejeição na SEFAZ';
         const errMsg = `Rejeição SEFAZ ${cStatRet}: ${xMotivoRet}`;
         try {
           await updateCotacaoNfeStatusDb(quoteIdOrNum, {
@@ -3986,7 +4001,7 @@ export async function transmitirNfeSefaz(
           autorizacaoConfirmadaSefaz = true;
           origemRecuperacao = 'timeout_consulta';
         } else if (consultaTimeout.cStat === '204') {
-          const matchP = (consultaTimeout.xMotivo || '').match(/(?:nProt|protocolo)[:\s=]*(\d{15})/i);
+          const matchP = getMotivoText(consultaTimeout.xMotivo).match(/(?:nProt|protocolo)[:\s=]*(\d{15})/i);
           if (matchP) {
             protocolo = matchP[1];
             autorizacaoConfirmadaSefaz = true;
@@ -4372,8 +4387,9 @@ export async function consultarStatusOuReciboNfe(
     const resChave = await consultarSituacaoNfeSefaz(chaveAcesso, 12000);
 
     // Se a SEFAZ acusou duplicidade (cStat 204), extrai o protocolo existente
-    if (!resChave.nProt && (resChave.cStat === '204' || resChave.cStatNota === '204' || (resChave.xMotivo || '').toLowerCase().includes('duplicidade'))) {
-      const matchP = (resChave.xMotivo || '').match(/(?:nProt|protocolo)[:\s=]*(\d{15})/i);
+    const motivoChave = getMotivoText(resChave.xMotivo);
+    if (!resChave.nProt && (resChave.cStat === '204' || resChave.cStatNota === '204' || motivoChave.toLowerCase().includes('duplicidade'))) {
+      const matchP = motivoChave.match(/(?:nProt|protocolo)[:\s=]*(\d{15})/i);
       if (matchP) {
         console.log(`[SEFAZ Consulta] Protocolo ${matchP[1]} recuperado do retorno de duplicidade (cStat 204) na consulta de situação!`);
         resChave.nProt = matchP[1];
@@ -4511,12 +4527,13 @@ export async function consultarStatusOuReciboNfe(
         mensagemErro: 'NF-e não consta na base de dados da SEFAZ (o lote não chegou a ser recebido). É seguro efetuar uma nova transmissão.'
       };
     } else {
+      const motivoFinal = getMotivoText(resChave.xMotivo) || 'Situação da NF-e não autorizada na SEFAZ';
       return {
         sucesso: false,
         statusNfe: resChave.isLotePendente ? 'Pendente' : 'Erro',
         cStat: resChave.cStat,
-        xMotivo: resChave.xMotivo || 'Situação da NF-e não autorizada na SEFAZ',
-        mensagemErro: resChave.xMotivo || 'Situação da NF-e não autorizada na SEFAZ'
+        xMotivo: motivoFinal,
+        mensagemErro: motivoFinal
       };
     }
   }
