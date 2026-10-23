@@ -985,6 +985,17 @@ export function enveloparXmlSoapSefaz(
 ): { envelope: string; action: string } {
   let cleanXml = compactarXmlSefaz(xmlLimpo.replace(/<\?xml[^>]*\?>\s*/gi, ''));
 
+  // A tela exibe a chave em grupos ("3526 1025 ..."); se ela vier com espacos
+  // no XML (chNFe ou Id do infEvento), o bloco a assinar fica invalido.
+  {
+    const semEspacos = cleanXml.replace(/\s/g, '');
+    const mChave = semEspacos.match(/(?:chNFe>|ID110111|Id="NFe)(\d{44})/);
+    if (mChave) {
+      const chave44 = mChave[1];
+      cleanXml = cleanXml.replace(new RegExp(chave44.split('').join('[\\s ]*'), 'g'), chave44);
+    }
+  }
+
   if (cleanXml.includes(':Envelope') || cleanXml.includes('<soap') || cleanXml.includes('soap:Envelope') || cleanXml.includes('soap12:Envelope')) {
     const action = SOAP_ACTIONS_SEFAZ[servico] || SOAP_ACTIONS_SEFAZ.autorizacao;
     return { envelope: assinarXmlSefazServer(cleanXml, certOverride), action };
