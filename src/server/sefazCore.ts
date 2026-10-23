@@ -483,7 +483,11 @@ export function extrairCredenciaisCertificado(certOverride?: any): {
         return { hasCert: false, origem: 'Nenhum' };
       }
 
-      const primaryKey = keys[0];
+      // Usa a chave privada que corresponde a um certificado folha (não CA) do PFX
+      const primaryKey =
+        keys.find(k => k.modulusHex && certs.some(c => !c.isCA && c.modulusHex === k.modulusHex)) ||
+        keys.find(k => k.modulusHex && certs.some(c => c.modulusHex === k.modulusHex)) ||
+        keys[0];
 
       certs.forEach((ce, idx) => {
         const matchesKey = !!(primaryKey.modulusHex && ce.modulusHex && primaryKey.modulusHex === ce.modulusHex);
@@ -795,7 +799,12 @@ export function assinarXmlSefazServer(xmlString: string, certOverride?: any): st
 
   // 1. Extração da chave privada e do certificado folha
   const creds = extrairCredenciaisCertificado(certOverride);
-  const signingKey = creds.keyPem || obterChaveFallbackTeste();
+  const cleanX509Check = (creds.x509CertB64 || '').replace(/[\r\n\s]/g, '');
+  const isTest = process.env.NODE_ENV === 'test' || !!process.env.VITEST;
+  if (!isTest && (!creds.keyPem || !cleanX509Check)) {
+    throw new Error('Certificado digital A1 não carregado (verifique SEFAZ_CERTIFICATE_BASE64 e SEFAZ_CERT_PASS na Vercel). A nota não foi enviada para evitar Rejeição 290.');
+  }
+  const signingKey = creds.keyPem || (isTest ? obterChaveFallbackTeste() : '');
 
   if (!signingKey) {
     console.warn('[SEFAZ Assinatura] ⚠️ Chave privada não encontrada para assinar o XML!');
@@ -888,7 +897,7 @@ export function assinarXmlSefazServer(xmlString: string, certOverride?: any): st
     return xmlAssinado;
   } catch (err: any) {
     console.error('[SEFAZ Assinatura] ❌ Falha ao assinar XML com xml-crypto:', sanitizarMensagemErro(err?.message || String(err)));
-    return xmlString;
+    throw new Error('Falha ao assinar a NF-e com o certificado digital: ' + sanitizarMensagemErro(err?.message || String(err)));
   }
 }
 
