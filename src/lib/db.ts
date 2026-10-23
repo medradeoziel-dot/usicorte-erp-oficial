@@ -1985,36 +1985,112 @@ export async function fetchCotacoesDb(
   }
 }
 
+export interface CarregarExtratoOptions {
+  filtroCliente?: string;
+  termoBusca?: string;
+}
+
 /**
  * Consulta de cotações para a tela de Fechamento & Extrato de Cobrança:
- * Carrega todas as cotações sem travar em .eq('status_pagamento', 'pendente'),
- * permitindo que o extrato consolide todo o histórico ou filtre por cliente caso informado.
+ * Carrega todas as cotações sem travar em .eq('status_pagamento', 'pendente') e sem limites rígidos de paginação,
+ * permitindo que a busca por número da cotação/item busque na tabela inteira do Supabase.
+ * Suporta correspondência inteligente de zeros à esquerda (ex: 28, 028, 00028, COT-2026-00028) e termos de itens.
  */
-export async function carregarExtratoCotacoes(filtroClienteId?: string): Promise<SupabaseCotacao[]> {
+export async function carregarExtratoCotacoes(
+  filtroClienteIdOrOptions?: string | CarregarExtratoOptions,
+  termoBuscaParam?: string
+): Promise<SupabaseCotacao[]> {
   try {
-    let query = db
+    let filtroClienteId: string | undefined = undefined;
+    let termoBusca: string | undefined = undefined;
+
+    if (typeof filtroClienteIdOrOptions === 'object' && filtroClienteIdOrOptions !== null) {
+      filtroClienteId = filtroClienteIdOrOptions.filtroCliente;
+      termoBusca = filtroClienteIdOrOptions.termoBusca;
+    } else if (typeof filtroClienteIdOrOptions === 'string') {
+      filtroClienteId = filtroClienteIdOrOptions;
+      termoBusca = termoBuscaParam;
+    } else {
+      termoBusca = termoBuscaParam;
+    }
+
+    let query: any = db
       .from('cotacoes')
       .select('*, cotacao_itens(*)')
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .range(0, 9999); // Remove limite rígido de paginação padrão para pesquisar na tabela inteira
 
-    // Aplica o filtro de cliente apenas se houver termo digitado, sem travar outros status
+    // Aplica o filtro de cliente apenas se houver termo digitado
     if (filtroClienteId && filtroClienteId.trim()) {
       query = query.ilike('cliente_nome', `%${filtroClienteId.trim()}%`);
     }
 
-    // Remova qualquer .eq('status_pagamento', 'pendente') fixo que limite a listagem geral,
-    // permitindo que o componente traga todas as cotações para o extrato do cliente.
-    
+    // Se houver busca por número ou item, monta condições abrangentes de busca
+    const orConditions: string[] = [];
+    if (termoBusca && termoBusca.trim()) {
+      const cleanTerm = termoBusca.trim();
+      const digitsOnly = cleanTerm.replace(/\D/g, '');
+      const numInt = parseInt(digitsOnly, 10);
+
+      orConditions.push(`numero.ilike.%${cleanTerm}%`);
+      orConditions.push(`numero_cotacao.ilike.%${cleanTerm}%`);
+      orConditions.push(`id.ilike.%${cleanTerm}%`);
+      orConditions.push(`observacoes.ilike.%${cleanTerm}%`);
+
+      if (!isNaN(numInt) && numInt > 0) {
+        const p3 = String(numInt).padStart(3, '0');
+        const p4 = String(numInt).padStart(4, '0');
+        const p5 = String(numInt).padStart(5, '0');
+        const p6 = String(numInt).padStart(6, '0');
+
+        orConditions.push(`numero.ilike.%${numInt}%`);
+        orConditions.push(`numero.ilike.%${p3}%`);
+        orConditions.push(`numero.ilike.%${p4}%`);
+        orConditions.push(`numero.ilike.%${p5}%`);
+        orConditions.push(`numero.ilike.%${p6}%`);
+        orConditions.push(`numero.ilike.%COT%${p5}%`);
+        orConditions.push(`numero.ilike.%COT%${numInt}%`);
+      }
+
+      // Tenta buscar cotações pelo termo de item na tabela cotacao_itens
+      try {
+        const { data: itensMatch } = await db
+          .from('cotacao_itens')
+          .select('cotacao_id')
+          .or(`produto.ilike.%${cleanTerm}%,descricao.ilike.%${cleanTerm}%,medida.ilike.%${cleanTerm}%,observacao.ilike.%${cleanTerm}%`)
+          .limit(500);
+
+        if (itensMatch && itensMatch.length > 0) {
+          const itemCotIds = Array.from(new Set(itensMatch.map((it: any) => it.cotacao_id).filter(Boolean)));
+          if (itemCotIds.length > 0) {
+            const safeIds = itemCotIds.slice(0, 80);
+            orConditions.push(`id.in.(${safeIds.join(',')})`);
+            orConditions.push(`numero.in.(${safeIds.join(',')})`);
+          }
+        }
+      } catch (errItens) {
+        // Silencioso em caso de erro na consulta de itens
+      }
+
+      if (orConditions.length > 0) {
+        query = query.or(orConditions.join(','));
+      }
+    }
+
     const { data, error } = await query;
     if (error) {
       console.warn('Aviso ao consultar cotacoes com cotacao_itens, tentando select(*):', error.message || error);
-      let fallbackQuery = db
+      let fallbackQuery: any = db
         .from('cotacoes')
         .select('*')
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .range(0, 9999);
 
       if (filtroClienteId && filtroClienteId.trim()) {
         fallbackQuery = fallbackQuery.ilike('cliente_nome', `%${filtroClienteId.trim()}%`);
+      }
+      if (orConditions.length > 0) {
+        fallbackQuery = fallbackQuery.or(orConditions.join(','));
       }
 
       const { data: fallbackData, error: fallbackError } = await fallbackQuery;

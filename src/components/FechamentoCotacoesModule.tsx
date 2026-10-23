@@ -128,8 +128,8 @@ export default function FechamentoCotacoesModule({
     return Array.from(map.values()).sort((a, b) => a.nome.localeCompare(b.nome));
   }, [clients, allQuotes]);
 
-  // Carrega todas as cotações e status de pagamento para o Extrato e Fechamento (sem restrição fixa de status)
-  const loadQuotesData = async (filtroClienteId?: string) => {
+  // Carrega todas as cotações e status de pagamento para o Extrato e Fechamento (sem restrição fixa de status e sem limite rígido)
+  const loadQuotesData = async (filtroClienteId?: string, termoBuscaNumero?: string) => {
     setIsLoading(true);
     const resultList: ExtratoCotacaoItem[] = [];
     const seenKeys = new Set<string>();
@@ -149,9 +149,9 @@ export default function FechamentoCotacoesModule({
       if (lq.id) localQuotesMap.set(lq.id.trim().toLowerCase(), lq);
     });
 
-    // 1. Carrega do Supabase usando query de extrato sem travar status_pagamento = 'pendente'
+    // 1. Carrega do Supabase usando query de extrato sem travar status_pagamento = 'pendente' e sem limite rígido
     try {
-      const dbQuotes = await carregarExtratoCotacoes(filtroClienteId);
+      const dbQuotes = await carregarExtratoCotacoes(filtroClienteId, termoBuscaNumero);
       if (dbQuotes && dbQuotes.length > 0) {
         dbQuotes.forEach(q => {
           const numKey = (q.numero || q.id || '').trim().toLowerCase();
@@ -412,11 +412,24 @@ export default function FechamentoCotacoesModule({
     setIsLoading(false);
   };
 
+  // Dispara busca com debounce no Supabase e banco local sempre que buscaNumero ou filtroCliente mudar
+  const isFirstRender = useRef(true);
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
+    const timer = setTimeout(() => {
+      loadQuotesData(filtroCliente, buscaNumero);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [buscaNumero, filtroCliente]);
+
   useEffect(() => {
     loadQuotesData();
 
     const handleAtualizacao = () => {
-      loadQuotesData();
+      loadQuotesData(filtroCliente, buscaNumero);
     };
 
     window.addEventListener('cotacoes_migradas_emergencia', handleAtualizacao);
@@ -468,8 +481,76 @@ export default function FechamentoCotacoesModule({
     }
   };
 
+  /**
+   * Helper robusto para correspondência de número com zeros à esquerda
+   * Garante suporte tanto para termos simples ('28', '028', '00028') quanto formatados ('COT-2026-00028', 'COT-28')
+   */
+  const matchNumeroCotacaoComZeros = (
+    numeroQuote: string | undefined | null,
+    idQuote: string | undefined | null,
+    termoBusca: string
+  ): boolean => {
+    if (!termoBusca || !termoBusca.trim()) return true;
+    const termo = termoBusca.trim().toLowerCase();
+    const numStr = String(numeroQuote || '').trim().toLowerCase();
+    const idStr = String(idQuote || '').trim().toLowerCase();
+
+    // 1. Verificação direta por substring
+    if (numStr.includes(termo) || idStr.includes(termo)) return true;
+
+    // 2. Extração numérica inteligente para zeros à esquerda (ex: 28, 028, 00028, COT-2026-00028)
+    const extrairSequencial = (str: string): { intVal: number; lastSeq: string } | null => {
+      if (!str) return null;
+      const matchSuffix = str.match(/(?:COT[-_\s]*)?(?:(?:19|20)\d{2}[-_\s]*)?(\d+)/i);
+      const digitsOnly = str.replace(/\D/g, '');
+      const seq = matchSuffix ? matchSuffix[1] : digitsOnly;
+      if (!seq) return null;
+      const intVal = parseInt(seq, 10);
+      return {
+        intVal: isNaN(intVal) ? -1 : intVal,
+        lastSeq: seq
+      };
+    };
+
+    const infoTermo = extrairSequencial(termo);
+    const infoNum = extrairSequencial(numStr);
+
+    if (infoTermo && infoNum) {
+      if (infoTermo.intVal > 0 && infoTermo.intVal === infoNum.intVal) {
+        return true;
+      }
+
+      const termoCleanNum = infoTermo.intVal > 0 ? String(infoTermo.intVal) : infoTermo.lastSeq.replace(/^0+/, '');
+      const numCleanNum = infoNum.intVal > 0 ? String(infoNum.intVal) : infoNum.lastSeq.replace(/^0+/, '');
+      if (termoCleanNum && numCleanNum && termoCleanNum === numCleanNum) {
+        return true;
+      }
+
+      if (infoTermo.intVal > 0) {
+        const padZeros = (n: number, size: number) => String(n).padStart(size, '0');
+        const p3 = padZeros(infoTermo.intVal, 3);
+        const p4 = padZeros(infoTermo.intVal, 4);
+        const p5 = padZeros(infoTermo.intVal, 5);
+        const p6 = padZeros(infoTermo.intVal, 6);
+        if (
+          numStr.includes(p3) ||
+          numStr.includes(p4) ||
+          numStr.includes(p5) ||
+          numStr.includes(p6)
+        ) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  };
+
   // Filtragem das cotações
   const filteredQuotes = useMemo(() => {
+    const termoBusca = buscaNumero.trim();
+    const temBuscaNumero = Boolean(termoBusca);
+
     return allQuotes.filter(q => {
       // 1. Filtro por Cliente
       if (filtroCliente.trim()) {
@@ -481,14 +562,12 @@ export default function FechamentoCotacoesModule({
         }
       }
 
-      // 2. Filtro por Data Inicial
-      if (filtroDataInicio) {
-        if (q.data < filtroDataInicio) return false;
-      }
-
-      // 3. Filtro por Data Final
-      if (filtroDataFim) {
-        if (q.data > filtroDataFim) return false;
+      // 2. e 3. Filtros por Intervalo de Datas
+      // REQUISITO 2: Se houver busca por 'Nº Cotação / Item' preenchida, o filtro de data DEVE SER IGNORADO
+      // para permitir encontrar cotações antigas (ex: cotação 00028) na tabela inteira
+      if (!temBuscaNumero) {
+        if (filtroDataInicio && q.data < filtroDataInicio) return false;
+        if (filtroDataFim && q.data > filtroDataFim) return false;
       }
 
       // 4. Filtro por Status de Pagamento
@@ -498,13 +577,28 @@ export default function FechamentoCotacoesModule({
         if (q.pagamento?.status !== 'Pago') return false;
       }
 
-      // 5. Busca Direta por Número ou Termo
-      if (buscaNumero.trim()) {
-        const numTerm = buscaNumero.trim().toLowerCase();
-        const numMatch = (q.numero || '').toLowerCase().includes(numTerm);
-        const idMatch = (q.id || '').toLowerCase().includes(numTerm);
-        const itemMatch = (q.itensResumo || '').toLowerCase().includes(numTerm);
-        if (!numMatch && !idMatch && !itemMatch) return false;
+      // 5. Busca Direta por Número ou Item com suporte total a zeros à esquerda
+      if (temBuscaNumero) {
+        const matchNum = matchNumeroCotacaoComZeros(q.numero, q.id, termoBusca);
+        if (matchNum) return true;
+
+        const termoLower = termoBusca.toLowerCase();
+        if ((q.itensResumo || '').toLowerCase().includes(termoLower)) return true;
+
+        if (q.itens && q.itens.some(it =>
+          (it.produto || '').toLowerCase().includes(termoLower) ||
+          (it.descricao || '').toLowerCase().includes(termoLower) ||
+          (it.medida || '').toLowerCase().includes(termoLower) ||
+          (it.info || '').toLowerCase().includes(termoLower) ||
+          (it.ncm || '').toLowerCase().includes(termoLower)
+        )) {
+          return true;
+        }
+
+        const rawObs = ((q.rawQuote as any)?.observacoes || '').toLowerCase();
+        if (rawObs.includes(termoLower)) return true;
+
+        return false;
       }
 
       return true;
@@ -1327,13 +1421,25 @@ export default function FechamentoCotacoesModule({
               <Search className="w-3.5 h-3.5 text-amber-400" />
               <span>Nº Cotação / Item</span>
             </label>
-            <input
-              type="text"
-              value={buscaNumero}
-              onChange={e => setBuscaNumero(e.target.value)}
-              placeholder="Ex: COT-001..."
-              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
-            />
+            <div className="relative">
+              <input
+                type="text"
+                value={buscaNumero}
+                onChange={e => setBuscaNumero(e.target.value)}
+                placeholder="Ex: 28, 00028, item..."
+                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 pr-7 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+              />
+              {buscaNumero && (
+                <button
+                  type="button"
+                  onClick={() => setBuscaNumero('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white cursor-pointer p-0.5"
+                  title="Limpar busca"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
           </div>
         </div>
 
