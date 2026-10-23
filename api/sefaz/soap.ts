@@ -338,17 +338,38 @@ export function extrairCredenciaisCertificado(certOverride?: any): {
       let certPem: string | undefined;
       let x509CertB64: string | undefined;
 
+      const chaves: any[] = [];
+      const certs: any[] = [];
       for (const sc of p12.safeContents) {
         for (const sb of sc.safeBags) {
-          if (sb.key) {
-            keyPem = forge.pki.privateKeyToPem(sb.key);
-          }
-          if (sb.cert) {
-            certPem = forge.pki.certificateToPem(sb.cert);
-            const certDer = forge.asn1.toDer(forge.pki.certificateToAsn1(sb.cert)).getBytes();
-            x509CertB64 = Buffer.from(certDer, 'binary').toString('base64');
-          }
+          if (sb.key) chaves.push(sb.key);
+          if (sb.cert) certs.push(sb.cert);
         }
+      }
+
+      const ehCA = (c: any) => {
+        const bc = c.extensions?.find((e: any) => e.name === 'basicConstraints');
+        return !!(bc && bc.cA === true);
+      };
+      const mod = (k: any) => (k && k.n ? k.n.toString(16) : '');
+
+      // Escolhe o certificado da EMPRESA (folha), que corresponde à chave privada
+      let chaveSel: any = undefined;
+      let certSel: any = undefined;
+      for (const k of chaves) {
+        const c = certs.find(c => mod(c.publicKey) === mod(k) && !ehCA(c)) || certs.find(c => mod(c.publicKey) === mod(k));
+        if (c) { chaveSel = k; certSel = c; break; }
+      }
+      if (!chaveSel) chaveSel = chaves[0];
+      if (!certSel) certSel = certs.find(c => !ehCA(c)) || certs[0];
+
+      if (chaveSel) keyPem = forge.pki.privateKeyToPem(chaveSel);
+      if (certSel) {
+        certPem = forge.pki.certificateToPem(certSel);
+        const certDer = forge.asn1.toDer(forge.pki.certificateToAsn1(certSel)).getBytes();
+        x509CertB64 = Buffer.from(certDer, 'binary').toString('base64').replace(/[\r\n\s]/g, '');
+        const cn = certSel.subject?.getField?.('CN')?.value || 'desconhecido';
+        console.log(`[SEFAZ Cert] Certificado selecionado para assinatura: "${cn}" | válido até ${certSel.validity?.notAfter?.toISOString?.()} | ${certs.length} certificado(s) no PFX`);
       }
 
       return {
@@ -665,11 +686,11 @@ export function assinarXmlSefazServer(xmlString: string, certOverride?: any): st
     }
   }
 
-  if (!signatureValue) {
-    signatureValue = crypto.createHash('sha1').update(signedInfo + (idRef || '')).digest('base64');
+  const x509Cert = (creds.x509CertB64 || '').replace(/[\r\n\s]/g, '');
+  if (!signatureValue || !x509Cert) {
+    throw new Error('Não foi possível assinar a NF-e com o Certificado Digital A1 (chave ou certificado ausente). A nota não foi enviada.');
   }
 
-  const x509Cert = creds.x509CertB64 || '';
   const keyInfo = x509Cert ? `<KeyInfo><X509Data><X509Certificate>${x509Cert}</X509Certificate></X509Data></KeyInfo>` : '';
 
   const signatureXml = `<Signature xmlns="http://www.w3.org/2000/09/xmldsig#">` +
