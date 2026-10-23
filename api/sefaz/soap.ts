@@ -710,7 +710,9 @@ export function assinarXmlSefazServer(xmlString: string, certOverride?: any): st
     const id = alvo.getAttribute('Id');
     const pai = alvo.parentNode;
     if (!id || !/^[A-Za-z_][A-Za-z0-9_.-]*$/.test(id) || !pai || pai.nodeType !== 1) {
-      throw new Error('Bloco fiscal com Id inválido ou sem elemento pai.');
+      const idVisivel = JSON.stringify(String(id ?? '(sem Id)').slice(0, 80));
+      const paiVisivel = pai && pai.nodeType === 1 ? (pai as XmlElement).localName : '(nenhum)';
+      throw new Error(`[v5] Bloco <${alvo.localName}> com Id inválido ${idVisivel} (pai: ${paiVisivel}).`);
     }
     // Não reutiliza a assinatura antiga enviada pelo navegador.
     for (const node of Array.from(pai.childNodes)) {
@@ -1416,6 +1418,72 @@ export function montarXmlNfeServer(dados: {
 </NFe>`;
 }
 
+/** Data/hora oficial de Brasília (UTC-3), 1 minuto no passado para evitar "evento no futuro". */
+function dataHoraBrasiliaSefaz(): string {
+  const d = new Date(Date.now() - 3 * 60 * 60 * 1000 - 60 * 1000);
+  return d.toISOString().slice(0, 19) + '-03:00';
+}
+
+export interface DadosCancelamentoSefaz {
+  chave: string;
+  nProt: string;
+  xJust: string;
+  nSeq: number;
+  tpAmb: 1 | 2;
+}
+
+/**
+ * Coleta chave, protocolo e justificativa de qualquer formato enviado pelo navegador
+ * (campos JSON, XML do evento ou envelope SOAP), ignorando espaços e formatação.
+ */
+export function extrairDadosCancelamentoSefaz(body: any, tpAmb: 1 | 2): DadosCancelamentoSefaz {
+  const textos = [body?.xml, body?.xmlAssinado, body?.xml_envio, body?.xmlConteudo, body?.xml_conteudo,
+    body?.xml_evento, body?.soapEnvelope, body?.soap_envelope]
+    .filter((t: any) => typeof t === 'string').join(' ');
+  const textoSemEspaco = textos.replace(/[\s\u00A0\u200B-\u200D\uFEFF]/g, '');
+
+  const digitos = (v: any) => String(v ?? '').replace(/\D/g, '');
+  let chave = [body?.chaveAcesso, body?.chave_acesso, body?.chNFe, body?.chave].map(digitos).find(c => c.length === 44) || '';
+  if (!chave) chave = textoSemEspaco.match(/<(?:\w+:)?chNFe>(\d{44})</)?.[1] || textoSemEspaco.match(/ID110111(\d{44})/)?.[1] || '';
+
+  let nProt = [body?.protocolo_autorizacao, body?.protocoloAutorizacao, body?.protocolo, body?.nProt].map(digitos).find(c => c.length === 15) || '';
+  if (!nProt) nProt = textoSemEspaco.match(/<(?:\w+:)?nProt>(\d{15})</)?.[1] || '';
+
+  let xJustBruta = String(body?.justificativa || body?.just || body?.xJust || '');
+  if (!xJustBruta.trim()) {
+    xJustBruta = (textos.match(/<(?:\w+:)?xJust>([\s\S]*?)<\/(?:\w+:)?xJust>/)?.[1] || '')
+      .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
+  }
+  const xJust = sanitizarTextoSoap(xJustBruta, 255);
+
+  const seqBruta = Number(digitos(body?.sequencia || body?.nSeqEvento || textoSemEspaco.match(/<(?:\w+:)?nSeqEvento>(\d+)</)?.[1] || '1'));
+  const nSeq = seqBruta >= 1 && seqBruta <= 99 ? seqBruta : 1;
+
+  return { chave, nProt, xJust, nSeq, tpAmb };
+}
+
+/** Monta o envEvento de cancelamento (110111) no layout oficial 1.00. */
+export function montarEventoCancelamentoServer(d: DadosCancelamentoSefaz, exigirProtocolo = true): string {
+  if (!/^\d{44}$/.test(d.chave)) {
+    throw new Error('Chave de acesso da NF-e inválida para cancelamento (precisa ter 44 dígitos).');
+  }
+  if (exigirProtocolo && !/^\d{15}$/.test(d.nProt)) {
+    throw new Error('Protocolo de autorização da NF-e não encontrado (precisa ter 15 dígitos).');
+  }
+  if (d.xJust.replace(/&\w+;/g, 'x').length < 15) {
+    throw new Error('Justificativa do cancelamento precisa ter pelo menos 15 caracteres.');
+  }
+  const cOrgao = d.chave.slice(0, 2);
+  const cnpj = d.chave.slice(6, 20);
+  const seq2 = String(d.nSeq).padStart(2, '0');
+  return `<envEvento xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.00"><idLote>${Date.now().toString().slice(-15)}</idLote>`
+    + `<evento xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.00"><infEvento Id="ID110111${d.chave}${seq2}">`
+    + `<cOrgao>${cOrgao}</cOrgao><tpAmb>${d.tpAmb}</tpAmb><CNPJ>${cnpj}</CNPJ><chNFe>${d.chave}</chNFe>`
+    + `<dhEvento>${dataHoraBrasiliaSefaz()}</dhEvento><tpEvento>110111</tpEvento><nSeqEvento>${d.nSeq}</nSeqEvento>`
+    + `<verEvento>1.00</verEvento><detEvento versao="1.00"><descEvento>Cancelamento</descEvento>`
+    + `<nProt>${/^\d{15}$/.test(d.nProt) ? d.nProt : '000000000000000'}</nProt><xJust>${d.xJust}</xJust></detEvento></infEvento></evento></envEvento>`;
+}
+
 /**
  * Normaliza e extrai parâmetros da requisição (JSON, XML cru ou parâmetros de envio)
  */
@@ -1429,6 +1497,7 @@ export function extrairDadosRequisicaoSefaz(req: any): {
   tpAmb: 1 | 2;
   servico: string;
   certificado?: any;
+  cancelamento?: DadosCancelamentoSefaz;
 } {
   let body = req.body;
   if (typeof body === 'string') {
@@ -1588,13 +1657,26 @@ export function extrairDadosRequisicaoSefaz(req: any): {
     }
   }
 
-  let soapEnvelope = body?.soapEnvelope || body?.soap_envelope;
+  // Cancelamento: o XML/envelope do navegador é ignorado; o evento é montado aqui,
+  // no formato oficial, a partir da chave, protocolo e justificativa.
+  let cancelamento: DadosCancelamentoSefaz | undefined;
+  const textoEvento = String(xmlFinal || '') + String(body?.soapEnvelope || body?.soap_envelope || '');
+  if (servico === 'evento' && (acaoRaw.includes('cancel') || body?.justificativa || /110111|<(?:\w+:)?xJust>/.test(textoEvento.replace(/\s/g, '')))) {
+    cancelamento = extrairDadosCancelamentoSefaz(body, tpAmb);
+    // O protocolo é conferido na SEFAZ antes do envio (ver handler).
+    xmlFinal = montarEventoCancelamentoServer(cancelamento, false);
+    endpoint = WEBSERVICES_SEFAZ_SP[tpAmb].evento;
+    console.log(`[SEFAZ Evento v5] Cancelamento montado no servidor: chave=${cancelamento.chave}, protocolo=${cancelamento.nProt}, seq=${cancelamento.nSeq}, tpAmb=${tpAmb}.`);
+  }
+
+  let soapEnvelope = cancelamento ? undefined : (body?.soapEnvelope || body?.soap_envelope);
+  let soapActionNavegador = cancelamento ? undefined : true;
   if (typeof soapEnvelope === 'string' && chave44.length === 44) {
     const chaveComEspacos = new RegExp(chave44.split('').join('[\\s ]*'), 'g');
     soapEnvelope = soapEnvelope.replace(chaveComEspacos, chave44);
   }
   const headers = req.headers || {};
-  let soapAction = body?.soapAction || body?.soap_action || headers['soapaction'] || headers['action'];
+  let soapAction = soapActionNavegador ? (body?.soapAction || body?.soap_action || headers['soapaction'] || headers['action']) : undefined;
   if (Array.isArray(soapAction)) soapAction = soapAction[0];
 
   if (!soapEnvelope && xmlFinal) {
@@ -1616,7 +1698,8 @@ export function extrairDadosRequisicaoSefaz(req: any): {
     timeoutMs,
     tpAmb,
     servico,
-    certificado
+    certificado,
+    cancelamento
   };
 }
 
@@ -1847,6 +1930,52 @@ export default async function handler(req: any, res: any): Promise<void> {
     console.log(`[SEFAZ Proxy Vercel] Transmitindo (${servico.toUpperCase()} - tpAmb: ${tpAmb}${chaveAcesso ? ` - Chave: ${chaveAcesso}` : ''}) para ${endpoint}...`);
 
     if (!endpoint || !soapAction) throw new Error('Endpoint ou ação SOAP não informado.');
+
+    if (dadosReq.cancelamento) {
+      const canc = dadosReq.cancelamento;
+      // Consulta a nota antes: confirma que está autorizada e usa o protocolo oficial da SEFAZ.
+      const consXml = `<consSitNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00"><tpAmb>${tpAmb}</tpAmb><xServ>CONSULTAR</xServ><chNFe>${canc.chave}</chNFe></consSitNFe>`;
+      const cons = enveloparXmlSoapSefaz(consXml, 'consultaProtocolo', '1', '1', certificado);
+      const respCons = await executarRequisicaoSoapNode(WEBSERVICES_SEFAZ_SP[tpAmb].consultaProtocolo, cons.action, cons.envelope, timeoutMs, certificado);
+      const dadosCons: any = extrairDadosRetornoSefazXmlServer(respCons.data);
+      const cStatCons = String(dadosCons.cStatLote || dadosCons.cStat || '');
+      console.log(`[SEFAZ Evento v5] Consulta antes do cancelamento: HTTP ${respCons.status}, cStat ${cStatCons} (${dadosCons.xMotivo || ''}), protocolo SEFAZ ${dadosCons.nProt || '-'}.`);
+
+      if (dadosCons.isConsumoIndevido) {
+        sendJson(res, 429, {
+          ok: false, statusHttp: 429, codigo: 'SEFAZ_656_CONSUMO_INDEVIDO', tipoResposta: 'consumo_indevido', isConsumoIndevido: true,
+          cStat: '656', xMotivo: dadosCons.xMotivo || 'Rejeição: Consumo Indevido',
+          mensagem: 'A SEFAZ bloqueou temporariamente esta nota por excesso de tentativas. Aguarde 1 hora antes de tentar o cancelamento.',
+          bloqueadoAte: Date.now() + 60 * 60 * 1000, retentavel: false, tpAmb, servico, chaveAcesso: canc.chave, xmlRetorno: respCons.data
+        });
+        return;
+      }
+      if (cStatCons === '101' || cStatCons === '151' || cStatCons === '155') {
+        sendJson(res, 200, {
+          ok: true, statusHttp: 200, tipoResposta: 'cancelada', isCancelada: true, jaCancelada: true,
+          cStat: '135', xMotivo: dadosCons.xMotivo || 'NF-e já está cancelada na SEFAZ',
+          mensagem: 'Esta NF-e já consta como CANCELADA na SEFAZ. Nada foi enviado novamente.',
+          tpAmb, servico, chaveAcesso: canc.chave, nProt: dadosCons.nProt, xml: respCons.data, xmlRetorno: respCons.data
+        });
+        return;
+      }
+      if (cStatCons !== '100' && cStatCons !== '150') {
+        sendJson(res, 422, {
+          ok: false, statusHttp: 422, codigo: 'NFE_NAO_AUTORIZADA', tipoResposta: 'rejeicao_fiscal',
+          cStat: cStatCons || 'CONSULTA_SEM_RETORNO', xMotivo: dadosCons.xMotivo || 'Consulta da NF-e sem retorno da SEFAZ',
+          mensagem: `A SEFAZ não confirmou esta NF-e como autorizada (HTTP ${respCons.status}, cStat ${cStatCons || '-'}: ${dadosCons.xMotivo || 'sem retorno'}). O cancelamento não foi enviado.`,
+          tpAmb, servico, chaveAcesso: canc.chave, xml: respCons.data, xmlRetorno: respCons.data
+        });
+        return;
+      }
+      if (/^\d{15}$/.test(String(dadosCons.nProt || '')) && dadosCons.nProt !== canc.nProt) {
+        console.warn(`[SEFAZ Evento v5] Protocolo da tela (${canc.nProt || '-'}) difere do oficial da SEFAZ (${dadosCons.nProt}). Usando o oficial.`);
+        canc.nProt = String(dadosCons.nProt);
+      }
+      // Remonta o evento com o protocolo confirmado (lança erro claro se ainda faltar).
+      envelopeParaTransmissao = enveloparXmlSoapSefaz(montarEventoCancelamentoServer(canc, true), 'evento', '1', '1', certificado).envelope;
+    }
+
     const response = await executarRequisicaoSoapNode(endpoint, soapAction, envelopeParaTransmissao, timeoutMs, certificado);
 
     console.log(`[SEFAZ Proxy Vercel] Resposta recebida da SEFAZ: HTTP ${response.status} (${response.data.length} bytes, hasCert: ${response.hasCert}, validacao: ${response.validacaoStatus}).`);
