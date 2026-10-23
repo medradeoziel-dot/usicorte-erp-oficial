@@ -161,6 +161,8 @@ export interface Quote {
   cliente_nome?: string;
   forma_pagamento?: string;
   indPag?: number;
+  informacoes_complementares?: string;
+  infCpl?: string;
   // Exclusão Lógica (Soft Delete)
   deletado_em?: string | null;
 }

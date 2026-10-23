@@ -1374,21 +1374,29 @@ export default function DanfeEspelhoA4({
                 <span className="block text-[6.5px] font-bold uppercase text-gray-600 mb-0.5">
                   INFORMAÇÕES COMPLEMENTARES
                 </span>
-                <p className="font-bold text-black uppercase">
-                  DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL. {creditoIcms.textoCredito}
-                </p>
-                <p className="text-gray-800 mt-0.5">
-                  Valor aproximado dos tributos: R$ {ibptFed.toFixed(2).replace('.', ',')} Federal (8,50%), R$ {ibptEst.toFixed(2).replace('.', ',')} Estadual (4,95%) e R$ 0,00 Municipal. Fonte: IBPT.
-                </p>
-                {quote.origemCotacoes && quote.origemCotacoes.length > 1 ? (
-                  <p className="text-gray-900 mt-0.5 font-bold">
-                    Ref. Cotações: <span className="font-semibold text-black">{quote.origemCotacoes.join(', ')}</span>.
-                    {quote.observations && !quote.observations.includes('Ref. Cotações') ? ` Observações: ${quote.observations}.` : ''}
-                  </p>
+                {(quote.informacoes_complementares || (quote as any).infCpl) ? (
+                  <div className="text-[7px] text-gray-900 leading-tight whitespace-pre-wrap font-sans">
+                    {quote.informacoes_complementares || (quote as any).infCpl}
+                  </div>
                 ) : (
-                  <p className="text-gray-800 mt-0.5 truncate">
-                    Pedido de Venda / Cotação UsiCorte Ref: Nº {quote.quoteNumber || 'COT-1'}. {quote.observations ? `Observações: ${quote.observations}.` : ''}
-                  </p>
+                  <>
+                    <p className="font-bold text-black uppercase">
+                      DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL. {creditoIcms.textoCredito}
+                    </p>
+                    <p className="text-gray-800 mt-0.5">
+                      Valor aproximado dos tributos: R$ {ibptFed.toFixed(2).replace('.', ',')} Federal (8,50%), R$ {ibptEst.toFixed(2).replace('.', ',')} Estadual (4,95%) e R$ 0,00 Municipal. Fonte: IBPT.
+                    </p>
+                    {quote.origemCotacoes && quote.origemCotacoes.length > 1 ? (
+                      <p className="text-gray-900 mt-0.5 font-bold">
+                        Ref. Cotações: <span className="font-semibold text-black">{quote.origemCotacoes.join(', ')}</span>.
+                        {quote.observations && !quote.observations.includes('Ref. Cotações') ? ` Observações: ${quote.observations}.` : ''}
+                      </p>
+                    ) : (
+                      <p className="text-gray-800 mt-0.5 truncate">
+                        Pedido de Venda / Cotação UsiCorte Ref: Nº {quote.quoteNumber || 'COT-1'}. {quote.observations ? `Observações: ${quote.observations}.` : ''}
+                      </p>
+                    )}
+                  </>
                 )}
               </div>
               

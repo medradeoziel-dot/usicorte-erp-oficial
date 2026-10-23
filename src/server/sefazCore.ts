@@ -1363,6 +1363,8 @@ export function montarXmlNfeServer(dados: {
   valorTotal?: number;
   numeroNfe?: string;
   serie?: string;
+  infCpl?: string;
+  informacoesComplementares?: string;
 }): string {
   const chave = dados.chaveAcesso.replace(/\D/g, '').padEnd(44, '0').slice(0, 44);
   const tpAmb = dados.tpAmb || 1;
@@ -1469,6 +1471,12 @@ export function montarXmlNfeServer(dados: {
         </ICMS>
         <PIS><PISNT><CST>07</CST></PISNT></PIS>
         <COFINS><COFINSNT><CST>07</CST></COFINSNT></COFINS>
+        <IBSCBS>
+          <vBCIBS>0.00</vBCIBS>
+          <vIBS>0.00</vIBS>
+          <vBCCBS>0.00</vBCCBS>
+          <vCBS>0.00</vCBS>
+        </IBSCBS>
       </imposto>
     </det>`;
   }).join('');
@@ -1569,7 +1577,7 @@ export function montarXmlNfeServer(dados: {
       </detPag>
     </pag>
     <infAdic>
-      <infCpl>${sanitizarTextoServer(`DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL. REF PEDIDO USICORTE.`, 5000)}</infCpl>
+      <infCpl>${sanitizarTextoServer(dados.infCpl || dados.informacoesComplementares || `DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL. REF PEDIDO USICORTE.`, 5000)}</infCpl>
     </infAdic>
   </infNFe>
 </NFe>`;
@@ -1794,7 +1802,8 @@ export function extrairDadosRequisicaoSefaz(req: any): {
         itens: body?.itens || body?.items,
         valorTotal: body?.valorTotal || body?.valor_total || body?.grandTotal,
         numeroNfe: body?.numeroNfe || body?.numero_nfe,
-        serie: body?.serie || body?.serie_nfe
+        serie: body?.serie || body?.serie_nfe,
+        infCpl: body?.infCpl || body?.informacoesComplementares || body?.informacoes_complementares || body?.cotacao?.informacoes_complementares || body?.cotacao?.infCpl
       });
     }
   }

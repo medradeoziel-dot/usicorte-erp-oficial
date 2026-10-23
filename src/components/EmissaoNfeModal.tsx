@@ -151,6 +151,12 @@ export default function EmissaoNfeModal({
   const [emailFeedback, setEmailFeedback] = useState<string | null>(null);
   const [isDownloadingXml, setIsDownloadingXml] = useState<boolean>(false);
   const [currentQuoteState, setCurrentQuoteState] = useState<Quote>(quote);
+  const [informacoesComplementares, setInformacoesComplementares] = useState<string>(
+    quote.informacoes_complementares || (quote as any).infCpl || ''
+  );
+  const [foiEditadoManualmente, setFoiEditadoManualmente] = useState<boolean>(
+    !!(quote.informacoes_complementares || (quote as any).infCpl)
+  );
   const [showCancelarModal, setShowCancelarModal] = useState<boolean>(false);
   const [showDanfeOficialModal, setShowDanfeOficialModal] = useState<boolean>(false);
   const [autoPrintDanfe, setAutoPrintDanfe] = useState<boolean>(false);
@@ -319,7 +325,12 @@ export default function EmissaoNfeModal({
   const handleOpenPreDanfeNewTab = async () => {
     setOpeningNewTab(true);
     try {
-      await abrirPreDanfeEmNovaAba(currentQuoteState, client);
+      const quoteParaPrevia: Quote = {
+        ...currentQuoteState,
+        informacoes_complementares: informacoesComplementares,
+        infCpl: informacoesComplementares
+      };
+      await abrirPreDanfeEmNovaAba(quoteParaPrevia, client);
     } finally {
       setOpeningNewTab(false);
     }
@@ -465,12 +476,56 @@ export default function EmissaoNfeModal({
     return primeiro || '101';
   }, [itensFiscais]);
 
+  // Geração automática dos textos padrões para Informações Complementares da NF-e (infCpl)
+  const textoPadraoInfCpl = useMemo(() => {
+    const linhas: string[] = [];
+    linhas.push(`DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL. ${creditoIcms.textoCredito}`.trim());
+    linhas.push(`Trib aprox: R$ ${(valorTotal * 0.085).toFixed(2).replace('.', ',')} Fed (8,50%), R$ ${(valorTotal * 0.0495).toFixed(2).replace('.', ',')} Est (4,95%) e R$ 0,00 Mun - Fonte: IBPT.`);
+    if (currentQuoteState.origemCotacoes && currentQuoteState.origemCotacoes.length > 1) {
+      linhas.push(`Ref. Cotações: ${currentQuoteState.origemCotacoes.join(', ')}`);
+    } else if (currentQuoteState.quoteNumber) {
+      linhas.push(`Pedido de Venda / Cotação UsiCorte Ref: Nº ${currentQuoteState.quoteNumber}.`);
+    }
+    if (currentQuoteState.observations && !currentQuoteState.observations.includes('Ref. Cotações')) {
+      linhas.push(`Observações adicionais: ${currentQuoteState.observations}`);
+    }
+    return linhas.join('\n');
+  }, [creditoIcms.textoCredito, valorTotal, currentQuoteState.origemCotacoes, currentQuoteState.quoteNumber, currentQuoteState.observations]);
+
+  useEffect(() => {
+    const salvo = currentQuoteState.informacoes_complementares || (currentQuoteState as any).infCpl;
+    if (salvo) {
+      setInformacoesComplementares(salvo);
+      setFoiEditadoManualmente(true);
+    } else if (!foiEditadoManualmente && textoPadraoInfCpl) {
+      setInformacoesComplementares(textoPadraoInfCpl);
+    }
+  }, [textoPadraoInfCpl, currentQuoteState.informacoes_complementares, foiEditadoManualmente]);
+
+  const handleInformacoesComplementaresChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setFoiEditadoManualmente(true);
+    setInformacoesComplementares(val);
+    setCurrentQuoteState(prev => ({
+      ...prev,
+      informacoes_complementares: val,
+      infCpl: val
+    }));
+  };
+
   // 4. Confirmar & Transmitir SEFAZ com envio direto via proxy
   const handleTransmitirSefaz = async () => {
     setIsTransmitting(true);
     setErrorMessage(null);
     setBloqueioSefazAte(null);
     try { localStorage.removeItem(chaveBloqueioSefaz); } catch {}
+
+    const quoteParaEnvio: Quote = {
+      ...currentQuoteState,
+      informacoes_complementares: informacoesComplementares,
+      infCpl: informacoesComplementares
+    };
+    setCurrentQuoteState(quoteParaEnvio);
 
     // TRAVA DE SEGURANÇA 1: Se o documento já estiver em estado Pendente ou possuir recibo gravado,
     // executa consulta prévia imediata na SEFAZ para evitar duplicidade de nota (Rejeição 204)
@@ -532,7 +587,7 @@ export default function EmissaoNfeModal({
 
     try {
       // 2. Invocação direta do serviço de transmissão à SEFAZ (via nfeService / proxy Vercel)
-      const res = await emitirNFe(currentQuoteState, client);
+      const res = await emitirNFe(quoteParaEnvio, client);
 
       if (registrarBloqueioSeHouver(res)) {
         // Bloqueio 656: a nota NÃO foi recebida; mantém como Pendente para nova tentativa após o prazo
@@ -549,7 +604,7 @@ export default function EmissaoNfeModal({
         // 3. Sucesso: Grava a nfe_chave, nfe_numero, danfe_url, xml_url e muda o status para "Emitida"
         setTransmissionResult(res);
         const updatedQuote: Quote = {
-          ...currentQuoteState,
+          ...quoteParaEnvio,
           status_nfe: 'Emitida',
           nfe_chave: res.nfeChave,
           chave_acesso: res.nfeChave,
@@ -597,7 +652,7 @@ export default function EmissaoNfeModal({
         const msgPendente = getMotivoText(res.xMotivo) || getMotivoText(res.mensagemErro) || 'Lote recebido e em processamento na SEFAZ. O recibo foi salvo para consulta posterior.';
         setErrorMessage(msgPendente);
         const pendenteQuote: Quote = {
-          ...currentQuoteState,
+          ...quoteParaEnvio,
           status_nfe: 'Pendente',
           nfe_chave: res.chaveAcesso || res.nfeChave || currentQuoteState.nfe_chave,
           chave_acesso: res.chaveAcesso || res.nfeChave || currentQuoteState.nfe_chave,
@@ -1248,39 +1303,63 @@ export default function EmissaoNfeModal({
           </div>
 
           {/* 4. Dados Adicionais e Informações Complementares da NF-e (infAdic / infCpl) */}
-          <div className="p-3.5 rounded-xl bg-slate-800/60 border border-slate-700/70 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="font-bold text-slate-200 flex items-center gap-1.5 text-xs">
-                <Info className="w-4 h-4 text-blue-400" />
-                Informações Complementares / Observações da NF-e (infAdic / infCpl)
-              </span>
-              {currentQuoteState.origemCotacoes && currentQuoteState.origemCotacoes.length > 1 && (
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40">
-                  Agrupamento de {currentQuoteState.origemCotacoes.length} Cotações
+          <div className="p-3.5 rounded-xl bg-slate-800/60 border border-slate-700/70 space-y-2.5">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-slate-200 flex items-center gap-1.5 text-xs">
+                  <FileText className="w-4 h-4 text-blue-400" />
+                  Informações Complementares / Observações da NF-e (infAdic / infCpl)
                 </span>
-              )}
+                <span className="text-[10px] font-semibold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/30">
+                  Campo Editável
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                {currentQuoteState.origemCotacoes && currentQuoteState.origemCotacoes.length > 1 && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                    Agrupamento de {currentQuoteState.origemCotacoes.length} Cotações
+                  </span>
+                )}
+                {foiEditadoManualmente && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setInformacoesComplementares(textoPadraoInfCpl);
+                      setFoiEditadoManualmente(false);
+                      setCurrentQuoteState(prev => ({
+                        ...prev,
+                        informacoes_complementares: textoPadraoInfCpl,
+                        infCpl: textoPadraoInfCpl
+                      }));
+                    }}
+                    className="text-[11px] text-blue-400 hover:text-blue-300 flex items-center gap-1 font-medium transition-colors cursor-pointer"
+                    title="Restaurar textos padrões originais (Simples Nacional, IBPT, cotações)"
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                    Restaurar Padrão
+                  </button>
+                )}
+              </div>
             </div>
-            <div className="p-3 rounded-lg bg-slate-950/70 border border-slate-800 text-[11px] leading-relaxed space-y-1 font-mono">
-              <p className="text-slate-300 font-sans">
-                • <strong className="text-slate-100 font-semibold">DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL.</strong> {creditoIcms.textoCredito}
-              </p>
-              <p className="text-slate-400">
-                • Trib aprox: R$ {(valorTotal * 0.085).toFixed(2).replace('.', ',')} Fed (8,50%), R$ {(valorTotal * 0.0495).toFixed(2).replace('.', ',')} Est (4,95%) e R$ 0,00 Mun - Fonte: IBPT.
-              </p>
-              {currentQuoteState.origemCotacoes && currentQuoteState.origemCotacoes.length > 1 ? (
-                <p className="text-amber-300 font-bold bg-amber-500/10 px-2 py-1 rounded border border-amber-500/20 font-sans">
-                  • Ref. Cotações: {currentQuoteState.origemCotacoes.join(', ')}
-                </p>
-              ) : (
-                <p className="text-slate-400">
-                  • Pedido de Venda / Cotação UsiCorte Ref: Nº {currentQuoteState.quoteNumber}.
-                </p>
-              )}
-              {currentQuoteState.observations && !currentQuoteState.observations.includes('Ref. Cotações') && (
-                <p className="text-slate-400 italic font-sans text-[10px]">
-                  • Observações adicionais: {currentQuoteState.observations}
-                </p>
-              )}
+
+            <div className="space-y-1.5">
+              <textarea
+                value={informacoesComplementares}
+                onChange={handleInformacoesComplementaresChange}
+                disabled={isTransmitting || isAutorizada}
+                rows={5}
+                maxLength={5000}
+                placeholder="Digite aqui as informações complementares da nota (ex: nº do pedido de compra do cliente, local de entrega, transportadora, etc.)..."
+                className="w-full p-3 rounded-lg bg-slate-950/80 border border-slate-700/80 hover:border-slate-600 focus:border-blue-500 text-slate-200 text-xs font-mono leading-relaxed transition-colors focus:outline-none focus:ring-1 focus:ring-blue-500/40 disabled:opacity-60 disabled:cursor-not-allowed resize-y"
+              />
+              <div className="flex items-center justify-between text-[10px] text-slate-400 px-1">
+                <span>
+                  Todo o conteúdo deste campo será transmitido na tag <code className="text-blue-300 font-mono">&lt;infCpl&gt;</code> e impresso no quadro de <strong className="text-slate-300">Dados Adicionais</strong> do DANFE / PDF.
+                </span>
+                <span className="font-mono text-slate-500 shrink-0 ml-2">
+                  {informacoesComplementares.length} / 5000 caracteres
+                </span>
+              </div>
             </div>
           </div>
 
@@ -1719,17 +1798,25 @@ export default function EmissaoNfeModal({
                 {/* 5. Dados Adicionais / Observações ao Fisco */}
                 <div className="text-[9px] font-bold uppercase mb-0.5 text-gray-700">DADOS ADICIONAIS / INFORMAÇÕES COMPLEMENTARES</div>
                 <div className="border border-black p-2 text-[9px] leading-relaxed bg-gray-50/50">
-                  <p className="font-semibold text-slate-900">
-                    DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL. {creditoIcms.textoCredito}
-                  </p>
-                  <p className="text-gray-600">
-                    Trib aprox: R$ {(valorTotal * 0.085).toFixed(2).replace('.', ',')} Fed, R$ {(valorTotal * 0.0495).toFixed(2).replace('.', ',')} Est e R$ 0,00 Mun - Fonte: IBPT.{' '}
-                    {currentQuoteState.origemCotacoes && currentQuoteState.origemCotacoes.length > 1 ? (
-                      <strong className="text-slate-900">Ref. Cotações: {currentQuoteState.origemCotacoes.join(', ')}.</strong>
-                    ) : (
-                      <>Cotação de Venda Ref: Nº {currentQuoteState.quoteNumber}.</>
-                    )}
-                  </p>
+                  {informacoesComplementares ? (
+                    <div className="font-medium text-slate-900 whitespace-pre-wrap font-sans text-[9px] leading-normal">
+                      {informacoesComplementares}
+                    </div>
+                  ) : (
+                    <>
+                      <p className="font-semibold text-slate-900">
+                        DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL. {creditoIcms.textoCredito}
+                      </p>
+                      <p className="text-gray-600">
+                        Trib aprox: R$ {(valorTotal * 0.085).toFixed(2).replace('.', ',')} Fed, R$ {(valorTotal * 0.0495).toFixed(2).replace('.', ',')} Est e R$ 0,00 Mun - Fonte: IBPT.{' '}
+                        {currentQuoteState.origemCotacoes && currentQuoteState.origemCotacoes.length > 1 ? (
+                          <strong className="text-slate-900">Ref. Cotações: {currentQuoteState.origemCotacoes.join(', ')}.</strong>
+                        ) : (
+                          <>Cotação de Venda Ref: Nº {currentQuoteState.quoteNumber}.</>
+                        )}
+                      </p>
+                    </>
+                  )}
                   <p className="text-red-700 font-bold mt-1">
                     ATENÇÃO: MODO DE CONFERÊNCIA. ESTE DOCUMENTO É UMA PRÉVIA E NÃO POSSUI VALIDADE JURÍDICA OU FISCAL.
                   </p>

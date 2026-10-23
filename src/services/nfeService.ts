@@ -2844,7 +2844,8 @@ export function gerarXmlNfe(
   dataEmissao: Date,
   protocolo?: string,
   observacoesAdicionais?: string,
-  ambiente: '1' = '1'
+  ambiente: '1' = '1',
+  informacoesComplementares?: string
 ): string {
   // 1. Garante que a chave possua estritamente 44 dígitos com cDV perfeitamente recalculado pelo Módulo 11 da SEFAZ
   const chaveValida = recalcularChaveAcessoComDvCorreto(chaveAcesso);
@@ -3048,7 +3049,13 @@ export function gerarXmlNfe(
       </detPag>
     </pag>
     <infAdic>
-      <infCpl>${sanitizarTextoXml(`DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL. ${creditoInfo.textoCredito} ${observacoesAdicionais ? `${observacoesAdicionais}. ` : ''}REF. ORCAMENTO/PEDIDO USICORTE.`, 5000)}</infCpl>
+      <infCpl>${sanitizarTextoXml(
+        informacoesComplementares ||
+        (observacoesAdicionais && observacoesAdicionais.includes('DOCUMENTO EMITIDO POR ME OU EPP')
+          ? observacoesAdicionais
+          : `DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL. ${creditoInfo.textoCredito} ${observacoesAdicionais ? `${observacoesAdicionais}. ` : ''}REF. ORCAMENTO/PEDIDO USICORTE.`),
+        5000
+      )}</infCpl>
     </infAdic>
   </infNFe>
 </NFe>`;
@@ -3426,6 +3433,8 @@ export async function transmitirNfeSefaz(
     ? `Ref. Cotações: ${quote.origemCotacoes.join(', ')}`
     : (quote.quoteNumber ? `Ref. Cotação: ${quote.quoteNumber}` : '');
 
+  const customInfCpl = quote.informacoes_complementares || (quote as any).infCpl;
+
   let xmlConteudo = gerarXmlNfe(
     emitente,
     destinatario,
@@ -3436,8 +3445,9 @@ export async function transmitirNfeSefaz(
     valorTotal,
     dataEmissao,
     undefined, // Protocolo: somente após autorização real da SEFAZ (nunca antes da transmissão)
-    refOrigemXml,
-    '1' // Produção oficial SEFAZ (tpAmb = 1)
+    customInfCpl || refOrigemXml,
+    '1', // Produção oficial SEFAZ (tpAmb = 1)
+    customInfCpl
   );
 
   // 6.1 VALIDAÇÃO AUTOMÁTICA PRÉ-TRANSMISSÃO DA NF-E (SCHEMA 4.00, BEM-FORMAÇÃO, CONTROLE, EDIÇÃO)
@@ -4087,8 +4097,9 @@ export async function transmitirNfeSefaz(
       valorTotal,
       dataEmissao,
       protocolo,
-      refOrigemXml,
-      '1'
+      customInfCpl || refOrigemXml,
+      '1',
+      customInfCpl
     );
   }
 
@@ -4114,7 +4125,12 @@ export async function transmitirNfeSefaz(
     refDanfeTexto,
     undefined,
     false,
-    xmlConteudo
+    xmlConteudo,
+    false,
+    undefined,
+    undefined,
+    false,
+    customInfCpl
   );
   const danfeBlob = new Blob([danfeHtml], { type: 'text/html' });
   const danfeUrl = URL.createObjectURL(danfeBlob);
@@ -4587,8 +4603,22 @@ export function gerarDanfeHtml(
   isCancelada: boolean = false,
   protocoloCancelamento?: string,
   motivoCancelamento?: string,
-  autoPrint: boolean = false
+  autoPrint: boolean = false,
+  informacoesComplementares?: string
 ): string {
+  let textoInfCplFinal = informacoesComplementares;
+  if (!textoInfCplFinal && xmlConteudo) {
+    const matchCpl = xmlConteudo.match(/<infCpl>([\s\S]*?)<\/infCpl>/i);
+    if (matchCpl && matchCpl[1]) {
+      textoInfCplFinal = matchCpl[1]
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&apos;/g, '\'');
+    }
+  }
+
   const chaveFormatada = isPrevia ? 'CHAVE SERÁ GERADA APÓS TRANSMISSÃO SEFAZ' : formatarChaveAcesso(chaveAcesso);
   const totalProdutos = itens.reduce((acc, it) => acc + it.subtotal, 0);
   const valorIbptAprox = totalProdutos * 0.1345;
@@ -5089,13 +5119,16 @@ export function gerarDanfeHtml(
           <tr>
             <td style="width: 70%; padding: 4px; border-right: 1px solid #000; vertical-align: top;">
               <div class="title">INFORMAÇÕES COMPLEMENTARES</div>
-              <div style="font-size: 7.5px; line-height: 1.3;">
-                <strong>DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL. ${creditoInfo.textoCredito}</strong><br>
+              <div style="font-size: 7.5px; line-height: 1.35; white-space: pre-wrap; font-family: inherit;">
+                ${textoInfCplFinal 
+                  ? `${escapeXml(textoInfCplFinal).replace(/\n/g, '<br/>')}${isPrevia && !textoInfCplFinal.includes('MODO DE CONFERÊNCIA') ? '<br/><strong style="color: #b91c1c;">⚠️ ATENÇÃO: MODO DE CONFERÊNCIA. ESTE DOCUMENTO É UMA PRÉVIA E NÃO POSSUI VALIDADE JURÍDICA OU FISCAL.</strong>' : ''}`
+                  : `<strong>DOCUMENTO EMITIDO POR ME OU EPP OPTANTE PELO SIMPLES NACIONAL. ${creditoInfo.textoCredito}</strong><br>
                 Valor aprox. tributos: R$ ${ibptFed.toFixed(2).replace('.', ',')} Federal (8,50%), R$ ${ibptEst.toFixed(2).replace('.', ',')} Estadual (4,95%) e R$ 0,00 Municipal. Fonte: IBPT.<br>
                 ${numeroCotacaoRef && (numeroCotacaoRef.includes('Ref. Cotações') || numeroCotacaoRef.includes(','))
                   ? (numeroCotacaoRef.startsWith('Ref. Cotações:') ? `<strong>${numeroCotacaoRef}.</strong>` : `<strong>Ref. Cotações: ${numeroCotacaoRef}.</strong>`)
                   : `Pedido de Venda / Cotação UsiCorte Ref: Nº ${numeroCotacaoRef || 'COT-1'}.`}<br>
-                ${isPrevia ? '<strong style="color: #b91c1c;">⚠️ ATENÇÃO: MODO DE CONFERÊNCIA. ESTE DOCUMENTO É UMA PRÉVIA E NÃO POSSUI VALIDADE JURÍDICA OU FISCAL.</strong>' : ''}
+                ${isPrevia ? '<strong style="color: #b91c1c;">⚠️ ATENÇÃO: MODO DE CONFERÊNCIA. ESTE DOCUMENTO É UMA PRÉVIA E NÃO POSSUI VALIDADE JURÍDICA OU FISCAL.</strong>' : ''}`
+                }
               </div>
             </td>
             <td style="width: 30%; padding: 4px; vertical-align: top; background: #fafafa;">
@@ -5254,7 +5287,8 @@ export async function abrirDanfeEmNovaAba(
       isCancelada,
       quote.protocolo_cancelamento,
       quote.motivo_cancelamento,
-      autoPrint
+      autoPrint,
+      quote.informacoes_complementares || (quote as any).infCpl
     );
 
     const blob = new Blob([danfeHtml], { type: 'text/html' });
@@ -5334,7 +5368,13 @@ export async function gerarPreDanfeHtml(
     true, // isPrevia = true
     refDanfeTexto,
     dupsFinal,
-    isAVistaFinal
+    isAVistaFinal,
+    undefined,
+    false,
+    undefined,
+    undefined,
+    false,
+    quote.informacoes_complementares || (quote as any).infCpl
   );
 }
 
