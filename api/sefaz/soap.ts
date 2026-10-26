@@ -645,9 +645,13 @@ function lerXmlAssinatura(xml: string) {
 }
 
 function alvosAssinatura(doc: ReturnType<typeof lerXmlAssinatura>) {
-  return Array.from(doc.getElementsByTagNameNS(NS_NFE, '*')).filter(
-    el => el.localName === 'infNFe' || el.localName === 'infEvento'
-  );
+  // Só assina o que o emitente envia: <NFe><infNFe> e <evento><infEvento>.
+  // Blocos de resposta da SEFAZ (retEvento, protNFe) nunca são assinados.
+  return Array.from(doc.getElementsByTagNameNS(NS_NFE, '*')).filter(el => {
+    const pai = el.parentNode as XmlElement | null;
+    const nomePai = pai && pai.nodeType === 1 ? pai.localName : '';
+    return (el.localName === 'infNFe' && nomePai === 'NFe') || (el.localName === 'infEvento' && nomePai === 'evento');
+  });
 }
 
 /** Confere digest e RSA no documento exato que será enviado, sem chamar a SEFAZ. */
@@ -712,7 +716,7 @@ export function assinarXmlSefazServer(xmlString: string, certOverride?: any): st
     if (!id || !/^[A-Za-z_][A-Za-z0-9_.-]*$/.test(id) || !pai || pai.nodeType !== 1) {
       const idVisivel = JSON.stringify(String(id ?? '(sem Id)').slice(0, 80));
       const paiVisivel = pai && pai.nodeType === 1 ? (pai as XmlElement).localName : '(nenhum)';
-      throw new Error(`[v5] Bloco <${alvo.localName}> com Id inválido ${idVisivel} (pai: ${paiVisivel}).`);
+      throw new Error(`[v6] Bloco <${alvo.localName}> com Id inválido ${idVisivel} (pai: ${paiVisivel}).`);
     }
     // Não reutiliza a assinatura antiga enviada pelo navegador.
     for (const node of Array.from(pai.childNodes)) {
@@ -1603,6 +1607,28 @@ export function extrairDadosRequisicaoSefaz(req: any): {
 
   if (!servico) servico = 'autorizacao';
 
+  // A tela pode mandar nomes diferentes ("cancelamento", "RecepcaoEvento"...).
+  // Normaliza para os nomes usados na tabela de endereços oficiais.
+  {
+    const s = String(servico).toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (/cancel|evento|110111/.test(s)) servico = 'evento';
+    else if (/retautoriza|recibo/.test(s)) servico = 'retAutorizacao';
+    else if (/consulta|protocolo|situacao/.test(s)) servico = 'consultaProtocolo';
+    else if (/status/.test(s)) servico = 'statusServico';
+    else if (/inutiliza/.test(s)) servico = 'inutilizacao';
+    else if (/autoriza|emitir|emissao|transmit|enviar/.test(s)) servico = 'autorizacao';
+  }
+  {
+    // Sinais de cancelamento em qualquer campo: força o serviço de eventos.
+    const t = String(xmlCandidate || '').replace(/[\s\u00A0]/g, '');
+    const temNfe = /<(?:\w+:)?infNFe\b/.test(t);
+    if (/cancel/.test(acaoRaw) || body?.justificativa || body?.xJust ||
+        (!temNfe && /110111|<(?:\w+:)?xJust>|<(?:\w+:)?(?:envEvento|procEventoNFe|retEvento)\b/.test(t))) {
+      servico = 'evento';
+    }
+  }
+  console.log(`[SEFAZ Evento v6] Pedido recebido: servico=${JSON.stringify(body?.servico || body?.service || '')} acao=${JSON.stringify(acaoRaw)} -> ${servico}; campos=${Object.keys(body || {}).join(',')}`);
+
   let xmlFinal = (typeof xmlCandidate === 'string' && xmlCandidate.trim()) ? xmlCandidate.trim() : '';
 
   if (!xmlFinal) {
@@ -1666,7 +1692,7 @@ export function extrairDadosRequisicaoSefaz(req: any): {
     // O protocolo é conferido na SEFAZ antes do envio (ver handler).
     xmlFinal = montarEventoCancelamentoServer(cancelamento, false);
     endpoint = WEBSERVICES_SEFAZ_SP[tpAmb].evento;
-    console.log(`[SEFAZ Evento v5] Cancelamento montado no servidor: chave=${cancelamento.chave}, protocolo=${cancelamento.nProt}, seq=${cancelamento.nSeq}, tpAmb=${tpAmb}.`);
+    console.log(`[SEFAZ Evento v6] Cancelamento montado no servidor: chave=${cancelamento.chave}, protocolo=${cancelamento.nProt}, seq=${cancelamento.nSeq}, tpAmb=${tpAmb}.`);
   }
 
   let soapEnvelope = cancelamento ? undefined : (body?.soapEnvelope || body?.soap_envelope);
@@ -1939,7 +1965,7 @@ export default async function handler(req: any, res: any): Promise<void> {
       const respCons = await executarRequisicaoSoapNode(WEBSERVICES_SEFAZ_SP[tpAmb].consultaProtocolo, cons.action, cons.envelope, timeoutMs, certificado);
       const dadosCons: any = extrairDadosRetornoSefazXmlServer(respCons.data);
       const cStatCons = String(dadosCons.cStatLote || dadosCons.cStat || '');
-      console.log(`[SEFAZ Evento v5] Consulta antes do cancelamento: HTTP ${respCons.status}, cStat ${cStatCons} (${dadosCons.xMotivo || ''}), protocolo SEFAZ ${dadosCons.nProt || '-'}.`);
+      console.log(`[SEFAZ Evento v6] Consulta antes do cancelamento: HTTP ${respCons.status}, cStat ${cStatCons} (${dadosCons.xMotivo || ''}), protocolo SEFAZ ${dadosCons.nProt || '-'}.`);
 
       if (dadosCons.isConsumoIndevido) {
         sendJson(res, 429, {
@@ -1969,7 +1995,7 @@ export default async function handler(req: any, res: any): Promise<void> {
         return;
       }
       if (/^\d{15}$/.test(String(dadosCons.nProt || '')) && dadosCons.nProt !== canc.nProt) {
-        console.warn(`[SEFAZ Evento v5] Protocolo da tela (${canc.nProt || '-'}) difere do oficial da SEFAZ (${dadosCons.nProt}). Usando o oficial.`);
+        console.warn(`[SEFAZ Evento v6] Protocolo da tela (${canc.nProt || '-'}) difere do oficial da SEFAZ (${dadosCons.nProt}). Usando o oficial.`);
         canc.nProt = String(dadosCons.nProt);
       }
       // Remonta o evento com o protocolo confirmado (lança erro claro se ainda faltar).
