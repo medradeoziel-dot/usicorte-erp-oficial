@@ -1186,6 +1186,7 @@ export async function carregarExtratoCotacoes(
     let query: any = db
       .from('cotacoes')
       .select('*, cotacao_itens(*)')
+      .not('status', 'ilike', 'rejeitado')
       .order('created_at', { ascending: false })
       .range(0, 9999); // Remove limite rígido de paginação padrão para pesquisar na tabela inteira
 
@@ -1259,6 +1260,7 @@ export async function carregarExtratoCotacoes(
       let fallbackQuery: any = db
         .from('cotacoes')
         .select('*')
+        .not('status', 'ilike', 'rejeitado')
         .order('created_at', { ascending: false })
         .range(0, 9999);
 
@@ -1274,9 +1276,17 @@ export async function carregarExtratoCotacoes(
         console.error('Erro ao carregar extrato de cotações:', fallbackError);
         return [];
       }
-      return (fallbackData || []) as SupabaseCotacao[];
+      const filteredFallback = ((fallbackData || []) as SupabaseCotacao[]).filter(q => {
+        const s = String(q.status || '').trim().toLowerCase();
+        return s !== 'rejeitado';
+      });
+      return filteredFallback;
     }
-    return (data || []) as SupabaseCotacao[];
+    const filteredData = ((data || []) as SupabaseCotacao[]).filter(q => {
+      const s = String(q.status || '').trim().toLowerCase();
+      return s !== 'rejeitado';
+    });
+    return filteredData;
   } catch (err) {
     console.error('Erro ao carregar extrato de cotações:', err);
     return [];

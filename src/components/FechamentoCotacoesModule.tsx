@@ -7,7 +7,9 @@ import {
   atualizarStatusPagamentoCotacaoDb,
   updateCotacaoNfeStatusDb,
   sincronizarPagamentoContaReceberDb,
-  fetchItensByCotacaoId
+  fetchItensByCotacaoId,
+  isUuid,
+  supabase
 } from '../lib/db';
 import { formatCurrency, formatSafeDate, formatarMedidasLimpa } from '../utils/calculator';
 import { 
@@ -49,7 +51,8 @@ import {
   Sparkles,
   ChevronDown,
   CreditCard,
-  Wallet
+  Wallet,
+  Trash2
 } from 'lucide-react';
 
 interface FechamentoCotacoesModuleProps {
@@ -154,6 +157,9 @@ export default function FechamentoCotacoesModule({
       const dbQuotes = await carregarExtratoCotacoes(filtroClienteId, termoBuscaNumero);
       if (dbQuotes && dbQuotes.length > 0) {
         dbQuotes.forEach(q => {
+          const statusLower = String(q.status || '').trim().toLowerCase();
+          if (statusLower === 'rejeitado') return;
+
           const numKey = (q.numero || q.id || '').trim().toLowerCase();
           if (!numKey || seenKeys.has(numKey)) return;
           seenKeys.add(numKey);
@@ -313,6 +319,9 @@ export default function FechamentoCotacoesModule({
         const localQuotes: Quote[] = JSON.parse(saved);
         if (Array.isArray(localQuotes)) {
           localQuotes.forEach(lq => {
+            const localStatusLower = String(lq.status || '').trim().toLowerCase();
+            if (localStatusLower === 'rejeitado') return;
+
             const numKey = (lq.quoteNumber || lq.id || '').trim().toLowerCase();
             if (!numKey || seenKeys.has(numKey)) return;
             seenKeys.add(numKey);
@@ -926,6 +935,51 @@ export default function FechamentoCotacoesModule({
     }
 
     await loadQuotesData();
+  };
+
+  const fetchCotacoes = () => {
+    loadQuotesData(filtroCliente, buscaNumero);
+  };
+
+  const handleExcluirCotacao = async (id: string) => {
+    if (!confirm('Deseja realmente remover esta cotação da listagem?')) return;
+
+    let query = supabase
+      .from('cotacoes')
+      .update({ status: 'REJEITADO' });
+
+    if (isUuid(id)) {
+      query = query.eq('id', id);
+    } else {
+      query = query.eq('numero', id);
+    }
+
+    const { error } = await query;
+
+    if (error) {
+      alert('Erro ao ocultar cotação: ' + error.message);
+    } else {
+      // Atualiza também no localStorage caso exista cópia local
+      try {
+        const saved = localStorage.getItem('s_orcamentos');
+        if (saved) {
+          const localList: Quote[] = JSON.parse(saved);
+          const updated = localList.map(item => {
+            if (item.id === id || item.quoteNumber === id) {
+              return { ...item, status: 'REJEITADO' };
+            }
+            return item;
+          });
+          localStorage.setItem('s_orcamentos', JSON.stringify(updated));
+        }
+      } catch {}
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('cotacao_status_alterado'));
+        window.dispatchEvent(new CustomEvent('cotacoes_atualizadas'));
+      }
+      fetchCotacoes(); // Recarrega a listagem
+    }
   };
 
   // Ação: Abrir Fluxo / Modal de Emissão de NF-e para Cotações Selecionadas ou Individual
@@ -1648,7 +1702,7 @@ export default function FechamentoCotacoesModule({
                   <th className="p-3 text-right w-28">Valor (R$)</th>
                   <th className="p-3 text-center w-24">Status Cotação</th>
                   <th className="p-3 text-center w-32">Status Pagamento</th>
-                  <th className="p-3 text-center w-28">Ações</th>
+                  <th className="p-3 text-center w-36">Ações</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60">
@@ -1794,6 +1848,15 @@ export default function FechamentoCotacoesModule({
                               <DollarSign className="w-3.5 h-3.5" />
                             </button>
                           )}
+
+                          {/* Botão de Exclusão (Soft Delete) */}
+                          <button
+                            onClick={() => handleExcluirCotacao(q.id || q.numero)}
+                            className="p-1.5 bg-rose-950/40 hover:bg-rose-900/60 text-rose-400 hover:text-rose-300 rounded-lg transition-colors text-[10px] border border-rose-500/20"
+                            title="Remover cotação da listagem"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       </td>
                     </tr>
