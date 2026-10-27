@@ -275,3 +275,30 @@ export async function cancelarOuDescartarRascunho(
     return { success: false, error: e };
   }
 }
+
+/**
+ * 4. LIMPEZA DE RASCUNHOS VAZIOS:
+ * Remove do banco todos os rascunhos sem itens, liberando os números.
+ * Retorna quantos foram removidos.
+ */
+export async function limparRascunhosVaziosDb(): Promise<{ success: boolean; removidos: number; error?: any }> {
+  let removidos = 0;
+  try {
+    const { data: rascunhos, error } = await db
+      .from('cotacoes')
+      .select('id, numero, status')
+      .in('status', ['rascunho', 'RASCUNHO']);
+    if (error) return { success: false, removidos: 0, error };
+
+    for (const r of (rascunhos || []) as any[]) {
+      const { data: itens } = await db.from('cotacao_itens').select('id').eq('cotacao_id', r.id).limit(1);
+      if (itens && itens.length > 0) continue;
+      const { error: delErr } = await db.from('cotacoes').delete().eq('id', r.id);
+      if (!delErr) removidos++;
+    }
+    return { success: true, removidos };
+  } catch (e) {
+    console.warn('[Reserva Cotação] Erro ao limpar rascunhos vazios:', e);
+    return { success: false, removidos, error: e };
+  }
+}
