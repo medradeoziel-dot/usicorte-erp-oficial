@@ -1,9 +1,9 @@
-import { db, isUuid, deleteCotacaoDb, invalidateCotacoesCache } from '../lib/db';
-import { resolveNextUniqueQuoteNumber, updateEmitenteNextSequential, fetchEmitenteNumberingConfig } from './companyService';
+import { db, isUuid, deleteCotacaoDb } from '../lib/db';
+import { resolveNextUniqueQuoteNumber } from './companyService';
 
 export interface CotacaoReservaResultado {
   id: string; // UUID do registro oficial criado no Supabase
-  numero: string; // Número único reservado (ex: COT-2026-000990)
+  numero: string; // Número único reservado (ex: #1051 ou COT-2026-000151)
   data: string;
   status: 'RASCUNHO' | 'rascunho';
   success: boolean;
@@ -11,40 +11,138 @@ export interface CotacaoReservaResultado {
 }
 
 /**
- * 1. OBTENÇÃO DA PRÓXIMA NUMERAÇÃO SEQUENCIAL OFICIAL:
- * Consulta a sequência oficial na tabela 'emitente' e valida contra os números reais
- * já cadastrados na tabela 'cotacoes' para garantir um sequencial estrito (ex: COT-2026-000990).
- * NUNCA embutir timestamps ou ano duplicado dentro do número sequencial.
+ * 1. Chama a função SQL `supabase.rpc('gerar_proximo_numero_cotacao')` para obter o novo número atômico.
+ * Caso a RPC não esteja instalada no Supabase ou retorne erro, utiliza o cálculo seguro consultando o banco diretamente.
  */
-export async function obterProximoNumeroCotacaoAtomics(): Promise<string> {
-  // 1. Consulta prioritária através do resolveNextUniqueQuoteNumber (autoridade oficial)
+async function numeroJaExisteNoBanco(numero: string): Promise<boolean> {
   try {
-    const res = await resolveNextUniqueQuoteNumber();
-    if (res?.quoteNumber) {
-      console.log('[Reserva Cotação] Próxima numeração sequencial calculada com sucesso:', res.quoteNumber);
-      return res.quoteNumber;
-    }
-  } catch (err) {
-    console.warn('[Reserva Cotação] Aviso ao resolver numeração via emitente/cotacoes:', err);
-  }
-
-  // 2. Fallback de contingência local seguro baseado no sequencial emitente (sem timestamp aleatório)
-  try {
-    const config = await fetchEmitenteNumberingConfig();
-    const prefix = config.prefix || 'COT-2026-';
-    const seq = config.nextSequential || 990;
-    return `${prefix}${String(seq).padStart(6, '0')}`;
+    const { data, error } = await db.from('cotacoes').select('id').eq('numero', numero).limit(1);
+    if (error) return false;
+    return Array.isArray(data) && data.length > 0;
   } catch {
-    return `COT-2026-000990`;
+    return false;
   }
 }
 
+async function maiorSequencialDoBanco(prefix: string): Promise<number> {
+  // Busca TODOS os números do prefixo e calcula o maior NUMERICAMENTE
+  // (ordenar texto falha quando há larguras diferentes, ex: "999" > "001184").
+  let maior = 0;
+  try {
+    const pageSize = 1000;
+    for (let from = 0; from < 50000; from += pageSize) {
+      const { data, error } = await db
+        .from('cotacoes')
+        .select('numero')
+        .like('numero', `${prefix}%`)
+        .range(from, from + pageSize - 1);
+      if (error || !data || data.length === 0) break;
+      for (const row of data as any[]) {
+        const m = String(row?.numero || '').match(/(\d+)$/);
+        if (m) maior = Math.max(maior, parseInt(m[1], 10));
+      }
+      if (data.length < pageSize) break;
+    }
+  } catch {}
+  return maior;
+}
+
 /**
- * 2. RESERVA EXPLÍCITA DE COTAÇÃO NO SUPABASE:
- * Chamada EXCLUSIVAMENTE mediante ação do usuário (ao clicar em 'Nova Cotação' ou ao preencher dados):
- * - Obtém o próximo número sequencial oficial
- * - Grava um registro inicial no Supabase com status 'rascunho'
- * - Atualiza o próximo sequencial na tabela emitente (+1) para evitar colisões
+ * Garante que o número sugerido é SEMPRE maior que qualquer número já salvo.
+ * Mesmo que a RPC/emitente esteja com contador atrasado, pula para maior + 1.
+ */
+async function garantirNumeroLivre(numero: string): Promise<string> {
+  const m = numero.match(/^(.*?)(\d+)$/);
+  if (!m) return numero;
+  const prefix = m[1];
+  const largura = Math.max(6, m[2].length);
+  const maiorBanco = await maiorSequencialDoBanco(prefix);
+  let seq = Math.max(parseInt(m[2], 10), maiorBanco + 1);
+  for (let i = 0; i < 50; i++) {
+    const cand = `${prefix}${String(seq).padStart(largura, '0')}`;
+    if (!(await numeroJaExisteNoBanco(cand))) {
+      if (cand !== numero) console.warn(`[Reserva Cotação] ${numero} ocupado/atrasado. Usando ${cand}.`);
+      return cand;
+    }
+    seq++;
+  }
+  return `${prefix}${String(seq).padStart(largura, '0')}`;
+}
+
+export async function obterProximoNumeroCotacaoAtomics(): Promise<string> {
+  const n = await obterProximoNumeroCotacaoBruto();
+  return garantirNumeroLivre(n);
+}
+
+async function obterProximoNumeroCotacaoBruto(): Promise<string> {
+  // 1. Tenta chamar a RPC oficial no Supabase conforme solicitado
+  try {
+    const { data, error } = await db.rpc('gerar_proximo_numero_cotacao');
+    if (!error && data !== null && data !== undefined) {
+      let numStr = '';
+      if (typeof data === 'number') {
+        const ano = new Date().getFullYear();
+        numStr = `COT-${ano}-${String(data).padStart(6, '0')}`;
+      } else if (typeof data === 'string') {
+        const trimmed = data.trim();
+        if (/^\d+$/.test(trimmed)) {
+          const ano = new Date().getFullYear();
+          numStr = `COT-${ano}-${trimmed.padStart(6, '0')}`;
+        } else {
+          numStr = trimmed;
+        }
+      } else if (typeof data === 'object' && data !== null) {
+        const raw = (data as any).numero || 
+                    (data as any).numero_cotacao || 
+                    (data as any).proximo_numero || 
+                    (data as any).proximoNumero || 
+                    Object.values(data)[0] || '';
+        if (typeof raw === 'number') {
+          const ano = new Date().getFullYear();
+          numStr = `COT-${ano}-${String(raw).padStart(6, '0')}`;
+        } else {
+          const trimmed = String(raw).trim();
+          if (/^\d+$/.test(trimmed)) {
+            const ano = new Date().getFullYear();
+            numStr = `COT-${ano}-${trimmed.padStart(6, '0')}`;
+          } else {
+            numStr = trimmed;
+          }
+        }
+      }
+      if (numStr) {
+        console.log('[Reserva Cotação] Número gerado atomicamente via RPC gerar_proximo_numero_cotacao:', numStr);
+        return numStr;
+      }
+    } else if (error) {
+      console.warn('[Reserva Cotação] RPC gerar_proximo_numero_cotacao:', error.message || error);
+    }
+  } catch (err) {
+    console.warn('[Reserva Cotação] Exceção ao chamar RPC gerar_proximo_numero_cotacao:', err);
+  }
+
+  // 2. Fallback resiliente: Cálculo sequencial atômico consultando 'cotacoes' e 'emitente'
+  try {
+    const res = await resolveNextUniqueQuoteNumber();
+    if (res?.quoteNumber) {
+      console.log('[Reserva Cotação] Número sequencial atômico calculado via cotacoes/emitente:', res.quoteNumber);
+      return res.quoteNumber;
+    }
+  } catch (err) {
+    console.warn('[Reserva Cotação] Fallback resolveNextUniqueQuoteNumber falhou:', err);
+  }
+
+  // 3. Fallback de emergência caso offline
+  const ano = new Date().getFullYear();
+  return `COT-${ano}-${String(Date.now()).slice(-6)}`;
+}
+
+/**
+ * 2. RESERVA IMEDIATA NO SUPABASE (RASCUNHO AUTOMÁTICO):
+ * Assim que o usuário clica em "Nova Cotação" ou abre a tela:
+ * - Chama a função SQL atômica `gerar_proximo_numero_cotacao`
+ * - Insere imediatamente um registro inicial no Supabase com status: 'RASCUNHO' gravando o numero_cotacao
+ * - O segundo computador que abrir a tela verá o número já ocupado e pulará para o próximo (+1).
  */
 export async function reservarNovaCotacaoNoSupabase(
   currentUser?: string
@@ -55,7 +153,7 @@ export async function reservarNovaCotacaoNoSupabase(
     const proximoNumero = await obterProximoNumeroCotacaoAtomics();
     const hoje = new Date().toISOString().split('T')[0];
 
-    // Payload de reserva inicial explícita no banco
+    // Payload de reserva inicial imediata no banco
     const payloadBase: Record<string, any> = {
       numero: proximoNumero,
       data: hoje,
@@ -63,7 +161,7 @@ export async function reservarNovaCotacaoNoSupabase(
       status: 'rascunho',
       situacao: 'RASCUNHO',
       valor_total: 0,
-      observacoes: 'Reserva explícita criada pelo operador.',
+      observacoes: 'Reserva automática imediata contra concorrência simultânea.',
       created_by: currentUser || undefined
     };
 
@@ -85,17 +183,9 @@ export async function reservarNovaCotacaoNoSupabase(
           .single();
       }
 
-      // 3. Se foi inserido com sucesso, atualiza o próximo sequencial no emitente e retorna
+      // 3. Se foi inserido com sucesso, retorna os dados da reserva garantida
       if (!res.error && res.data?.id) {
-        console.log(`[Reserva Cotação] SUCESSO: Cotação ${proximoNumero} reservada no Supabase! ID=${res.data.id}`);
-        
-        // Atualiza a tabela emitente com o próximo número
-        const match = proximoNumero.match(/(\d+)$/);
-        if (match) {
-          const currentNum = parseInt(match[1], 10);
-          updateEmitenteNextSequential(currentNum + 1).catch(() => {});
-        }
-
+        console.log(`[Reserva Cotação] SUCESSO: Cotação ${proximoNumero} reservada no Supabase! ID=${res.data.id}, status=${res.data.status}`);
         return {
           id: String(res.data.id),
           numero: String(res.data.numero || proximoNumero),
@@ -105,26 +195,27 @@ export async function reservarNovaCotacaoNoSupabase(
         };
       }
 
-      // 4. Se erro de chave duplicada (concorrência): tenta o próximo
+      // 4. Se erro de chave duplicada (outro computador reservou exatamente no mesmo instante):
       if (res.error && (res.error.code === '23505' || res.error.message?.includes('duplicate key') || res.error.message?.includes('unique'))) {
-        console.warn(`[Reserva Cotação] Número ${proximoNumero} já ocupado no banco. Avançando sequencial...`);
+        console.warn(`[Reserva Cotação] Conflito concorrente detectado no número ${proximoNumero} (tentativa ${tentativa}/${maxTentativas}). Buscando próximo número...`);
         continue;
       }
 
-      console.warn('[Reserva Cotação] Erro retornado ao inserir reserva:', res.error);
+      console.warn('[Reserva Cotação] Supabase retornou erro ao reservar:', res.error);
     } catch (err) {
       console.warn(`[Reserva Cotação] Exceção na tentativa ${tentativa}:`, err);
     }
   }
 
-  // Fallback local caso o banco esteja inacessível
+  // Fallback local se o banco estiver totalmente offline
   const fallbackNum = await obterProximoNumeroCotacaoAtomics();
   const fallbackId = `TEMP-LOCAL-${Date.now()}`;
+  console.warn('[Reserva Cotação] Usando fallback local provisório:', fallbackId);
   return {
     id: fallbackId,
     numero: fallbackNum,
     data: new Date().toISOString().split('T')[0],
-    status: 'rascunho',
+    status: 'RASCUNHO',
     success: false,
     isFallbackLocal: true
   };
@@ -132,7 +223,9 @@ export async function reservarNovaCotacaoNoSupabase(
 
 /**
  * 3. CANCELAMENTO / DESCARTE DE RASCUNHO:
- * Descarta o rascunho com soft delete marcando como 'CANCELADO' / 'rejeitado'
+ * Caso o operador cancele ou feche a tela sem adicionar nenhum item:
+ * - Apaga fisicamente o rascunho vazio do Supabase para NÃO consumir o número de sequência desnecessariamente.
+ * - Caso já contenha itens, aplica soft delete marcando como 'CANCELADO'.
  */
 export async function cancelarOuDescartarRascunho(
   cotacaoId: string,
@@ -141,6 +234,40 @@ export async function cancelarOuDescartarRascunho(
   if (!cotacaoId) return { success: true };
 
   try {
+    // 1. Verifica se a cotação possui itens cadastrados
+    let temItens = false;
+    try {
+      let qItens = db.from('cotacao_itens').select('id');
+      if (isUuid(cotacaoId)) {
+        qItens = qItens.eq('cotacao_id', cotacaoId);
+      } else {
+        const numToMatch = cotacaoNumero || cotacaoId;
+        qItens = qItens.or(`cotacao_id.eq.${cotacaoId},cotacao_id.eq.${numToMatch}`);
+      }
+      const { data: itens } = await qItens;
+      if (itens && itens.length > 0) {
+        temItens = true;
+      }
+    } catch {}
+
+    // 2. Se for um rascunho vazio SEM itens, remove fisicamente do banco para liberar o número
+    if (!temItens) {
+      let delQuery = db.from('cotacoes').delete();
+      if (isUuid(cotacaoId)) {
+        delQuery = delQuery.eq('id', cotacaoId);
+      } else {
+        const numToMatch = cotacaoNumero || cotacaoId;
+        delQuery = delQuery.or(`id.eq.${cotacaoId},numero.eq.${numToMatch}`);
+      }
+      const { error: delErr } = await delQuery;
+
+      if (!delErr) {
+        console.log(`[Reserva Cotação] Rascunho vazio ${cotacaoId} (${cotacaoNumero || ''}) excluído do Supabase. Sequência preservada!`);
+        return { success: true };
+      }
+    }
+
+    // 3. Se possuía itens ou delete direto falhou, aplica soft delete
     const res = await deleteCotacaoDb(cotacaoId);
     return { success: !res.error, error: res.error };
   } catch (e) {
@@ -148,91 +275,3 @@ export async function cancelarOuDescartarRascunho(
     return { success: false, error: e };
   }
 }
-
-/**
- * 4. ROTINA DE LIMPEZA DE RASCUNHOS VAZIOS:
- * Localiza e apaga/inativa todos os rascunhos vazios ("Rascunho em Edição" sem itens)
- * e códigos errôneos (como 202620, 202600), e recalcula o sequencial correto.
- */
-export async function limparRascunhosVaziosDb(): Promise<{
-  success: boolean;
-  purgedCount: number;
-  nextQuoteNumber?: string;
-  error?: any;
-}> {
-  try {
-    // 1. Busca todos os rascunhos vazios acumulados
-    const { data: drafts, error } = await db
-      .from('cotacoes')
-      .select('id, numero, cliente_nome, status, situacao, cotacao_itens(id)')
-      .or("cliente_nome.eq.Rascunho em Edição,cliente_nome.ilike.%Rascunho Machine%,numero.like.%202620%,numero.like.%202600%");
-
-    if (error) {
-      console.warn('Erro ao consultar rascunhos para limpeza:', error);
-      return { success: false, purgedCount: 0, error };
-    }
-
-    if (!drafts || drafts.length === 0) {
-      const nextRes = await resolveNextUniqueQuoteNumber();
-      return { success: true, purgedCount: 0, nextQuoteNumber: nextRes?.quoteNumber };
-    }
-
-    // Filtra apenas registros sem itens ou marcados como Rascunho em Edição
-    const emptyDrafts = drafts.filter((d: any) => {
-      const semItens = !d.cotacao_itens || d.cotacao_itens.length === 0;
-      const isNomeRascunho = d.cliente_nome === 'Rascunho em Edição' || String(d.cliente_nome || '').toLowerCase().includes('rascunho machine');
-      const isNumeroErrado = String(d.numero || '').includes('202620') || String(d.numero || '').includes('202600');
-      return (isNomeRascunho || isNumeroErrado) && semItens;
-    });
-
-    const ids = emptyDrafts.map((d: any) => d.id);
-    const agoraIso = new Date().toISOString();
-
-    let cleanedCount = 0;
-    if (ids.length > 0) {
-      // Aplica exclusão lógica (soft delete) em lotes
-      for (let i = 0; i < ids.length; i += 40) {
-        const chunk = ids.slice(i, i + 40);
-        const { error: updErr, data } = await db
-          .from('cotacoes')
-          .update({
-            deletado_em: agoraIso,
-            status: 'rejeitado',
-            situacao: 'CANCELADO'
-          })
-          .in('id', chunk)
-          .select('id');
-
-        if (!updErr) {
-          cleanedCount += data?.length || chunk.length;
-        }
-      }
-
-      // Tenta também exclusão física direta (se o banco permitir)
-      try {
-        await db.from('cotacoes').delete().in('id', ids.slice(0, 100));
-      } catch {}
-    }
-
-    // 2. Invalida cache de cotações
-    invalidateCotacoesCache();
-
-    // 3. Recalcula o sequencial correto oficial
-    const nextRes = await resolveNextUniqueQuoteNumber();
-    if (nextRes?.sequential) {
-      await updateEmitenteNextSequential(nextRes.sequential);
-    }
-
-    console.log(`[Limpeza de Rascunhos] Limpeza concluída: ${cleanedCount} rascunhos inativados. Próximo sequencial: ${nextRes?.quoteNumber}`);
-
-    return {
-      success: true,
-      purgedCount: cleanedCount,
-      nextQuoteNumber: nextRes?.quoteNumber
-    };
-  } catch (err: any) {
-    console.error('Erro geral na rotina de limpeza de rascunhos:', err);
-    return { success: false, purgedCount: 0, error: err };
-  }
-}
-
