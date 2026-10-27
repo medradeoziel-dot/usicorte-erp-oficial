@@ -56,8 +56,8 @@ async function garantirNumeroLivre(numero: string): Promise<string> {
   if (!m) return numero;
   const prefix = m[1];
   const largura = Math.max(6, m[2].length);
-  const maiorBanco = await maiorSequencialDoBanco(prefix);
-  let seq = Math.max(parseInt(m[2], 10), maiorBanco + 1);
+  // Respeita SEMPRE o número configurado no emitente. Só avança (+1) se o número exato já existir.
+  let seq = parseInt(m[2], 10);
   for (let i = 0; i < 50; i++) {
     const cand = `${prefix}${String(seq).padStart(largura, '0')}`;
     if (!(await numeroJaExisteNoBanco(cand))) {
@@ -133,8 +133,10 @@ async function obterProximoNumeroCotacaoBruto(): Promise<string> {
   }
 
   // 3. Fallback de emergência caso offline
-  const ano = new Date().getFullYear();
-  return `COT-${ano}-${String(Date.now()).slice(-6)}`;
+  // Nunca gerar número a partir do relógio (isso criava números como 021933 e quebrava a sequência)
+  const { getQuoteSequentialConfig } = await import('./companyService');
+  const cfg = getQuoteSequentialConfig();
+  return `${cfg.prefix || 'COT-2026-'}${String(cfg.nextSequential).padStart(6, '0')}`;
 }
 
 /**
