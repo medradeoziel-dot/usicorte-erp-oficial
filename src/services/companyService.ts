@@ -775,6 +775,7 @@ export async function fetchEmitenteNumberingConfig(): Promise<{ nextSequential: 
     const { data, error } = await db
       .from('emitente')
       .select('proximo_numero_sequencial, prefixo_cotacao')
+      .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
 
@@ -912,7 +913,36 @@ export async function resolveNextUniqueQuoteNumber(
  * Assim que um novo orçamento for salvo com sucesso, atualiza o 'proximo_numero_sequencial'
  * na tabela 'emitente' (somando +1) para que a próxima cotação já venha com o número seguinte automático (ex: 141).
  */
-export async function updateEmitenteNextSequential(nextSequential: number): Promise<boolean> {
+let pendingSequentialUpdate: Promise<boolean> | null = null;
+
+/** Aguarda qualquer gravação de contador ainda em andamento (evita ler número antigo logo após salvar). */
+export async function aguardarAtualizacaoSequencial(): Promise<void> {
+  if (pendingSequentialUpdate) {
+    try { await pendingSequentialUpdate; } catch {}
+  }
+}
+
+function gravarSequencialLocal(nextSequential: number) {
+  const local = getLocalCompanyData();
+  local.proximo_numero_sequencial = nextSequential;
+  local.nextQuoteSequential = nextSequential;
+  local.proximo_numero_cotacao = nextSequential;
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(local));
+  } catch {}
+  return local;
+}
+
+export function updateEmitenteNextSequential(nextSequential: number): Promise<boolean> {
+  // Atualiza o cache local NA HORA, antes de ir ao banco
+  gravarSequencialLocal(nextSequential);
+  const p = updateEmitenteNextSequentialDb(nextSequential);
+  pendingSequentialUpdate = p;
+  p.finally(() => { if (pendingSequentialUpdate === p) pendingSequentialUpdate = null; });
+  return p;
+}
+
+async function updateEmitenteNextSequentialDb(nextSequential: number): Promise<boolean> {
   try {
     const { data: existing } = await db
       .from('emitente')
