@@ -1,5 +1,5 @@
 import { db, isUuid, deleteCotacaoDb } from '../lib/db';
-import { resolveNextUniqueQuoteNumber } from './companyService';
+import { resolveNextUniqueQuoteNumber, aguardarAtualizacaoSequencial } from './companyService';
 
 export interface CotacaoReservaResultado {
   id: string; // UUID do registro oficial criado no Supabase
@@ -75,7 +75,19 @@ export async function obterProximoNumeroCotacaoAtomics(): Promise<string> {
 }
 
 async function obterProximoNumeroCotacaoBruto(): Promise<string> {
-  // 1. Tenta chamar a RPC oficial no Supabase conforme solicitado
+  // 1. PRIORIDADE: número configurado no Emitente (sempre lido do banco, sem cache)
+  await aguardarAtualizacaoSequencial();
+  try {
+    const res = await resolveNextUniqueQuoteNumber();
+    if (res?.quoteNumber) {
+      console.log('[Reserva Cotação] Número sequencial atômico calculado via cotacoes/emitente:', res.quoteNumber);
+      return res.quoteNumber;
+    }
+  } catch (err) {
+    console.warn('[Reserva Cotação] Fallback resolveNextUniqueQuoteNumber falhou:', err);
+  }
+
+  // 2. Reserva: RPC do banco (só se a configuração do Emitente falhar)
   try {
     const { data, error } = await db.rpc('gerar_proximo_numero_cotacao');
     if (!error && data !== null && data !== undefined) {
@@ -119,17 +131,6 @@ async function obterProximoNumeroCotacaoBruto(): Promise<string> {
     }
   } catch (err) {
     console.warn('[Reserva Cotação] Exceção ao chamar RPC gerar_proximo_numero_cotacao:', err);
-  }
-
-  // 2. Fallback resiliente: Cálculo sequencial atômico consultando 'cotacoes' e 'emitente'
-  try {
-    const res = await resolveNextUniqueQuoteNumber();
-    if (res?.quoteNumber) {
-      console.log('[Reserva Cotação] Número sequencial atômico calculado via cotacoes/emitente:', res.quoteNumber);
-      return res.quoteNumber;
-    }
-  } catch (err) {
-    console.warn('[Reserva Cotação] Fallback resolveNextUniqueQuoteNumber falhou:', err);
   }
 
   // 3. Fallback de emergência caso offline
