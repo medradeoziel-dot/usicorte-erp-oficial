@@ -835,29 +835,32 @@ export async function resolveNextUniqueQuoteNumber(
   const validSeqs: number[] = [];
 
   try {
-    // Busca TODAS as cotações (paginando de 1000 em 1000 — o banco limita a 1000 por consulta)
-    const pageSize = 1000;
-    for (let from = 0; from < 100000; from += pageSize) {
-      const { data: cotacoesData, error } = await db
-        .from('cotacoes')
-        .select('numero')
-        .range(from, from + pageSize - 1);
-      if (error || !cotacoesData || cotacoesData.length === 0) break;
-      cotacoesData.forEach((r: any) => {
-        const numStr = String(r.numero || '').trim();
-        if (!numStr) return;
-        // QUALQUER número já gravado (inclusive rascunhos e canceladas) está OCUPADO
-        existingSet.add(numStr.toLowerCase());
-        allDbRows.push(r);
+    const { data: cotacoesData } = await db
+      .from('cotacoes')
+      .select('numero, cliente_nome, deletado_em, status, situacao');
+
+    if (cotacoesData && Array.isArray(cotacoesData)) {
+      cotacoesData.forEach(r => {
+        const isDeleted = !!r.deletado_em || r.situacao === 'CANCELADO' || r.status === 'rejeitado';
+        const isDraftVazio = r.cliente_nome === 'Rascunho em Edição' || (r.cliente_nome && String(r.cliente_nome).toLowerCase().includes('rascunho'));
+        const numStr = (r.numero || '').trim();
+        // Ignora numerações corrompidas com 2026 duplicado (ex: 202600, 202620)
         const isCorrupted = numStr.includes('202600') || numStr.includes('202620');
-        if (isCorrupted || !numStr.toLowerCase().startsWith(prefix.toLowerCase())) return;
-        const match = numStr.match(/(\d+)$/);
-        if (match) {
-          const val = parseInt(match[1], 10);
-          if (val > 0 && val < 50000) validSeqs.push(val);
+
+        if (!isDeleted && !isDraftVazio && !isCorrupted) {
+          allDbRows.push(r);
+          const s = numStr.toLowerCase();
+          if (s) existingSet.add(s);
+
+          const match = numStr.match(/(\d+)$/);
+          if (match) {
+            const val = parseInt(match[1], 10);
+            if (val > 0 && val < 50000 && !String(val).startsWith('2026')) {
+              validSeqs.push(val);
+            }
+          }
         }
       });
-      if (cotacoesData.length < pageSize) break;
     }
   } catch (e) {
     console.warn('Aviso ao consultar números na tabela cotacoes:', e);
@@ -885,15 +888,7 @@ export async function resolveNextUniqueQuoteNumber(
   }
 
   // Se targetSeq estiver em um patamar absurdo (> 5000) por erro anterior, restaura para 990
-  if (targetSeq > 5000) {
-    targetSeq = 990;
-  }
-
-  // Sempre começa DEPOIS do maior número já existente (contador do emitente pode estar atrasado)
-  if (validSeqs.length > 0) {
-    const maiorExistente = Math.max(...validSeqs);
-    if (targetSeq <= maiorExistente) targetSeq = maiorExistente + 1;
-  }
+  // (removido: não reescreve mais o número configurado pelo usuário)
 
   // Se o número alvo já estiver ocupado no banco, avança sequencialmente (+1) até encontrar o próximo livre
   let wasAdjusted = false;
