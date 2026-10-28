@@ -14,6 +14,8 @@ import {
   formatSafeDate,
   getSafeISODate,
   formatarMedidasLimpa,
+  formatItemDescription,
+  getObservacaoEspecificaItem,
   formatDimensaoPolegada,
   formatDimensaoMm,
   renderizarTabelaRelatorio,
@@ -1543,6 +1545,16 @@ export default function SalesModule({
     const widthFormatted = isSpecialItem ? '' : widthMmFormatted;
     const lengthFormatted = isSpecialItem ? '' : lengthMmFormatted;
 
+    const defaultFormatDesc = isSpecialItem
+      ? (itemDescription.trim() || 'Serviço')
+      : (itemGeometryType === 'macico' || itemGeometryType === 'REDONDO_QUADRADO'
+          ? 'Trefilado'
+          : (itemGeometryType === 'bucha' || itemGeometryType === 'TUBO_BUCHA' ? 'Bucha / Tubo Mecânico' : 'Retângulo'));
+
+    const resolvedDesc = (itemDescription.trim() && itemDescription.trim().toLowerCase() !== itemMatName.trim().toLowerCase())
+      ? itemDescription.trim()
+      : defaultFormatDesc;
+
     let updatedItemsList: QuoteItem[];
 
     if (editingItemId) {
@@ -1550,8 +1562,8 @@ export default function SalesModule({
       updatedItemsList = items.map(item => item.id === editingItemId ? {
         ...item,
         companyName: clientName || 'UsiCorte Cliente',
-        description: itemDescription.trim() || itemMatName,
-        descricao: itemDescription.trim() || itemMatName,
+        description: resolvedDesc,
+        descricao: resolvedDesc,
         constantName: itemMatName,
         constanteNome: itemMatName,
         material: itemMatName,
@@ -1610,8 +1622,8 @@ export default function SalesModule({
         id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
         date: quoteDate || new Date().toISOString().split('T')[0],
         companyName: clientName || 'UsiCorte Cliente',
-        description: itemDescription.trim() || itemMatName,
-        descricao: itemDescription.trim() || itemMatName,
+        description: resolvedDesc,
+        descricao: resolvedDesc,
         constantName: itemMatName,
         constanteNome: itemMatName,
         material: itemMatName,
@@ -1882,7 +1894,7 @@ export default function SalesModule({
 
   const handleEditItem = (item: QuoteItem) => {
     setEditingItemId(item.id);
-    setItemDescription(item.description || item.descricao || (item as any).produto || '');
+    setItemDescription(formatItemDescription(item));
 
     // 1. Resolução automática e validação do tipo de geometria (Chapa, Maciço ou Tubo)
     const resolvedGeometry = resolveItemGeometry(item);
@@ -1958,7 +1970,7 @@ export default function SalesModule({
       setItemManualUnitWeightKg('0');
     }
 
-    setItemNotes(item.notes || item.observacao || (item as any).info || '');
+    setItemNotes(getObservacaoEspecificaItem(item));
     setItemDrawingImage(item.drawingImage || item.fotoDesenho || (item as any).desenhoUrl || (item as any).desenho_url || null);
     setIsManualUnitPrice(false);
 
@@ -3847,10 +3859,10 @@ export default function SalesModule({
                             </div>
                           )}
                           <div>
-                            <span>{item.description || item.descricao || '-'}</span>
-                            {(item.notes || item.observacao) && (
-                              <span className="block text-[10px] text-slate-400 font-normal">
-                                Obs: {item.notes || item.observacao}
+                            <span className="font-semibold text-slate-850">{formatItemDescription(item)}</span>
+                            {getObservacaoEspecificaItem(item) && (
+                              <span className="block text-[10px] text-slate-500 font-normal mt-0.5">
+                                <span className="font-medium text-slate-600">Info:</span> {getObservacaoEspecificaItem(item)}
                               </span>
                             )}
                           </div>

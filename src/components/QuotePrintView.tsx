@@ -1,5 +1,5 @@
 import React from "react";
-import { formatSafeDate, getObservacaoEspecificaItem } from "../utils/calculator";
+import { formatSafeDate, getObservacaoEspecificaItem, formatItemDescription, formatarMedidasLimpa } from "../utils/calculator";
 import CompanyHeader from "./CompanyHeader";
 
 // Types/Interfaces
@@ -147,10 +147,10 @@ export const QuotePrintView: React.FC<QuotePrintViewProps> = (props) => {
   const itens: QuoteItem[] = rawItens.map((item, index) => ({
     id: item.id ?? index + 1,
     material: item.material ?? item.name ?? "MATERIAL",
-    medidas: item.medidas ?? item.dimensions ?? item.dimensões ?? "",
-    descricao: item.descricao ?? item.descrição ?? item.description ?? "",
-    informacoes: item.informacoes ?? item.informação ?? item.info ?? "",
-    observacao: item.observacao ?? item.obs ?? item.notes ?? item.observacoes ?? "",
+    medidas: formatarMedidasLimpa(item) || item.medidas || item.dimensions || item.dimensões || "",
+    descricao: formatItemDescription(item),
+    informacoes: getObservacaoEspecificaItem(item) || item.informacoes || item.informação || item.info || item.observacao || item.notes || "",
+    observacao: getObservacaoEspecificaItem(item) || item.observacao || item.obs || item.notes || item.observacoes || "",
     quantidade: item.quantidade ?? item.qtd ?? item.quantity ?? 1,
     valorUnitario: item.valorUnitario ?? item.unitPrice ?? 0,
     valorTotal: item.valorTotal ?? item.subtotal ?? (Number(item.valorUnitario || item.unitPrice || 0) * Number(item.quantidade || item.qtd || item.quantity || 1)),

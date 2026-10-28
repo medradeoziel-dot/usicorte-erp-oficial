@@ -31,11 +31,13 @@ import {
   normalizeConstant,
   tabelaConstantes,
   formatarMedidasLimpa,
+  formatItemDescription,
   getSafeISODate
 } from '../utils/calculator';
 
 export type SystemColumnField = 
   | 'material'
+  | 'description'
   | 'diameter'
   | 'thickness'
   | 'width'
@@ -54,13 +56,14 @@ export interface ColumnMappingOption {
 
 export const SYSTEM_COLUMN_OPTIONS: ColumnMappingOption[] = [
   { field: 'ignore', label: '— Não Mapear (Ignorar) —', description: 'Coluna será desconsiderada' },
-  { field: 'material', label: 'Material / Nome do Item', description: 'Ex: OXICORTE A36, SAE 1045, BRONZE TM 23', required: true },
+  { field: 'material', label: 'Material / Liga', description: 'Ex: OXICORTE A36, SAE 1045, BRONZE TM 23', required: true },
+  { field: 'description', label: 'Descrição / Formato / Especificação', description: 'Ex: Retângulo, Trefilado, Corte Especial, Flange' },
   { field: 'diameter', label: 'Diâmetro (Ø)', description: 'Ex: 1", 1.1/2", 50mm, Ø 2"' },
   { field: 'thickness', label: 'Espessura', description: 'Ex: 1/2", 1", 1.1/2", 25.4mm' },
-  { field: 'width', label: 'Largura', description: 'Ex: 2", 50, 100mm, 200' },
-  { field: 'length', label: 'Comprimento', description: 'Ex: 250, 500, 1000mm' },
+  { field: 'width', label: 'Largura (mm)', description: 'Ex: 45, 50, 100mm, 200' },
+  { field: 'length', label: 'Comprimento (mm)', description: 'Ex: 88, 250, 500, 1000mm' },
   { field: 'quantity', label: 'Quantidade (Qtd)', description: 'Ex: 1, 2, 10 peças' },
-  { field: 'notes', label: 'Observações / Info Adicional', description: 'Ex: Cortar no serrote, chanfrar pontas' },
+  { field: 'notes', label: 'Informações / Observações (CONF DESENHO / Códigos)', description: 'Ex: CONF DESENHO, cód. peça, chanfrar' },
   { field: 'priceKg', label: 'Preço por Kg (R$/Kg) [Opcional]', description: 'Ex: 22,00, 35,00' }
 ];
 
@@ -70,6 +73,7 @@ export interface ImportedRowPreview {
   id: string;
   originalRowIndex: number;
   materialName: string;
+  description: string;
   geometry: GeometryChoice;
   rawDiameter: string;
   rawThickness: string;
@@ -272,7 +276,11 @@ export default function ImportExcelCsvModal({
         headerRow.forEach((colVal: any, idx: number) => {
           const colTxt = String(colVal || '').trim().toLowerCase();
           
-          if (/mat|prod|desc|item|material|produto|descricao|descrição/i.test(colTxt)) {
+          if (/obs|not|info|detalhe|desenho|observa[cç][aã]o|informa[cç][aã]o/i.test(colTxt)) {
+            initialMapping[idx] = 'notes';
+          } else if (/desc|descri[cç][aã]o|formato|tipo|especific/i.test(colTxt)) {
+            initialMapping[idx] = 'description';
+          } else if (/mat|material|liga|a[cç]o|produto|prod/i.test(colTxt)) {
             initialMapping[idx] = 'material';
           } else if (/di[aâ]m|diametro|diâmetro|ø|dext|ext/i.test(colTxt)) {
             initialMapping[idx] = 'diameter';
@@ -284,8 +292,6 @@ export default function ImportExcelCsvModal({
             initialMapping[idx] = 'length';
           } else if (/qtd|quant|pe[cç]as|quantidade|un/i.test(colTxt)) {
             initialMapping[idx] = 'quantity';
-          } else if (/obs|not|info|detalhe|observa[cç][aã]o/i.test(colTxt)) {
-            initialMapping[idx] = 'notes';
           } else if (/pre[cç]o|r\$|kg|valor/i.test(colTxt)) {
             initialMapping[idx] = 'priceKg';
           } else {
@@ -320,6 +326,7 @@ export default function ImportExcelCsvModal({
 
     dataRows.forEach((row, rIdx) => {
       let rawMat = '';
+      let rawDesc = '';
       let rawDia = '';
       let rawThick = '';
       let rawWidth = '';
@@ -334,6 +341,7 @@ export default function ImportExcelCsvModal({
         if (!cellVal) return;
 
         if (field === 'material') rawMat = cellVal;
+        else if (field === 'description') rawDesc = cellVal;
         else if (field === 'diameter') rawDia = cellVal;
         else if (field === 'thickness') rawThick = cellVal;
         else if (field === 'width') rawWidth = cellVal;
@@ -368,6 +376,16 @@ export default function ImportExcelCsvModal({
       const matFinalName = rawMat || batchMaterial || (detectedGeom === 'macico' ? 'AÇO REDONDO SAE 1045' : 'OXICORTE A36');
       const { k, precoKg: defaultMatPrice, matchedName } = resolveMaterialDefaults(matFinalName, detectedGeom);
 
+      // Descrição técnica limpa: nunca duplica o nome do material
+      const defaultDesc = detectedGeom === 'macico' 
+        ? 'Trefilado' 
+        : (detectedGeom === 'bucha' ? 'Bucha / Tubo Mecânico' : 'Retângulo');
+      
+      let itemDescriptionVal = rawDesc.trim();
+      if (!itemDescriptionVal || itemDescriptionVal.toLowerCase() === matFinalName.trim().toLowerCase()) {
+        itemDescriptionVal = defaultDesc;
+      }
+
       const rowPriceKg = rawPriceKg ? (parseFloat(rawPriceKg.replace(',', '.')) || defaultPrice) : (defaultMatPrice || defaultPrice);
 
       const { unitWeightKg, totalWeightKg, unitPrice, subtotal } = computeRowCalculations(
@@ -395,6 +413,7 @@ export default function ImportExcelCsvModal({
         id: `imp-${Date.now()}-${rIdx}-${Math.random().toString(36).slice(2, 6)}`,
         originalRowIndex: hasHeaderRow ? rIdx + 2 : rIdx + 1,
         materialName: matchedName || matFinalName,
+        description: itemDescriptionVal,
         geometry: detectedGeom,
         rawDiameter: rawDia,
         rawThickness: rawThick,
@@ -562,12 +581,14 @@ export default function ImportExcelCsvModal({
       const widthMmStr = row.widthMm > 0 ? formatDimensaoMm(row.widthMm) : '';
       const lengthMmStr = row.lengthMm > 0 ? formatDimensaoMm(row.lengthMm) : '';
 
+      const cleanDesc = row.description?.trim() || (row.geometry === 'macico' ? 'Trefilado' : row.geometry === 'bucha' ? 'Bucha / Tubo Mecânico' : 'Retângulo');
+
       return {
         id: `item-import-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 7)}`,
         date: todayIso,
         companyName: clientName,
-        description: row.materialName,
-        descricao: row.materialName,
+        description: cleanDesc,
+        descricao: cleanDesc,
         constant: row.constantK >= 0.1 ? row.constantK : (row.constantK * 1000).toFixed(2),
         constantName: row.materialName,
         constanteNome: row.materialName,
@@ -604,7 +625,9 @@ export default function ImportExcelCsvModal({
         totalWeightKg: row.totalWeightKg,
         pesoTotal: row.totalWeightKg,
         notes: row.notes,
-        observacao: row.notes
+        observacao: row.notes,
+        info: row.notes,
+        informacoes: row.notes
       };
     });
 
@@ -955,11 +978,12 @@ export default function ImportExcelCsvModal({
                     <thead className="bg-slate-900 text-slate-200 uppercase font-semibold text-[10px] tracking-wider sticky top-0 z-10 shadow-xs">
                       <tr>
                         <th className="py-3 px-2.5 w-10 text-center">#</th>
-                        <th className="py-3 px-3 min-w-[160px]">Material / Item</th>
-                        <th className="py-3 px-3 min-w-[140px]">Geometria</th>
+                        <th className="py-3 px-3 min-w-[150px]">Material / Item</th>
+                        <th className="py-3 px-3 min-w-[130px]">Descrição / Formato</th>
+                        <th className="py-3 px-3 min-w-[130px]">Geometria</th>
                         <th className="py-3 px-3 min-w-[150px]">Dimensões (Polegadas / mm)</th>
                         <th className="py-3 px-3 text-center w-16">Qtd</th>
-                        <th className="py-3 px-3 min-w-[140px]">Observações</th>
+                        <th className="py-3 px-3 min-w-[140px]">Observações / Info</th>
                         <th className="py-3 px-3 text-right text-emerald-300 bg-slate-800 font-bold whitespace-nowrap">Peso Calc. (Kg)</th>
                         <th className="py-3 px-3 text-right min-w-[90px]">Preço/Kg (R$)</th>
                         <th className="py-3 px-3 text-right font-bold text-indigo-200 min-w-[90px]">Subtotal (R$)</th>
@@ -983,6 +1007,17 @@ export default function ImportExcelCsvModal({
                             />
                           </td>
 
+                          {/* Descrição / Formato do Corte */}
+                          <td className="py-2.5 px-3">
+                            <input
+                              type="text"
+                              value={row.description}
+                              onChange={(e) => handleRowChange(row.id, { description: e.target.value })}
+                              placeholder="Ex: Retângulo, Trefilado..."
+                              className="w-full px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-indigo-950 focus:bg-white focus:border-indigo-500 outline-hidden"
+                            />
+                          </td>
+
                           {/* Geometria por Linha */}
                           <td className="py-2.5 px-3">
                             <select
@@ -990,7 +1025,11 @@ export default function ImportExcelCsvModal({
                               onChange={(e) => {
                                 const newGeom = e.target.value as GeometryChoice;
                                 const { k } = resolveMaterialDefaults(row.materialName, newGeom);
-                                handleRowChange(row.id, { geometry: newGeom, constantK: k });
+                                const defaultD = newGeom === 'macico' ? 'Trefilado' : newGeom === 'bucha' ? 'Bucha / Tubo Mecânico' : 'Retângulo';
+                                const descUpdated = (!row.description || row.description === 'Retângulo' || row.description === 'Trefilado' || row.description === 'Bucha / Tubo Mecânico')
+                                  ? defaultD
+                                  : row.description;
+                                handleRowChange(row.id, { geometry: newGeom, constantK: k, description: descUpdated });
                               }}
                               className="w-full px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-800 focus:bg-white focus:border-indigo-500 outline-hidden cursor-pointer"
                             >
@@ -1002,7 +1041,7 @@ export default function ImportExcelCsvModal({
 
                           {/* Dimensões em Polegadas */}
                           <td className="py-2.5 px-3 whitespace-nowrap font-mono text-[11px]">
-                            <div className="font-bold text-indigo-900 bg-indigo-50 px-2 py-1 rounded-md border border-indigo-100 flex items-center gap-1.5" title="Dimensão formatada em polegadas conforme equivalência 1 pol = 25.4mm">
+                            <div className="font-bold text-indigo-900 bg-indigo-50 px-2 py-1 rounded-md border border-indigo-100 flex items-center gap-1.5" title="Dimensão formatada: Espessura/Diâmetro em polegadas, Largura/Comprimento em mm">
                               <span>{row.displayMeasure || '—'}</span>
                             </div>
                           </td>
@@ -1022,13 +1061,13 @@ export default function ImportExcelCsvModal({
                             />
                           </td>
 
-                          {/* Observações */}
+                          {/* Observações / Informações */}
                           <td className="py-2.5 px-3">
                             <input
                               type="text"
                               value={row.notes}
                               onChange={(e) => handleRowChange(row.id, { notes: e.target.value })}
-                              placeholder="Observações..."
+                              placeholder="Ex: CONF DESENHO..."
                               className="w-full px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-700 focus:bg-white focus:border-indigo-500 outline-hidden"
                             />
                           </td>

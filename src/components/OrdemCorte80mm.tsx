@@ -112,8 +112,9 @@ export function resolverMedidasDescricaoForma(item: any): string {
 
   const formaResolvida = resolverFormaItem(item) || 'RETÂNGULO';
 
+  const matName = (item?.produto || item?.material || item?.constanteNome || item?.constantName || '').toString().trim().toUpperCase();
   let descFinal = '';
-  if (descBruta && descBruta.toUpperCase() !== 'ITEM INDUSTRIAL' && descBruta.toUpperCase() !== 'MATERIAL') {
+  if (descBruta && descBruta.toUpperCase() !== matName && descBruta.toUpperCase() !== 'ITEM INDUSTRIAL' && descBruta.toUpperCase() !== 'MATERIAL') {
     descFinal = descBruta.toUpperCase();
   } else if (formaResolvida) {
     descFinal = formaResolvida.toUpperCase();

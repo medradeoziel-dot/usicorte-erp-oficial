@@ -1,6 +1,6 @@
 import React from "react";
 import type { Cliente, ItemPedido, Pedido } from "../lib/types";
-import { formatSafeDate, getObservacaoEspecificaItem } from "../utils/calculator";
+import { formatSafeDate, getObservacaoEspecificaItem, formatItemDescription, formatarMedidasLimpa } from "../utils/calculator";
 import CompanyHeader from "./CompanyHeader";
 
 interface A4PreviewProps {
@@ -66,7 +66,7 @@ export default function A4Preview({ pedido, cliente, itens, fotosPorPeca, mode }
               <div key={item.id} className="a4-card-4col border border-slate-300 rounded p-2.5 bg-white text-xs space-y-1">
                 <div className="a4-card-header flex justify-between items-center border-b border-slate-200 pb-1">
                   <span className="a4-card-num font-mono font-bold text-slate-500">#{item.id}</span>
-                  <span className="a4-card-name font-bold text-slate-900 truncate">{item.descricao}</span>
+                  <span className="a4-card-name font-bold text-slate-900 truncate">{formatItemDescription(item as any)}</span>
                 </div>
                 {fotosPorPeca[item.id] ? (
                   <img src={fotosPorPeca[item.id]} alt="" className="a4-card-img w-full h-24 object-contain bg-slate-50 border border-slate-100 rounded" />
@@ -87,7 +87,7 @@ export default function A4Preview({ pedido, cliente, itens, fotosPorPeca, mode }
                   </div>
                 </div>
                 <div className="a4-card-detail text-[11px]">
-                  <b>Medida:</b> <span className="font-mono font-bold text-slate-900">{item.medida}</span>
+                  <b>Medida:</b> <span className="font-mono font-bold text-slate-900">{formatarMedidasLimpa(item as any) || item.medida}</span>
                   {getObservacaoEspecificaItem(item) && (
                     <span className="block text-[10px] text-slate-500 italic mt-0.5">{getObservacaoEspecificaItem(item)}</span>
                   )}
@@ -135,13 +135,13 @@ export default function A4Preview({ pedido, cliente, itens, fotosPorPeca, mode }
                   </td>
                   <td className="a4-td text-center p-1.5">
                     <div className="medida-bloco-center flex flex-col items-center justify-center">
-                      <span className="medida-dimensao font-bold font-mono text-[11px] text-slate-900 leading-tight">{item.medida || "—"}</span>
+                      <span className="medida-dimensao font-bold font-mono text-[11px] text-slate-900 leading-tight">{formatarMedidasLimpa(item as any) || item.medida || "—"}</span>
                       {getObservacaoEspecificaItem(item) && (
                         <span className="medida-obs text-[9.5px] text-slate-500 italic font-sans leading-tight mt-0.5">{getObservacaoEspecificaItem(item)}</span>
                       )}
                     </div>
                   </td>
-                  <td className="a4-td a4-td-desc text-left text-slate-800 p-1.5">{item.descricao || "—"}</td>
+                  <td className="a4-td a4-td-desc text-left text-slate-800 p-1.5">{formatItemDescription(item as any)}</td>
                   <td className="a4-td text-left text-slate-600 italic text-[10px] p-1.5">{getObservacaoEspecificaItem(item) || "—"}</td>
                   <td className="a4-td a4-td-r text-right font-mono p-1.5">{formatCurrency(item.valorUnit)}</td>
                   <td className="a4-td a4-td-r text-center font-mono font-bold p-1.5">{item.quantidade}</td>

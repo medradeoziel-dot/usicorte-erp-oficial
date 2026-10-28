@@ -78,6 +78,11 @@ export default function RelatorioPedidoPrint({ cliente, numeroPedido, data, iten
                         <div style={{ fontWeight: 'bold' }} className="leading-tight text-slate-900">
                           {item.produto}
                         </div>
+                        {item.descricao && item.descricao.trim().toLowerCase() !== item.produto.trim().toLowerCase() && (
+                          <div className="text-[10px] text-slate-600 font-semibold leading-tight mt-0.5">
+                            {item.descricao}
+                          </div>
+                        )}
                         <div
                           className="medida-obs"
                           style={{ fontSize: '9px', fontStyle: 'italic', color: '#6b7280', fontWeight: 'normal', marginTop: '1px', lineHeight: '1.1' }}

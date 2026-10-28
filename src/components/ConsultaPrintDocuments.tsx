@@ -8,6 +8,7 @@ import {
   formatCurrency, 
   formatSafeDate, 
   formatarMedidasLimpa, 
+  formatItemDescription,
   formatWeightKg, 
   getObservacaoEspecificaItem 
 } from '../utils/calculator';
@@ -44,9 +45,9 @@ export function normalizeQuoteForPrint(rawQuote: any): any {
     const subtotal = Number(item.subtotal !== undefined ? item.subtotal : (item.valorTotal || item.valorGeral || (unitPrice * qty)));
     const totalWeightKg = Number(item.totalWeightKg !== undefined ? item.totalWeightKg : (item.pesoTotal || 0));
     const material = item.constanteNome || item.constantName || item.material || item.produto || 'MATERIAL';
-    const medidas = formatarMedidasLimpa(item) || item.dimensions || item.medida || item.medidas || '';
-    const descricao = item.descricao || item.description || item.produto || '-';
-    const observacao = getObservacaoEspecificaItem(item) || item.observacao || item.notes || item.info || '';
+    const medidas = formatarMedidasLimpa(item);
+    const descricao = formatItemDescription(item);
+    const observacao = getObservacaoEspecificaItem(item) || item.observacao || item.notes || item.info || item.informacoes || '';
     const drawingImage = item.drawingImage || item.fotoDesenho || item.desenhoUrl || item.desenho_url || '';
     const rawItemDate = item.created_at || item.data || item.date || item.createdAt || dateVal;
 
@@ -236,8 +237,8 @@ export function ConsultaPrintDocuments({ quote, tipo }: ConsultaPrintDocumentsPr
               q.items.map((item: any, idx: number) => {
                 const produtoMaterial = item.constanteNome || item.material || 'MATERIAL';
                 const medidasFormatadas = formatarMedidasLimpa(item);
-                const descricaoItem = item.descricao || item.description || '-';
-                const obsEspecifica = getObservacaoEspecificaItem(item) || item.observacao || '';
+                const descricaoItem = formatItemDescription(item);
+                const obsEspecifica = getObservacaoEspecificaItem(item) || item.observacao || item.notes || item.info || item.informacoes || '';
                 const valorUnitario = Number(item.valorUnitario || item.unitPrice || 0);
                 const qtd = Number(item.qtd || item.quantity || 1);
                 const subtotal = Number(item.subtotal || item.totalPrice || (valorUnitario * qtd));

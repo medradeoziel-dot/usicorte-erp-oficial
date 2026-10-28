@@ -1,5 +1,5 @@
 import React from 'react';
-import { getObservacaoEspecificaItem, formatSafeDate } from '../../utils/calculator';
+import { getObservacaoEspecificaItem, formatSafeDate, formatItemDescription, formatarMedidasLimpa } from '../../utils/calculator';
 import { ItemRelatorio } from './RelatorioPropostaPrint';
 
 interface Props {
@@ -94,7 +94,7 @@ export default function RelatorioCortePrint({ itens, cliente, numeroPedido, data
               <div>
                 <span className="text-[10px] text-slate-500 block uppercase font-bold">Medida de Corte</span>
                 <div className="medida-bloco flex flex-col">
-                  <span className="font-mono font-bold text-slate-900">{item.medida}</span>
+                  <span className="font-mono font-bold text-slate-900">{formatarMedidasLimpa(item) || item.medida}</span>
                   {getObservacaoEspecificaItem(item) && (
                     <span className="medida-obs text-[9.5px] text-slate-500 italic mt-0.5">{getObservacaoEspecificaItem(item)}</span>
                   )}
@@ -108,7 +108,7 @@ export default function RelatorioCortePrint({ itens, cliente, numeroPedido, data
 
             <div>
               <span className="text-[10px] text-slate-500 block uppercase font-bold">Descrição</span>
-              <span className="text-slate-800">{item.descricao}</span>
+              <span className="text-slate-800">{formatItemDescription(item)}</span>
             </div>
 
             <div className="pt-2 border-t border-dashed border-slate-300">
@@ -154,13 +154,15 @@ export default function RelatorioCortePrint({ itens, cliente, numeroPedido, data
                   </td>
                   <td className="border border-black p-1.5 text-left">
                     <div className="medida-bloco flex flex-col">
-                      <span className="medida-dimensao font-bold font-mono text-slate-900 leading-tight">{item.medida}</span>
+                      <span className="medida-dimensao font-bold font-mono text-slate-900 leading-tight">
+                        {formatarMedidasLimpa(item) || item.medida}
+                      </span>
                       {obsItem && (
                         <span className="medida-obs text-[9.5px] text-slate-500 italic font-sans leading-tight mt-0.5">{obsItem}</span>
                       )}
                     </div>
                   </td>
-                  <td className="border border-black p-1.5 text-left uppercase text-[10px] text-gray-700 break-words">{item.descricao || '-'}</td>
+                  <td className="border border-black p-1.5 text-left uppercase text-[10px] text-gray-700 break-words">{formatItemDescription(item)}</td>
                   <td className="border border-black p-1.5 text-center font-black font-mono text-xs">{item.qtd}</td>
                   <td className="border border-black p-1.5 text-center">
                     <div className="w-4 h-4 border border-black mx-auto"></div>

@@ -1,5 +1,5 @@
 import React from 'react';
-import { getObservacaoEspecificaItem, formatSafeDate } from '../../utils/calculator';
+import { getObservacaoEspecificaItem, formatSafeDate, formatItemDescription, formatarMedidasLimpa } from '../../utils/calculator';
 
 export interface ItemRelatorio {
   idVer?: string | number;
@@ -129,7 +129,7 @@ export default function RelatorioPropostaPrint({
               <div>
                 <span className="text-[10px] text-slate-400 uppercase font-bold block">Medidas</span>
                 <div className="medida-bloco flex flex-col">
-                  <span className="medida-dimensao font-mono text-slate-800 font-semibold">{item.medida}</span>
+                  <span className="medida-dimensao font-mono text-slate-800 font-semibold">{formatarMedidasLimpa(item) || item.medida}</span>
                   {obsItem && (
                     <span className="medida-obs text-[10px] text-slate-500 italic mt-0.5">{obsItem}</span>
                   )}
@@ -138,7 +138,7 @@ export default function RelatorioPropostaPrint({
 
               <div>
                 <span className="text-[10px] text-slate-400 uppercase font-bold block">Descrição</span>
-                <span className="text-slate-700">{item.descricao}</span>
+                <span className="text-slate-700">{formatItemDescription(item)}</span>
               </div>
 
               {obsItem && (
@@ -201,13 +201,15 @@ export default function RelatorioPropostaPrint({
                   </td>
                   <td className="py-2 px-1 text-center font-mono text-xs">
                     <div className="medida-bloco-center flex flex-col items-center justify-center">
-                      <span className="medida-dimensao font-bold font-mono text-slate-900 leading-tight">{item.medida}</span>
+                      <span className="medida-dimensao font-bold font-mono text-slate-900 leading-tight">
+                        {formatarMedidasLimpa(item) || item.medida}
+                      </span>
                       {obsItem && (
                         <span className="medida-obs text-[9.5px] text-slate-500 italic font-sans leading-tight mt-0.5">{obsItem}</span>
                       )}
                     </div>
                   </td>
-                  <td className="py-2 px-1 text-center">{item.descricao}</td>
+                  <td className="py-2 px-1 text-center">{formatItemDescription(item)}</td>
                   <td className="py-2 px-1 text-center italic text-slate-600">{obsItem || "-"}</td>
                   <td className="py-2 px-1 text-center font-mono whitespace-nowrap">
                     {formatMoeda(item.unitario)}

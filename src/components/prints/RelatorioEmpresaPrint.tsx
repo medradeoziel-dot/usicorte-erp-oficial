@@ -1,5 +1,5 @@
 import React from 'react';
-import { getObservacaoEspecificaItem, formatSafeDate } from '../../utils/calculator';
+import { getObservacaoEspecificaItem, formatSafeDate, formatItemDescription, formatarMedidasLimpa } from '../../utils/calculator';
 import { ItemRelatorio } from './RelatorioPropostaPrint';
 
 interface Props {
@@ -54,16 +54,16 @@ export default function RelatorioEmpresaPrint({ itens, cliente, numeroProposta, 
             <div className="grid grid-cols-2 gap-2 text-slate-700">
               <div>
                 <span className="text-[10px] text-slate-400 block uppercase font-bold">Medida</span>
-                <span className="font-semibold font-mono">{item.medida}</span>
+                <span className="font-semibold font-mono">{formatarMedidasLimpa(item) || item.medida}</span>
               </div>
               <div>
                 <span className="text-[10px] text-slate-400 block uppercase font-bold">Código / Obs</span>
-                <span>{item.observacao || '-'}</span>
+                <span>{getObservacaoEspecificaItem(item) || item.observacao || item.info || '-'}</span>
               </div>
             </div>
             <div>
               <span className="text-[10px] text-slate-400 block uppercase font-bold">Descrição</span>
-              <span className="text-slate-700">{item.descricao}</span>
+              <span className="text-slate-700">{formatItemDescription(item)}</span>
             </div>
             <div className="pt-2 border-t border-slate-200 flex justify-between items-center">
               <span className="text-slate-600">Qtd: <strong>{item.qtd}</strong> | Unit: {formatCurrency(item.unitario)}</span>
@@ -109,14 +109,16 @@ export default function RelatorioEmpresaPrint({ itens, cliente, numeroProposta, 
                   </td>
                   <td className="py-2 px-1 text-center font-mono text-xs">
                     <div className="medida-bloco-center flex flex-col items-center justify-center">
-                      <span className="medida-dimensao font-bold font-mono text-slate-900 leading-tight">{item.medida}</span>
+                      <span className="medida-dimensao font-bold font-mono text-slate-900 leading-tight">
+                        {formatarMedidasLimpa(item) || item.medida}
+                      </span>
                       {obsItem && (
                         <span className="medida-obs text-[9px] text-slate-500 italic font-sans leading-tight mt-0.5">{obsItem}</span>
                       )}
                     </div>
                   </td>
-                  <td className="py-2 px-1 text-center">{item.descricao}</td>
-                  <td className="py-2 px-1 text-center">{obsItem || item.observacao || '-'}</td>
+                  <td className="py-2 px-1 text-center">{formatItemDescription(item)}</td>
+                  <td className="py-2 px-1 text-center">{obsItem || item.observacao || item.info || '-'}</td>
                   <td className="py-2 px-1 text-center font-bold font-mono">{item.qtd}</td>
                   <td className="py-2 px-1 text-center whitespace-nowrap font-mono">{formatCurrency(item.unitario)}</td>
                   <td className="py-2 px-1 text-center font-bold whitespace-nowrap font-mono">{formatCurrency(item.valorGeral)}</td>

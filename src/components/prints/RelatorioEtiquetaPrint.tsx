@@ -48,6 +48,14 @@ export default function RelatorioEtiquetaPrint({ cliente, numeroPedido, itens }:
                       {item.produto}
                     </p>
                   </div>
+                  {item.descricao && item.descricao.trim().toLowerCase() !== item.produto.trim().toLowerCase() && (
+                    <div>
+                      <p className="text-[9.5px] sm:text-[10px] font-bold text-slate-500 uppercase">Descrição / Formato:</p>
+                      <p className="text-[11px] sm:text-xs font-bold uppercase text-slate-800">
+                        {item.descricao}
+                      </p>
+                    </div>
+                  )}
                   <div>
                     <p className="text-[9.5px] sm:text-[10px] font-bold text-slate-500 uppercase">Medida:</p>
                     <div className="medida-bloco flex flex-col">

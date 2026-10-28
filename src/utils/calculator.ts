@@ -578,24 +578,42 @@ export function mmToInchFraction(mm: number, tolerance = 0.5): string | null {
  * Formata um valor numérico ou textual para exibição em polegadas (ex: 1", 1.1/2", 2", 3/4").
  */
 /**
- * Formata um valor numérico ou textual para exibição estritamente em milímetros (ex: 50mm, 72mm, 1000mm).
- * NUNCA converte para polegadas.
+ * Formata um valor numérico ou textual para exibição estritamente em milímetros (ex: 45mm, 88mm, 1000mm).
+ * NUNCA converte para polegadas. Se receber frações ou múltiplas dimensões (ex: "45 x 88"), formata cada uma em mm.
  */
 export function formatDimensaoMm(val: string | number | undefined | null): string {
   if (val === undefined || val === null) return '';
   const str = String(val).trim();
   if (!str || str === '-' || str === '—') return '';
 
-  // Se já possui aspas de polegada ou 'pol', converte o número para mm (* 25.4)
+  // Se vier com múltiplas dimensões separadas por 'x' (ex: "45 x 88" ou "45mm x 88mm")
+  if (str.includes('x') || str.includes('×')) {
+    return str
+      .replace(/×/g, 'x')
+      .split('x')
+      .map(part => formatDimensaoMm(part.trim()))
+      .filter(Boolean)
+      .join(' x ');
+  }
+
+  // Se já for puramente numérico ou terminar em 'mm' (sem aspas de polegada)
   const isInch = /["'”’]|pol|in/i.test(str);
-  const clean = str.replace(/["'”’]|pol|in|mm|ø/gi, '').replace(',', '.').trim();
-  const n = parseFloat(clean);
-  if (!isNaN(n) && n > 0) {
-    const mmVal = isInch ? n * 25.4 : n;
+  if (!isInch) {
+    const cleanNum = str.replace(/mm/gi, '').replace(',', '.').trim();
+    const n = parseFloat(cleanNum);
+    if (!isNaN(n) && n > 0) {
+      const finalVal = Number.isInteger(n) ? String(n) : String(Number(n.toFixed(2)));
+      return `${finalVal}mm`;
+    }
+  }
+
+  const mmVal = typeof val === 'number' ? val : parseDimensionToMm(str, 'mm');
+  if (mmVal > 0) {
     const finalVal = Number.isInteger(mmVal) ? String(mmVal) : String(Number(mmVal.toFixed(2)));
     return `${finalVal}mm`;
   }
-  return str.endsWith('mm') ? str : `${str}mm`;
+  const clean = str.replace(/["'”’]|pol|in/gi, '').trim();
+  return clean.endsWith('mm') ? clean : `${clean}mm`;
 }
 
 /**
@@ -635,6 +653,11 @@ export function formatDimensaoPolegada(val: string | number | undefined | null):
   return str;
 }
 
+/**
+ * Regra oficial UsiCorte para exibição das medidas no relatório:
+ * SOMENTE a Espessura ou o Diâmetro aparecem formatados em polegadas (ex: 1/2"),
+ * enquanto a Largura e o Comprimento permanecem estritamente em milímetros (mm) (ex: 45mm x 88mm).
+ */
 export function formatarMedidasLimpa(item: Record<string, any>): string {
   if (!item) return "—";
 
@@ -671,18 +694,55 @@ export function formatarMedidasLimpa(item: Record<string, any>): string {
     : (cleanPart(item.thickness || item.espessura) ? formatDimensaoPolegada(item.thickness || item.espessura) : "");
 
   const measureRaw = cleanPart(item.measure || item.medida);
+  const cWidthLength = cleanPart(item.widthLength);
 
   // LARGURA: SEMPRE E ESTRITAMENTE EM MILÍMETROS (MM), NUNCA POLEGADAS
-  const widthMmStr = widthValMm > 0 
+  let widthMmStr = widthValMm > 0 
     ? formatDimensaoMm(widthValMm) 
     : (cleanPart(item.width || item.largura) ? formatDimensaoMm(item.width || item.largura) : "");
 
   // COMPRIMENTO: SEMPRE E ESTRITAMENTE EM MILÍMETROS (MM)
-  const lengthMmStr = lengthValMm > 0 
+  let lengthMmStr = lengthValMm > 0 
     ? formatDimensaoMm(lengthValMm) 
     : (cleanPart(item.length || item.comprimento) ? formatDimensaoMm(item.length || item.comprimento) : "");
 
-  const cWidthLength = cleanPart(item.widthLength);
+  // Se largura/comprimento não vieram separados mas widthLength contém dimensões combinadas (ex: "45 x 88")
+  if ((!widthMmStr || !lengthMmStr) && cWidthLength) {
+    if (cWidthLength.includes('x') || cWidthLength.includes('×')) {
+      const parts = cWidthLength.replace(/×/g, 'x').split('x').map(p => p.trim()).filter(Boolean);
+      if (parts.length >= 2) {
+        if (!widthMmStr) widthMmStr = formatDimensaoMm(parts[0]);
+        if (!lengthMmStr) lengthMmStr = formatDimensaoMm(parts[1]);
+      } else if (parts.length === 1 && !lengthMmStr) {
+        lengthMmStr = formatDimensaoMm(parts[0]);
+      }
+    } else if (!lengthMmStr) {
+      lengthMmStr = formatDimensaoMm(cWidthLength);
+    }
+  }
+
+  // Se measureRaw vier como uma string composta por 'x' (ex: "1/2 x 45 x 88" ou "12,7 x 45 x 88")
+  if (measureRaw && (measureRaw.includes('x') || measureRaw.includes('×'))) {
+    const rawParts = measureRaw.replace(/×/g, 'x').split('x').map(p => p.trim()).filter(Boolean);
+    if (rawParts.length >= 3) {
+      // 1ª dimensão = Espessura (Polegadas), 2ª e 3ª = Largura e Comprimento (mm)
+      const pEsp = formatDimensaoPolegada(rawParts[0]);
+      const pLarg = formatDimensaoMm(rawParts[1]);
+      const pComp = formatDimensaoMm(rawParts[2]);
+      return normalizarMedida(`${pEsp} x ${pLarg} x ${pComp}`);
+    } else if (rawParts.length === 2) {
+      if (geometry === "macico" || geometry === "redondo" || geometry === "redondo_quadrado") {
+        let pDia = formatDimensaoPolegada(rawParts[0]);
+        if (!pDia.startsWith("Ø")) pDia = `Ø ${pDia}`;
+        const pComp = formatDimensaoMm(rawParts[1]);
+        return normalizarMedida(`${pDia} x ${pComp}`);
+      } else {
+        const pEsp = formatDimensaoPolegada(rawParts[0]);
+        const pComp = formatDimensaoMm(rawParts[1]);
+        return normalizarMedida(`${pEsp} x ${pComp}`);
+      }
+    }
+  }
 
   let resultado = "";
 
@@ -698,7 +758,7 @@ export function formatarMedidasLimpa(item: Record<string, any>): string {
     }
   }
   // 2. MACIÇO / REDONDO / QUADRADO: Diâmetro (pol) x Comprimento (mm)
-  // Exemplo correto na tela: Ø 1" x 1000mm
+  // Exemplo correto na proposta: Ø 1" x 1000mm
   else if (geometry === "macico" || geometry === "redondo" || geometry === "redondo_quadrado") {
     let diam = diaPol || thickPol || (measureRaw ? formatDimensaoPolegada(measureRaw) : "");
     if (diam && !diam.startsWith("Ø")) {
@@ -709,7 +769,7 @@ export function formatarMedidasLimpa(item: Record<string, any>): string {
     resultado = normalizarMedida(tokens.join(" x "));
   }
   // 3. CHAPA / RETÂNGULO / PLACA: Espessura (pol) x Largura (mm) x Comprimento (mm)
-  // Exemplo correto na tela: 1/2" x 50mm x 1000mm
+  // Exemplo correto na proposta: 1/2" x 45mm x 88mm
   else if (
     geometry === "chapa" ||
     geometry === "placa" ||
@@ -731,7 +791,7 @@ export function formatarMedidasLimpa(item: Record<string, any>): string {
     if (tokens.length >= 2) {
       resultado = normalizarMedida(tokens.join(" x "));
     } else {
-      resultado = normalizarMedida([primary, cWidthLength].filter(Boolean).join(" x "));
+      resultado = normalizarMedida([primary, cWidthLength ? formatDimensaoMm(cWidthLength) : ""].filter(Boolean).join(" x "));
     }
   }
 
@@ -747,14 +807,62 @@ export function formatarMedidasLimpa(item: Record<string, any>): string {
 export const formatarMedida = formatarMedidasLimpa;
 
 /**
- * Extrai a observação específica e manual de um item.
+ * Retorna a especificação técnica detalhada ou o texto descritivo do item,
+ * garantindo que a coluna "Descrição" NUNCA duplique o nome do material.
+ * Se o campo descrição for igual ao nome do material ou estiver vazio,
+ * exibe a especificação técnica detalhada ou o formato do corte
+ * (ex: "Retângulo", "Trefilado", "Bucha / Tubo Mecânico", etc.).
+ */
+export function formatItemDescription(item: any): string {
+  if (!item) return "-";
+  const matName = String(item.constanteNome || item.constantName || item.material || item.produto || "").trim();
+  const rawDesc = String(item.descricao || item.description || item.formato || item.tipoCorte || "").trim();
+  const geometry = String(item.geometryType || item.geometry || item.tipo || item.profileType || "").toLowerCase();
+
+  const getFormatoPadrao = (): string => {
+    if (geometry === "macico" || geometry === "redondo" || geometry === "redondo_quadrado") {
+      return "Trefilado";
+    }
+    if (geometry === "bucha" || geometry === "tubo" || geometry === "tubo_bucha") {
+      return "Bucha / Tubo Mecânico";
+    }
+    return "Retângulo";
+  };
+
+  if (!rawDesc || rawDesc === "-" || rawDesc === "—") {
+    return getFormatoPadrao();
+  }
+
+  // Normalização para comparar com o nome do material
+  const normMat = matName.toLowerCase().replace(/\s+/g, " ").trim();
+  const normDesc = rawDesc.toLowerCase().replace(/\s+/g, " ").trim();
+
+  // Se a descrição for exatamente igual ao material ou variação sem pontuação
+  if (normMat && (normDesc === normMat || normDesc.replace(/[^a-z0-9]/g, '') === normMat.replace(/[^a-z0-9]/g, ''))) {
+    return getFormatoPadrao();
+  }
+
+  // Se a descrição começa com o nome do material seguido de hífen/dois-pontos (ex: "OXICORTE A36 - Retângulo" ou "A36 - CONF DESENHO")
+  if (normMat && (normDesc.startsWith(normMat + " -") || normDesc.startsWith(normMat + " :") || normDesc.startsWith(normMat + ":"))) {
+    const semPrefixo = rawDesc.slice(matName.length).replace(/^[\s\-:]+/, '').trim();
+    if (semPrefixo) {
+      return semPrefixo;
+    }
+    return getFormatoPadrao();
+  }
+
+  return rawDesc;
+}
+
+/**
+ * Extrai a observação específica e manual de um item (ex: "CONF DESENHO", códigos de peça, tolerâncias).
  * Retorna null se:
  * - O campo for nulo, undefined, vazio ou contiver apenas espaços/traços ("-", "—").
  * - Conter textos padrão/genéricos do sistema (ex: "Preços com impostos inclusos...", "Material sujeito a conferência...").
  */
 export function getObservacaoEspecificaItem(item: any): string | null {
   if (!item || typeof item !== 'object') return null;
-  const raw = item.observacao ?? item.obs ?? item.notes ?? item.observacoes ?? item.informacoes;
+  const raw = item.observacao ?? item.obs ?? item.notes ?? item.observacoes ?? item.informacoes ?? item.info ?? item.informacao;
   if (!raw || typeof raw !== 'string') return null;
   const trimmed = raw.trim();
   if (!trimmed || trimmed === '-' || trimmed === '—' || trimmed.toLowerCase() === 'n/a') {
@@ -787,13 +895,13 @@ export function renderizarTabelaRelatorio(listaItens: any[]): void {
     // 1. Nome do Material (Constante)
     const produtoMaterial = item.constanteNome || item.constantName || item.material || "MATERIAL";
     
-    // 2. Medidas limpas
+    // 2. Medidas limpas com formato oficial (Espessura/Diâmetro em polegadas, Largura/Comprimento em mm)
     const medidasFormatadas = formatarMedidasLimpa(item);
 
-    // 3. Descrição
-    const descricaoItem = item.descricao || item.description || "-";
+    // 3. Descrição limpa sem duplicar o material
+    const descricaoItem = formatItemDescription(item);
 
-    // 4. Observação Específica do Item
+    // 4. Observação / Informações específicas do Item
     const obsItem = getObservacaoEspecificaItem(item);
 
     const tr = document.createElement('tr');
