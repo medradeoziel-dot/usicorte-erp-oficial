@@ -933,25 +933,30 @@ function gravarSequencialLocal(nextSequential: number) {
   return local;
 }
 
-export function updateEmitenteNextSequential(nextSequential: number): Promise<boolean> {
-  // Atualiza o cache local NA HORA, antes de ir ao banco
-  gravarSequencialLocal(nextSequential);
-  const p = updateEmitenteNextSequentialDb(nextSequential);
+export function updateEmitenteNextSequential(nextSequential: number, permitirDiminuir: boolean = false): Promise<boolean> {
+  const p = updateEmitenteNextSequentialDb(nextSequential, permitirDiminuir);
   pendingSequentialUpdate = p;
   p.finally(() => { if (pendingSequentialUpdate === p) pendingSequentialUpdate = null; });
   return p;
 }
 
-async function updateEmitenteNextSequentialDb(nextSequential: number): Promise<boolean> {
+async function updateEmitenteNextSequentialDb(nextSequential: number, permitirDiminuir: boolean = false): Promise<boolean> {
   try {
     const { data: existing } = await db
       .from('emitente')
-      .select('id')
+      .select('id, proximo_numero_sequencial')
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
 
     if (existing && existing.id) {
+      // Com vários computadores, o contador NUNCA volta para trás
+      // (só volta se você mudar manualmente na configuração).
+      const atual = parseInt(String(existing.proximo_numero_sequencial ?? 0), 10) || 0;
+      if (!permitirDiminuir && atual > nextSequential) {
+        nextSequential = atual;
+      }
+      gravarSequencialLocal(nextSequential);
       const { error } = await db
         .from('emitente')
         .update({
@@ -1039,7 +1044,7 @@ export function setQuoteSequentialConfig(nextSequential: number, prefix?: string
     comp.quotePrefix = prefix;
     comp.prefixo_cotacao = prefix;
   }
-  updateEmitenteNextSequential(nextSequential).catch(() => {});
+  updateEmitenteNextSequential(nextSequential, true).catch(() => {});
 }
 
 /**
