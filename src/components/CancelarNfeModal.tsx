@@ -22,6 +22,69 @@ import {
   NfeCancellationResult
 } from '../services/nfeService';
 
+// Shared source for the standalone cancellation-screen delivery. No requests are made here.
+function normalizarRetornoCancelamento(entrada: unknown) {
+  const obj = entrada && typeof entrada === 'object' ? entrada as Record<string, unknown> : {};
+  const texto = (valor: unknown): string => typeof valor === 'string' ? valor.trim() : '';
+  const codigo = (valor: unknown): string => typeof valor === 'number' ? String(valor) : texto(valor);
+  const aceitos = ['135', '136', '155'];
+  const mensagem = texto(obj['mensagemErro']) || texto(obj['message']) || texto(obj['xMotivo']);
+  const xml = texto(obj['xmlCancelamento']) || texto(obj['xmlRetorno']) || texto(obj['xml']);
+  const jaCancelada = obj['jaCancelada'] === true;
+  let cStat = codigo(obj['cStatNota']) || codigo(obj['cStat']) || codigo(obj['codigoSefaz']);
+  let protocolo = texto(obj['protocoloCancelamento']);
+  let data = texto(obj['dataCancelamento']);
+  let xmlEvento = texto(obj['xmlCancelamento']);
+
+  // Read only SEFAZ event responses, never the signed request or an authorization protocol.
+  if (xml && !jaCancelada) {
+    const doc = new DOMParser().parseFromString(xml, 'application/xml');
+    if (doc.getElementsByTagName('parsererror').length === 0) {
+      const retornos = Array.from(doc.getElementsByTagNameNS('*', 'retEvento'));
+      for (const retorno of retornos) {
+        const info = retorno.getElementsByTagNameNS('*', 'infEvento')[0];
+        if (!info) continue;
+        const ler = (nome: string) => info.getElementsByTagNameNS('*', nome)[0]?.textContent?.trim() || '';
+        const tipo = ler('tpEvento');
+        if (tipo && tipo !== '110111') continue;
+        const statusEvento = ler('cStat');
+        if (!statusEvento) continue;
+        cStat = statusEvento;
+        protocolo = ler('nProt') || protocolo;
+        data = ler('dhRegEvento') || data;
+        xmlEvento = xml;
+        break;
+      }
+    }
+  }
+
+  // The current service sometimes discards all fields and returns just this labelled error.
+  // Require both the exact SEFAZ label and its official reason; never search for arbitrary digits.
+  if (!cStat) {
+    const rotulada = mensagem.match(/^Rejei[çc][ãa]o SEFAZ\s+(135|136|155)\s*:\s*(.+)$/i);
+    const numero = rotulada?.[1];
+    const motivo = rotulada?.[2] || '';
+    if (numero === '155' && /^Cancelamento homologado fora de prazo\b/i.test(motivo)) cStat = numero;
+    if (numero === '135' && /^Evento registrado e vinculado\b/i.test(motivo)) cStat = numero;
+    if (numero === '136' && /^Evento registrado,? mas n[ãa]o vinculado\b/i.test(motivo)) cStat = numero;
+  }
+
+  const confirmado = aceitos.includes(cStat) || jaCancelada ||
+    (!cStat && obj['sucesso'] === true && obj['statusNfe'] === 'CANCELADA');
+  return {
+    confirmado,
+    cStat,
+    jaCancelada,
+    protocoloCancelamento: protocolo,
+    dataCancelamento: data,
+    xmlCancelamento: xmlEvento,
+    mensagem: jaCancelada ? 'Esta NF-e já consta como cancelada na SEFAZ. Nenhum novo evento foi enviado.' :
+      cStat === '155' ? 'Cancelamento homologado fora de prazo.' :
+      cStat === '136' ? 'Evento registrado, mas não vinculado à NF-e. Confirme a situação da nota na SEFAZ.' :
+      'Cancelamento confirmado pela SEFAZ.'
+  };
+}
+
 interface CancelarNfeModalProps {
   quote: Quote;
   client?: Client | null;
@@ -47,6 +110,7 @@ export default function CancelarNfeModal({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<boolean>(false);
   const [resultado, setResultado] = useState<NfeCancellationResult | null>(null);
+  const [retornoSefaz, setRetornoSefaz] = useState<ReturnType<typeof normalizarRetornoCancelamento> | null>(null);
   const [hasConfirmedCheckbox, setHasConfirmedCheckbox] = useState<boolean>(true);
 
   // Chave de acesso oficial (44 dígitos) com resolução resiliente
@@ -90,6 +154,37 @@ export default function CancelarNfeModal({
     setErrorMsg(null);
   };
 
+  const registrarCancelamento = (
+    original: Partial<NfeCancellationResult>,
+    retorno: ReturnType<typeof normalizarRetornoCancelamento>
+  ) => {
+    setRetornoSefaz(retorno);
+    setResultado({
+      ...original,
+      sucesso: true,
+      statusNfe: 'CANCELADA',
+      protocoloCancelamento: retorno.protocoloCancelamento,
+      xmlCancelamento: retorno.xmlCancelamento,
+      dataCancelamento: retorno.dataCancelamento
+    } as NfeCancellationResult);
+    setErrorMsg(null);
+    const updatedQuote: Quote = {
+      ...quote,
+      status_nfe: 'CANCELADA',
+      motivo_cancelamento: justificativa.trim()
+    };
+    // Do not fabricate an event protocol or timestamp when the service only returns a message.
+    if (retorno.protocoloCancelamento) updatedQuote.protocolo_cancelamento = retorno.protocoloCancelamento;
+    if (retorno.xmlCancelamento) updatedQuote.xml_cancelamento = retorno.xmlCancelamento;
+    if (retorno.dataCancelamento) updatedQuote.nfe_cancelada_em = retorno.dataCancelamento;
+    try {
+      onSuccess(updatedQuote);
+    } catch (erroAtualizacao) {
+      console.error('Cancelamento confirmado, mas falhou a atualização do sistema:', erroAtualizacao);
+      setErrorMsg('A SEFAZ confirmou o cancelamento, mas não foi possível atualizar o sistema. Não transmita novamente.');
+    }
+  };
+
   const handleConfirmarCancelamento = async () => {
     if (!isJustificativaValida) {
       setErrorMsg('A justificativa deve conter no mínimo 15 caracteres para transmissão à SEFAZ.');
@@ -107,23 +202,20 @@ export default function CancelarNfeModal({
     try {
       const res = await transmitirCancelamentoNfeSefaz(quote, justificativa.trim());
 
-      if (res.sucesso && res.statusNfe === 'CANCELADA') {
-        setResultado(res);
-        const updatedQuote: Quote = {
-          ...quote,
-          status_nfe: 'CANCELADA',
-          protocolo_cancelamento: res.protocoloCancelamento,
-          xml_cancelamento: res.xmlCancelamento,
-          motivo_cancelamento: justificativa.trim(),
-          nfe_cancelada_em: res.dataCancelamento || new Date().toISOString()
-        };
-        onSuccess(updatedQuote);
+      const retorno = normalizarRetornoCancelamento(res);
+      if (retorno.confirmado) {
+        registrarCancelamento(res, retorno);
       } else {
         setErrorMsg(res.mensagemErro || 'Rejeição da SEFAZ ao tentar cancelar a NF-e.');
       }
     } catch (err: any) {
-      console.error('Erro ao transmitir cancelamento para SEFAZ:', err);
-      setErrorMsg(err?.message || 'Falha de comunicação com a SEFAZ.');
+      const retorno = normalizarRetornoCancelamento(err);
+      if (retorno.confirmado) {
+        registrarCancelamento({}, retorno);
+      } else {
+        console.error('Erro ao transmitir cancelamento para SEFAZ:', err);
+        setErrorMsg(err?.message || 'Falha de comunicação com a SEFAZ.');
+      }
     } finally {
       setIsTransmitting(false);
     }
@@ -162,7 +254,7 @@ export default function CancelarNfeModal({
                 Cancelamento de NF-e Homologada
               </h2>
               <p className="text-xs text-slate-400 mt-0.5">
-                Transmissão do evento de cancelamento oficial da SEFAZ (Modelo 55 • Status 101)
+                Transmissão do evento de cancelamento oficial da SEFAZ (Modelo 55)
               </p>
             </div>
           </div>
@@ -188,29 +280,31 @@ export default function CancelarNfeModal({
                 </div>
                 <div>
                   <h3 className="text-sm font-black text-emerald-300 uppercase tracking-wide">
-                    Cancelamento Homologado com Sucesso! (Status 101)
+                    Nota cancelada
                   </h3>
                   <p className="text-xs text-slate-300 mt-1">
-                    O evento de cancelamento foi registrado e autorizado no ambiente da SEFAZ. O status da NF-e foi atualizado para <strong>CANCELADA</strong> no Supabase.
+                    {retornoSefaz?.mensagem || 'Cancelamento confirmado pela SEFAZ.'} Não transmita o cancelamento novamente.
                   </p>
                 </div>
               </div>
+
+              {errorMsg && <p role="alert" className="text-xs text-amber-300">{errorMsg}</p>}
 
               {/* Detalhes do Evento Homologado */}
               <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 space-y-2.5 text-xs font-mono">
                 <div className="flex justify-between items-center py-1 border-b border-slate-800">
                   <span className="text-slate-400">Protocolo de Cancelamento:</span>
-                  <span className="text-emerald-400 font-bold">{resultado.protocoloCancelamento}</span>
+                  <span className="text-emerald-400 font-bold">{resultado.protocoloCancelamento || 'Não informado no retorno'}</span>
                 </div>
                 <div className="flex justify-between items-center py-1 border-b border-slate-800">
                   <span className="text-slate-400">Data e Hora do Evento:</span>
                   <span className="text-slate-200">
-                    {resultado.dataCancelamento ? new Date(resultado.dataCancelamento).toLocaleString('pt-BR') : new Date().toLocaleString('pt-BR')}
+                    {resultado.dataCancelamento ? new Date(resultado.dataCancelamento).toLocaleString('pt-BR') : 'Não informada no retorno'}
                   </span>
                 </div>
                 <div className="flex justify-between items-center py-1 border-b border-slate-800">
                   <span className="text-slate-400">Status Retorno SEFAZ:</span>
-                  <span className="text-emerald-300 font-bold">101 - Cancelamento de NF-e homologado</span>
+                  <span className="text-emerald-300 font-bold">{retornoSefaz?.cStat ? `${retornoSefaz.cStat} - ${retornoSefaz.mensagem}` : 'Cancelamento confirmado'}</span>
                 </div>
                 <div className="flex justify-between items-center py-1 border-b border-slate-800">
                   <span className="text-slate-400">Chave de Acesso:</span>
@@ -233,10 +327,11 @@ export default function CancelarNfeModal({
                 <button
                   type="button"
                   onClick={handleDownloadXmlCancel}
+                  disabled={!resultado.xmlCancelamento}
                   className="flex-1 px-4 py-2.5 bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-xs rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <Download className="w-4 h-4" />
-                  Baixar XML do Evento de Cancelamento
+                  {resultado.xmlCancelamento ? 'Baixar XML do Evento de Cancelamento' : 'XML do evento não disponível'}
                 </button>
                 <button
                   type="button"
