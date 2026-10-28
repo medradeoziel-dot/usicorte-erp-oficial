@@ -1,5 +1,5 @@
 import { db, isUuid, deleteCotacaoDb } from '../lib/db';
-import { resolveNextUniqueQuoteNumber } from './companyService';
+import { resolveNextUniqueQuoteNumber, aguardarAtualizacaoSequencial } from './companyService';
 
 export interface CotacaoReservaResultado {
   id: string; // UUID do registro oficial criado no Supabase
@@ -25,36 +25,43 @@ async function numeroJaExisteNoBanco(numero: string): Promise<boolean> {
 }
 
 async function maiorSequencialDoBanco(prefix: string): Promise<number> {
+  // Busca TODOS os números do prefixo e calcula o maior NUMERICAMENTE
+  // (ordenar texto falha quando há larguras diferentes, ex: "999" > "001184").
+  let maior = 0;
   try {
-    const { data } = await db
-      .from('cotacoes')
-      .select('numero')
-      .like('numero', `${prefix}%`)
-      .order('numero', { ascending: false })
-      .limit(1);
-    const n = data && data[0] ? String((data[0] as any).numero || '') : '';
-    const m = n.match(/(\d+)$/);
-    return m ? parseInt(m[1], 10) : 0;
-  } catch {
-    return 0;
-  }
+    const pageSize = 1000;
+    for (let from = 0; from < 50000; from += pageSize) {
+      const { data, error } = await db
+        .from('cotacoes')
+        .select('numero')
+        .like('numero', `${prefix}%`)
+        .range(from, from + pageSize - 1);
+      if (error || !data || data.length === 0) break;
+      for (const row of data as any[]) {
+        const m = String(row?.numero || '').match(/(\d+)$/);
+        if (m) maior = Math.max(maior, parseInt(m[1], 10));
+      }
+      if (data.length < pageSize) break;
+    }
+  } catch {}
+  return maior;
 }
 
 /**
- * Garante que o número sugerido ainda NÃO existe na tabela cotacoes.
- * Se já existir (contador da RPC/emitente desatualizado), pula para o maior número + 1.
+ * Garante que o número sugerido é SEMPRE maior que qualquer número já salvo.
+ * Mesmo que a RPC/emitente esteja com contador atrasado, pula para maior + 1.
  */
 async function garantirNumeroLivre(numero: string): Promise<string> {
-  if (!(await numeroJaExisteNoBanco(numero))) return numero;
   const m = numero.match(/^(.*?)(\d+)$/);
   if (!m) return numero;
   const prefix = m[1];
   const largura = Math.max(6, m[2].length);
-  let seq = Math.max(parseInt(m[2], 10), await maiorSequencialDoBanco(prefix)) + 1;
+  // Respeita SEMPRE o número configurado no emitente. Só avança (+1) se o número exato já existir.
+  let seq = parseInt(m[2], 10);
   for (let i = 0; i < 50; i++) {
     const cand = `${prefix}${String(seq).padStart(largura, '0')}`;
     if (!(await numeroJaExisteNoBanco(cand))) {
-      console.warn(`[Reserva Cotação] Número ${numero} já existia. Avançando para ${cand}.`);
+      if (cand !== numero) console.warn(`[Reserva Cotação] ${numero} ocupado/atrasado. Usando ${cand}.`);
       return cand;
     }
     seq++;
@@ -68,7 +75,19 @@ export async function obterProximoNumeroCotacaoAtomics(): Promise<string> {
 }
 
 async function obterProximoNumeroCotacaoBruto(): Promise<string> {
-  // 1. Tenta chamar a RPC oficial no Supabase conforme solicitado
+  // 1. PRIORIDADE: número configurado no Emitente (sempre lido do banco, sem cache)
+  await aguardarAtualizacaoSequencial();
+  try {
+    const res = await resolveNextUniqueQuoteNumber();
+    if (res?.quoteNumber) {
+      console.log('[Reserva Cotação] Número sequencial atômico calculado via cotacoes/emitente:', res.quoteNumber);
+      return res.quoteNumber;
+    }
+  } catch (err) {
+    console.warn('[Reserva Cotação] Fallback resolveNextUniqueQuoteNumber falhou:', err);
+  }
+
+  // 2. Reserva: RPC do banco (só se a configuração do Emitente falhar)
   try {
     const { data, error } = await db.rpc('gerar_proximo_numero_cotacao');
     if (!error && data !== null && data !== undefined) {
@@ -114,104 +133,44 @@ async function obterProximoNumeroCotacaoBruto(): Promise<string> {
     console.warn('[Reserva Cotação] Exceção ao chamar RPC gerar_proximo_numero_cotacao:', err);
   }
 
-  // 2. Fallback resiliente: Cálculo sequencial atômico consultando 'cotacoes' e 'emitente'
-  try {
-    const res = await resolveNextUniqueQuoteNumber();
-    if (res?.quoteNumber) {
-      console.log('[Reserva Cotação] Número sequencial atômico calculado via cotacoes/emitente:', res.quoteNumber);
-      return res.quoteNumber;
-    }
-  } catch (err) {
-    console.warn('[Reserva Cotação] Fallback resolveNextUniqueQuoteNumber falhou:', err);
-  }
-
   // 3. Fallback de emergência caso offline
-  const ano = new Date().getFullYear();
-  return `COT-${ano}-${String(Date.now()).slice(-6)}`;
+  // Nunca gerar número a partir do relógio (isso criava números como 021933 e quebrava a sequência)
+  const { getQuoteSequentialConfig } = await import('./companyService');
+  const cfg = getQuoteSequentialConfig();
+  return `${cfg.prefix || 'COT-2026-'}${String(cfg.nextSequential).padStart(6, '0')}`;
 }
 
 /**
- * 2. RESERVA IMEDIATA NO SUPABASE (RASCUNHO AUTOMÁTICO):
- * Assim que o usuário clica em "Nova Cotação" ou abre a tela:
- * - Chama a função SQL atômica `gerar_proximo_numero_cotacao`
- * - Insere imediatamente um registro inicial no Supabase com status: 'RASCUNHO' gravando o numero_cotacao
- * - O segundo computador que abrir a tela verá o número já ocupado e pulará para o próximo (+1).
+ * 2. NOVA COTAÇÃO (SEM RASCUNHO AUTOMÁTICO):
+ * Ao abrir "Nova Cotação" NADA é gravado no banco.
+ * Só mostramos o PRÓXIMO número previsto. O número só vale de verdade
+ * quando o usuário clica em "Salvar Cotação".
+ * Se dois computadores salvarem ao mesmo tempo, o banco (gatilho SQL
+ * "atribuir_numero_cotacao") dá um número diferente para cada um.
  */
 export async function reservarNovaCotacaoNoSupabase(
-  currentUser?: string
+  _currentUser?: string
 ): Promise<CotacaoReservaResultado> {
-  const maxTentativas = 5;
-
-  for (let tentativa = 1; tentativa <= maxTentativas; tentativa++) {
-    const proximoNumero = await obterProximoNumeroCotacaoAtomics();
-    const hoje = new Date().toISOString().split('T')[0];
-
-    // Payload de reserva inicial imediata no banco
-    const payloadBase: Record<string, any> = {
-      numero: proximoNumero,
-      data: hoje,
-      cliente_nome: 'Rascunho em Edição',
-      status: 'rascunho',
-      situacao: 'RASCUNHO',
-      valor_total: 0,
-      observacoes: 'Reserva automática imediata contra concorrência simultânea.',
-      created_by: currentUser || undefined
-    };
-
-    try {
-      // 1. Tenta INSERT direto na tabela 'cotacoes'
-      let res = await db
-        .from('cotacoes')
-        .insert([payloadBase])
-        .select('id, numero, status, created_at')
-        .single();
-
-      // 2. Se falhar por constraint de status uppercase, tenta com 'RASCUNHO'
-      if (res.error && (res.error.message?.toLowerCase().includes('status') || res.error.message?.toLowerCase().includes('check'))) {
-        const payloadUpper = { ...payloadBase, status: 'RASCUNHO' };
-        res = await db
-          .from('cotacoes')
-          .insert([payloadUpper])
-          .select('id, numero, status, created_at')
-          .single();
-      }
-
-      // 3. Se foi inserido com sucesso, retorna os dados da reserva garantida
-      if (!res.error && res.data?.id) {
-        console.log(`[Reserva Cotação] SUCESSO: Cotação ${proximoNumero} reservada no Supabase! ID=${res.data.id}, status=${res.data.status}`);
-        return {
-          id: String(res.data.id),
-          numero: String(res.data.numero || proximoNumero),
-          data: hoje,
-          status: 'rascunho',
-          success: true
-        };
-      }
-
-      // 4. Se erro de chave duplicada (outro computador reservou exatamente no mesmo instante):
-      if (res.error && (res.error.code === '23505' || res.error.message?.includes('duplicate key') || res.error.message?.includes('unique'))) {
-        console.warn(`[Reserva Cotação] Conflito concorrente detectado no número ${proximoNumero} (tentativa ${tentativa}/${maxTentativas}). Buscando próximo número...`);
-        continue;
-      }
-
-      console.warn('[Reserva Cotação] Supabase retornou erro ao reservar:', res.error);
-    } catch (err) {
-      console.warn(`[Reserva Cotação] Exceção na tentativa ${tentativa}:`, err);
-    }
-  }
-
-  // Fallback local se o banco estiver totalmente offline
-  const fallbackNum = await obterProximoNumeroCotacaoAtomics();
-  const fallbackId = `TEMP-LOCAL-${Date.now()}`;
-  console.warn('[Reserva Cotação] Usando fallback local provisório:', fallbackId);
+  const numeroPrevisto = await obterProximoNumeroCotacaoAtomics();
+  const hoje = new Date().toISOString().split('T')[0];
+  console.log(`[Nova Cotação] Número previsto ${numeroPrevisto} (ainda não gravado - só grava ao Salvar).`);
   return {
-    id: fallbackId,
-    numero: fallbackNum,
-    data: new Date().toISOString().split('T')[0],
-    status: 'RASCUNHO',
-    success: false,
+    // ID provisório: a tela trata como cotação NOVA e faz INSERT ao salvar
+    id: `TEMP-LOCAL-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    numero: numeroPrevisto,
+    data: hoje,
+    status: 'rascunho',
+    success: true,
     isFallbackLocal: true
   };
+}
+
+/**
+ * Busca o número de novo logo antes de salvar (outro computador pode ter salvo antes).
+ * Use na tela, no botão "Salvar Cotação", antes do INSERT de uma cotação nova.
+ */
+export async function obterNumeroAtualizadoParaSalvar(): Promise<string> {
+  return obterProximoNumeroCotacaoAtomics();
 }
 
 /**
@@ -225,6 +184,8 @@ export async function cancelarOuDescartarRascunho(
   cotacaoNumero?: string
 ): Promise<{ success: boolean; error?: any }> {
   if (!cotacaoId) return { success: true };
+  // Cotação nova que nunca foi salva: não existe no banco, nada para apagar
+  if (String(cotacaoId).startsWith('TEMP-')) return { success: true };
 
   try {
     // 1. Verifica se a cotação possui itens cadastrados
@@ -266,5 +227,32 @@ export async function cancelarOuDescartarRascunho(
   } catch (e) {
     console.warn('[Reserva Cotação] Erro ao descartar rascunho:', e);
     return { success: false, error: e };
+  }
+}
+
+/**
+ * 4. LIMPEZA DE RASCUNHOS VAZIOS:
+ * Remove do banco todos os rascunhos sem itens, liberando os números.
+ * Retorna quantos foram removidos.
+ */
+export async function limparRascunhosVaziosDb(): Promise<{ success: boolean; removidos: number; error?: any }> {
+  let removidos = 0;
+  try {
+    const { data: rascunhos, error } = await db
+      .from('cotacoes')
+      .select('id, numero, status')
+      .in('status', ['rascunho', 'RASCUNHO']);
+    if (error) return { success: false, removidos: 0, error };
+
+    for (const r of (rascunhos || []) as any[]) {
+      const { data: itens } = await db.from('cotacao_itens').select('id').eq('cotacao_id', r.id).limit(1);
+      if (itens && itens.length > 0) continue;
+      const { error: delErr } = await db.from('cotacoes').delete().eq('id', r.id);
+      if (!delErr) removidos++;
+    }
+    return { success: true, removidos };
+  } catch (e) {
+    console.warn('[Reserva Cotação] Erro ao limpar rascunhos vazios:', e);
+    return { success: false, removidos, error: e };
   }
 }
