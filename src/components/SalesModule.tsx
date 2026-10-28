@@ -14,6 +14,8 @@ import {
   formatSafeDate,
   getSafeISODate,
   formatarMedidasLimpa,
+  formatDimensaoPolegada,
+  formatDimensaoMm,
   renderizarTabelaRelatorio,
   parseNumberBR, 
   parseDimensionToMm,
@@ -70,6 +72,7 @@ import {
 } from './ConsultaPrintDocuments';
 import QuoteHistoryModal from './QuoteHistoryModal';
 import MaterialAutocomplete, { AutocompleteOption } from './MaterialAutocomplete';
+import ImportExcelCsvModal from './ImportExcelCsvModal';
 import {
   FileSpreadsheet,
   PlusCircle,
@@ -587,6 +590,7 @@ export default function SalesModule({
   const [autoCalcWeight, setAutoCalcWeight] = useState<number | null>(null);
 
   // Modals & History state
+  const [isExcelImportModalOpen, setIsExcelImportModalOpen] = useState<boolean>(false);
   const [showHistoryModal, setShowHistoryModal] = useState<boolean>(false);
   const [showPrintModal, setShowPrintModal] = useState<boolean>(false);
   const [showPrintOptionsModal, setShowPrintOptionsModal] = useState<boolean>(false);
@@ -1509,11 +1513,14 @@ export default function SalesModule({
       ? unitPriceNum
       : (parseNumberBR(itemPricePerKg) || (unitWeightKg > 0 ? unitPriceNum / unitWeightKg : undefined));
 
+    const widthMmFormatted = effectiveWidthMm > 0 ? `${effectiveWidthMm}mm` : (itemWidthMm.trim() ? formatDimensaoMm(itemWidthMm) : '');
+    const lengthMmFormatted = effectiveLengthMm > 0 ? `${effectiveLengthMm}mm` : (itemLengthMm.trim() ? formatDimensaoMm(itemLengthMm) : '');
+
     const formattedWidthLength = isSpecialItem
       ? '—'
       : (itemGeometryType === 'CHAPA_RETANGULO' || itemGeometryType === 'chapa'
-          ? (effectiveWidthMm > 0 && effectiveLengthMm > 0 ? `${effectiveWidthMm} x ${effectiveLengthMm} mm` : itemWidthLength.trim() || '-')
-          : (effectiveLengthMm > 0 ? `${effectiveLengthMm} mm` : itemWidthLength.trim() || '-'));
+          ? (widthMmFormatted && lengthMmFormatted ? `${widthMmFormatted} x ${lengthMmFormatted}` : itemWidthLength.trim() || '-')
+          : (lengthMmFormatted ? `${lengthMmFormatted}` : itemWidthLength.trim() || '-'));
 
     const itemMatName = itemConstantName.trim() || (isSpecialItem ? itemDescription.trim() : 'CHAPA');
     const tempItemData = {
@@ -1531,6 +1538,11 @@ export default function SalesModule({
       ? '—'
       : formatarMedidasLimpa(tempItemData);
 
+    const thickFormatted = isSpecialItem ? '' : (effectiveThicknessMm > 0 ? formatDimensaoPolegada(effectiveThicknessMm) : (itemThickness.trim() ? formatDimensaoPolegada(itemThickness) : ''));
+    const diaFormatted = isSpecialItem ? '' : (effectiveDiameterMm > 0 ? formatDimensaoPolegada(effectiveDiameterMm) : (itemDiameter.trim() ? formatDimensaoPolegada(itemDiameter) : ''));
+    const widthFormatted = isSpecialItem ? '' : widthMmFormatted;
+    const lengthFormatted = isSpecialItem ? '' : lengthMmFormatted;
+
     let updatedItemsList: QuoteItem[];
 
     if (editingItemId) {
@@ -1547,21 +1559,21 @@ export default function SalesModule({
         geometryType: itemGeometryType,
         constant: isSpecialItem ? '0' : (itemConstant.trim() || '0.00785'),
         pricePerKg: priceKgNum,
-        measure: isSpecialItem ? '—' : (itemThickness.trim() || itemDiameter.trim()),
-        thickness: isSpecialItem ? '' : itemThickness.trim(),
-        espessura: isSpecialItem ? '' : itemThickness.trim(),
+        measure: isSpecialItem ? '—' : (medidasFormatadas || itemThickness.trim() || itemDiameter.trim()),
+        thickness: thickFormatted,
+        espessura: thickFormatted,
         thicknessMm: effectiveThicknessMm > 0 ? effectiveThicknessMm : undefined,
         espessuraMm: effectiveThicknessMm > 0 ? effectiveThicknessMm : undefined,
-        diameter: isSpecialItem ? '' : itemDiameter.trim(),
-        diametro: isSpecialItem ? '' : itemDiameter.trim(),
+        diameter: diaFormatted,
+        diametro: diaFormatted,
         diameterMm: effectiveDiameterMm > 0 ? effectiveDiameterMm : undefined,
         diametroMm: effectiveDiameterMm > 0 ? effectiveDiameterMm : undefined,
         widthLength: formattedWidthLength,
         widthMm: effectiveWidthMm > 0 ? effectiveWidthMm : undefined,
-        largura: isSpecialItem ? '' : itemWidthMm.trim(),
+        largura: widthFormatted,
         larguraMm: effectiveWidthMm > 0 ? effectiveWidthMm : undefined,
         lengthMm: effectiveLengthMm > 0 ? effectiveLengthMm : undefined,
-        comprimento: isSpecialItem ? '' : itemLengthMm.trim(),
+        comprimento: lengthFormatted,
         comprimentoMm: effectiveLengthMm > 0 ? effectiveLengthMm : undefined,
         unitWeightKg: unitWeightKg,
         totalWeightKg: totalWeightKg,
@@ -1606,21 +1618,21 @@ export default function SalesModule({
         geometryType: itemGeometryType,
         constant: isSpecialItem ? '0' : (itemConstant.trim() || '0.00785'),
         pricePerKg: priceKgNum,
-        measure: isSpecialItem ? '—' : (itemThickness.trim() || itemDiameter.trim()),
-        thickness: isSpecialItem ? '' : itemThickness.trim(),
-        espessura: isSpecialItem ? '' : itemThickness.trim(),
+        measure: isSpecialItem ? '—' : (medidasFormatadas || itemThickness.trim() || itemDiameter.trim()),
+        thickness: thickFormatted,
+        espessura: thickFormatted,
         thicknessMm: effectiveThicknessMm > 0 ? effectiveThicknessMm : undefined,
         espessuraMm: effectiveThicknessMm > 0 ? effectiveThicknessMm : undefined,
-        diameter: isSpecialItem ? '' : itemDiameter.trim(),
-        diametro: isSpecialItem ? '' : itemDiameter.trim(),
+        diameter: diaFormatted,
+        diametro: diaFormatted,
         diameterMm: effectiveDiameterMm > 0 ? effectiveDiameterMm : undefined,
         diametroMm: effectiveDiameterMm > 0 ? effectiveDiameterMm : undefined,
         widthLength: formattedWidthLength,
         widthMm: effectiveWidthMm > 0 ? effectiveWidthMm : undefined,
-        largura: isSpecialItem ? '' : itemWidthMm.trim(),
+        largura: widthFormatted,
         larguraMm: effectiveWidthMm > 0 ? effectiveWidthMm : undefined,
         lengthMm: effectiveLengthMm > 0 ? effectiveLengthMm : undefined,
-        comprimento: isSpecialItem ? '' : itemLengthMm.trim(),
+        comprimento: lengthFormatted,
         comprimentoMm: effectiveLengthMm > 0 ? effectiveLengthMm : undefined,
         unitWeightKg: unitWeightKg,
         totalWeightKg: totalWeightKg,
@@ -2844,8 +2856,17 @@ export default function SalesModule({
             </div>
           </div>
 
-          {/* Quick presets shortcut button */}
+          {/* Quick presets & Import spreadsheet shortcut buttons */}
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsExcelImportModalOpen(true)}
+              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+              title="Importar itens de planilha Excel (.xlsx, .xls) ou CSV com mapeamento de colunas e conferência em polegadas"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+              <span>Importar Excel / CSV</span>
+            </button>
             <button
               type="button"
               onClick={handleTriggerAutoCalc}
@@ -3720,8 +3741,18 @@ export default function SalesModule({
             </div>
           </div>
 
-          {items.length > 0 && (
-            <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsExcelImportModalOpen(true)}
+              className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors"
+              title="Importar planilha Excel (.xlsx, .xls) ou CSV com conferência técnica e medidas em polegadas"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Importar Planilha</span>
+            </button>
+
+            {items.length > 0 && (
               <button
                 onClick={() => {
                   if (confirm('Deseja realmente limpar todos os itens deste orçamento?')) {
@@ -3734,8 +3765,8 @@ export default function SalesModule({
                 <Trash2 className="w-3.5 h-3.5" />
                 Limpar Todos os Itens
               </button>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
         {/* Dynamic Responsive Table */}
@@ -3760,12 +3791,20 @@ export default function SalesModule({
               {items.length === 0 ? (
                 <tr>
                   <td colSpan={11} className="py-12 text-center text-slate-400">
-                    <div className="space-y-2">
+                    <div className="space-y-3 max-w-md mx-auto">
                       <Layers className="w-8 h-8 text-slate-300 mx-auto" />
                       <p className="font-semibold text-slate-600">Nenhum item adicionado ainda</p>
                       <p className="text-[11px] text-slate-400">
-                        Preencha o formulário acima e clique em <b>"Adicionar Item"</b> para lançar produtos com cálculo automático por Kg.
+                        Preencha o formulário acima e clique em <b>"Adicionar Item"</b>, ou importe múltiplos itens em lote a partir de uma planilha.
                       </p>
+                      <button
+                        type="button"
+                        onClick={() => setIsExcelImportModalOpen(true)}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-300 rounded-xl text-xs font-bold transition-all shadow-2xs cursor-pointer"
+                      >
+                        <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                        <span>Carregar Planilha Excel / CSV</span>
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -4255,6 +4294,18 @@ export default function SalesModule({
           onClose={() => setQuoteForCancelNfe(null)}
         />
       )}
+
+      {/* MODAL DE IMPORTAÇÃO DE PLANILHA EXCEL / CSV COM CONFERÊNCIA EM POLEGADAS */}
+      <ImportExcelCsvModal
+        isOpen={isExcelImportModalOpen}
+        onClose={() => setIsExcelImportModalOpen(false)}
+        onImportItems={(newItems) => {
+          setItems(prev => [...prev, ...newItems]);
+          setSuccessMessage(`✅ ${newItems.length} itens importados com sucesso da planilha com medidas em polegadas!`);
+          setTimeout(() => setSuccessMessage(null), 5000);
+        }}
+        clientName={clientName || 'UsiCorte Cliente'}
+      />
 
       {/* PORTAL DE IMPRESSÃO DIRETA COM LAYOUTS IDÊNTICOS À CONSULTA */}
       {activeDirectPrint && typeof document !== 'undefined' && createPortal(

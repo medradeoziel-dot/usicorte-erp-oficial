@@ -284,14 +284,14 @@ export async function cancelarOuDescartarRascunho(
  * Remove do banco todos os rascunhos sem itens, liberando os números.
  * Retorna quantos foram removidos.
  */
-export async function limparRascunhosVaziosDb(): Promise<{ success: boolean; removidos: number; error?: any }> {
+export async function limparRascunhosVaziosDb(): Promise<{ success: boolean; removidos: number; purgedCount: number; nextQuoteNumber?: string; error?: any }> {
   let removidos = 0;
   try {
     const { data: rascunhos, error } = await db
       .from('cotacoes')
       .select('id, numero, status')
       .in('status', ['rascunho', 'RASCUNHO']);
-    if (error) return { success: false, removidos: 0, error };
+    if (error) return { success: false, removidos: 0, purgedCount: 0, error };
 
     for (const r of (rascunhos || []) as any[]) {
       const { data: itens } = await db.from('cotacao_itens').select('id').eq('cotacao_id', r.id).limit(1);
@@ -299,9 +299,10 @@ export async function limparRascunhosVaziosDb(): Promise<{ success: boolean; rem
       const { error: delErr } = await db.from('cotacoes').delete().eq('id', r.id);
       if (!delErr) removidos++;
     }
-    return { success: true, removidos };
+    const nextQuoteNumber = await obterProximoNumeroCotacaoAtomics();
+    return { success: true, removidos, purgedCount: removidos, nextQuoteNumber };
   } catch (e) {
     console.warn('[Reserva Cotação] Erro ao limpar rascunhos vazios:', e);
-    return { success: false, removidos, error: e };
+    return { success: false, removidos, purgedCount: 0, error: e };
   }
 }

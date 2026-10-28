@@ -127,21 +127,30 @@ export function parseNumberBR(input: string | number): number {
  * - "1 1/2"    -> 38.1 mm
  * - "3/8 pol"  -> 9.525 mm
  */
-export function parseDimensionToMm(input: string | number | undefined | null): number {
+export function parseDimensionToMm(
+  input: string | number | undefined | null,
+  unitMode: 'auto' | 'inch' | 'mm' = 'auto'
+): number {
   if (input === undefined || input === null) {
     return 0;
   }
 
   if (typeof input === 'number') {
-    return isNaN(input) ? 0 : input;
+    if (isNaN(input)) return 0;
+    return unitMode === 'inch' ? input * 25.4 : input;
   }
 
   if (typeof input !== 'string') {
     return 0;
   }
 
+  const rawStr = input.trim();
+  if (!rawStr) return 0;
+
+  const hasInchIndicator = unitMode === 'inch' || /["'”’]|pol|in/i.test(rawStr);
+
   // Limpa o texto: remove aspas de polegada ("), a palavra 'pol', 'in', 'mm', 'ø', espaços extras nas pontas
-  let cleanInput = input
+  let cleanInput = rawStr
     .replace(/["'”’]|pol|in|mm|ø/gi, '')
     .replace(',', '.')
     .trim();
@@ -184,7 +193,10 @@ export function parseDimensionToMm(input: string | number | undefined | null): n
   const parsedValue = parseFloat(cleanInput);
   if (isNaN(parsedValue)) return 0;
 
-  // Se o usuário digitou apenas um número decimal e você quer tratar como mm diretamente:
+  if (hasInchIndicator) {
+    return parsedValue * 25.4;
+  }
+
   return parsedValue;
 }
 
@@ -513,6 +525,116 @@ export function normalizarMedida(valor: string | undefined | null): string {
   return unicas.join(" x ");
 }
 
+function gcd(a: number, b: number): number {
+  return b === 0 ? a : gcd(b, a % b);
+}
+
+/**
+ * Converte valor em milímetros para a fração de polegada canônica da UsiCorte.
+ * Exemplos:
+ * 25.4 -> '1"'
+ * 38.1 -> '1.1/2"'
+ * 50.8 -> '2"'
+ * 12.7 -> '1/2"'
+ * 19.05 -> '3/4"'
+ * 6.35 -> '1/4"'
+ * 31.75 -> '1.1/4"'
+ * 63.50 -> '2.1/2"'
+ */
+export function mmToInchFraction(mm: number, tolerance = 0.5): string | null {
+  if (!mm || isNaN(mm) || mm <= 0) return null;
+  const inches = mm / 25.4;
+
+  // 1. Polegadas inteiras exatas (ex: 1", 2", 3", 4", etc.)
+  const nearestWhole = Math.round(inches);
+  if (Math.abs(nearestWhole * 25.4 - mm) <= tolerance && nearestWhole > 0) {
+    return `${nearestWhole}"`;
+  }
+
+  // 2. Frações padrão (denominadores 2, 4, 8, 16, 32, 64)
+  for (const den of [2, 4, 8, 16, 32, 64]) {
+    const whole = Math.floor(inches);
+    const rem = inches - whole;
+    const num = Math.round(rem * den);
+    if (num > 0 && num < den) {
+      const calcMm = (whole + num / den) * 25.4;
+      if (Math.abs(calcMm - mm) <= tolerance) {
+        const g = gcd(num, den);
+        const simpNum = num / g;
+        const simpDen = den / g;
+        if (whole > 0) {
+          return `${whole}.${simpNum}/${simpDen}"`;
+        } else {
+          return `${simpNum}/${simpDen}"`;
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Formata um valor numérico ou textual para exibição em polegadas (ex: 1", 1.1/2", 2", 3/4").
+ */
+/**
+ * Formata um valor numérico ou textual para exibição estritamente em milímetros (ex: 50mm, 72mm, 1000mm).
+ * NUNCA converte para polegadas.
+ */
+export function formatDimensaoMm(val: string | number | undefined | null): string {
+  if (val === undefined || val === null) return '';
+  const str = String(val).trim();
+  if (!str || str === '-' || str === '—') return '';
+
+  // Se já possui aspas de polegada ou 'pol', converte o número para mm (* 25.4)
+  const isInch = /["'”’]|pol|in/i.test(str);
+  const clean = str.replace(/["'”’]|pol|in|mm|ø/gi, '').replace(',', '.').trim();
+  const n = parseFloat(clean);
+  if (!isNaN(n) && n > 0) {
+    const mmVal = isInch ? n * 25.4 : n;
+    const finalVal = Number.isInteger(mmVal) ? String(mmVal) : String(Number(mmVal.toFixed(2)));
+    return `${finalVal}mm`;
+  }
+  return str.endsWith('mm') ? str : `${str}mm`;
+}
+
+/**
+ * Formata um valor numérico ou textual para exibição em polegadas (ex: 1", 1.1/2", 2", 3/4").
+ * Utilizado exclusivamente para ESPESSURA e DIÂMETRO.
+ */
+export function formatDimensaoPolegada(val: string | number | undefined | null): string {
+  if (val === undefined || val === null) return '';
+  const str = String(val).trim();
+  if (!str || str === '-' || str === '—') return '';
+
+  // Se já está formatado com polegadas
+  if (str.includes('"') || /pol|in/i.test(str)) {
+    return str
+      .replace(/\s+(\d+\/\d+)/, '.$1')
+      .replace(/pol|in/gi, '')
+      .trim()
+      .replace(/"*$/, '"');
+  }
+
+  // Se é uma fração simples ou mista (ex: "1/2" ou "1.1/2" ou "1 1/2")
+  if (/^\d+\/\d+$/.test(str)) {
+    return `${str}"`;
+  }
+  if (/^\d+[\s\.]\d+\/\d+$/.test(str)) {
+    return `${str.replace(' ', '.')}"`;
+  }
+
+  // Tenta converter milímetros para polegadas se for uma bitola conhecida
+  const mm = parseNumberBR(str);
+  if (mm > 0) {
+    const inchStr = mmToInchFraction(mm);
+    if (inchStr) return inchStr;
+    return `${str}mm`;
+  }
+
+  return str;
+}
+
 export function formatarMedidasLimpa(item: Record<string, any>): string {
   if (!item) return "—";
 
@@ -522,15 +644,7 @@ export function formatarMedidasLimpa(item: Record<string, any>): string {
     return "—";
   }
 
-  const {
-    geometry,
-    diameter,
-    measure,
-    widthLength,
-    width,
-    length,
-    unit = "mm",
-  } = item || {};
+  const geometry = (item.geometryType || item.geometry || item.tipo || item.profileType || "").toLowerCase();
 
   const cleanPart = (val: any): string => {
     if (val === undefined || val === null) return "";
@@ -541,66 +655,89 @@ export function formatarMedidasLimpa(item: Record<string, any>): string {
     return s;
   };
 
-  const cDiameter = cleanPart(diameter);
-  const cMeasure = cleanPart(measure);
-  const cWidthLength = cleanPart(widthLength);
-  const cWidth = cleanPart(width);
-  const cLength = cleanPart(length);
+  // Extração precisa dos valores numéricos em mm
+  const diaMm = item.diameterMm ?? item.diametroMm ?? (item.diameter ? parseDimensionToMm(item.diameter) : 0);
+  const thickMm = item.thicknessMm ?? item.espessuraMm ?? (item.thickness ? parseDimensionToMm(item.thickness) : 0);
+  const widthValMm = item.widthMm ?? item.larguraMm ?? (item.width ? parseDimensionToMm(item.width, 'mm') : 0);
+  const lengthValMm = item.lengthMm ?? item.comprimentoMm ?? (item.length ? parseDimensionToMm(item.length, 'mm') : 0);
+
+  // ESPESSURA e DIÂMETRO formatados em POLEGADAS
+  const diaPol = diaMm > 0 
+    ? formatDimensaoPolegada(diaMm) 
+    : (cleanPart(item.diameter || item.diametro) ? formatDimensaoPolegada(item.diameter || item.diametro) : "");
+
+  const thickPol = thickMm > 0 
+    ? formatDimensaoPolegada(thickMm) 
+    : (cleanPart(item.thickness || item.espessura) ? formatDimensaoPolegada(item.thickness || item.espessura) : "");
+
+  const measureRaw = cleanPart(item.measure || item.medida);
+
+  // LARGURA: SEMPRE E ESTRITAMENTE EM MILÍMETROS (MM), NUNCA POLEGADAS
+  const widthMmStr = widthValMm > 0 
+    ? formatDimensaoMm(widthValMm) 
+    : (cleanPart(item.width || item.largura) ? formatDimensaoMm(item.width || item.largura) : "");
+
+  // COMPRIMENTO: SEMPRE E ESTRITAMENTE EM MILÍMETROS (MM)
+  const lengthMmStr = lengthValMm > 0 
+    ? formatDimensaoMm(lengthValMm) 
+    : (cleanPart(item.length || item.comprimento) ? formatDimensaoMm(item.length || item.comprimento) : "");
+
+  const cWidthLength = cleanPart(item.widthLength);
 
   let resultado = "";
 
-  // BUCHA / TUBO: medida composta por diâmetro externo x diâmetro interno x comprimento
-  if (geometry === "bucha" || geometry === "tubo") {
-    const externo = cDiameter || cMeasure;
-    const interno = cWidthLength || cWidth;
-    const comp = cLength;
-    resultado = normalizarMedida(
-      [externo, interno, comp].filter(Boolean).join(" x ")
-    );
+  // 1. BUCHA / TUBO: Ø Ext (pol) x Ø Int (pol) x Comp (mm)
+  if (geometry === "bucha" || geometry === "tubo" || geometry === "tubo_bucha") {
+    const ext = diaPol || (measureRaw ? formatDimensaoPolegada(measureRaw) : "");
+    const int = thickPol;
+    const comp = lengthMmStr || (cWidthLength ? formatDimensaoMm(cWidthLength) : "");
+    const tokens = [ext, int, comp].filter(Boolean);
+    resultado = normalizarMedida(tokens.join(" x "));
+    if (resultado && !resultado.startsWith("Ø")) {
+      resultado = `Ø ${resultado}`;
+    }
   }
-  // MACIÇO / REDONDO: medida composta por diâmetro x comprimento
-  else if (geometry === "macico" || geometry === "redondo") {
-    const diam = cDiameter || cMeasure;
-    const comp = cWidthLength || cLength;
-    resultado = normalizarMedida([diam, comp].filter(Boolean).join(" x "));
+  // 2. MACIÇO / REDONDO / QUADRADO: Diâmetro (pol) x Comprimento (mm)
+  // Exemplo correto na tela: Ø 1" x 1000mm
+  else if (geometry === "macico" || geometry === "redondo" || geometry === "redondo_quadrado") {
+    let diam = diaPol || thickPol || (measureRaw ? formatDimensaoPolegada(measureRaw) : "");
+    if (diam && !diam.startsWith("Ø")) {
+      diam = `Ø ${diam}`;
+    }
+    const comp = lengthMmStr || (cWidthLength ? formatDimensaoMm(cWidthLength) : "");
+    const tokens = [diam, comp].filter(Boolean);
+    resultado = normalizarMedida(tokens.join(" x "));
   }
-  // CHAPA / PLACA / RETANGULAR: medida composta por espessura x largura x comprimento
+  // 3. CHAPA / RETÂNGULO / PLACA: Espessura (pol) x Largura (mm) x Comprimento (mm)
+  // Exemplo correto na tela: 1/2" x 50mm x 1000mm
   else if (
     geometry === "chapa" ||
     geometry === "placa" ||
-    geometry === "retangular"
+    geometry === "retangular" ||
+    geometry === "chapa_retangulo"
   ) {
-    const espessura = cDiameter || cMeasure;
-    const dimensoes = cWidthLength || [cWidth, cLength].filter(Boolean).join(" x ");
-    resultado = normalizarMedida(
-      [espessura, dimensoes].filter(Boolean).join(" x ")
-    );
+    const espessura = thickPol || diaPol || (measureRaw ? formatDimensaoPolegada(measureRaw) : "");
+    const tokens = [espessura, widthMmStr, lengthMmStr].filter(Boolean);
+    if (tokens.length >= 2) {
+      resultado = normalizarMedida(tokens.join(" x "));
+    } else {
+      resultado = normalizarMedida([espessura, cWidthLength ? formatDimensaoMm(cWidthLength) : ""].filter(Boolean).join(" x "));
+    }
   }
-  // Fallback genérico
+  // 4. Fallback genérico
   else {
-    resultado = normalizarMedida(
-      [cDiameter || cMeasure, cWidthLength || [cWidth, cLength].filter(Boolean).join(" x ")]
-        .filter(Boolean)
-        .join(" x ")
-    );
+    const primary = thickPol || diaPol || (measureRaw ? formatDimensaoPolegada(measureRaw) : "");
+    const tokens = [primary, widthMmStr, lengthMmStr].filter(Boolean);
+    if (tokens.length >= 2) {
+      resultado = normalizarMedida(tokens.join(" x "));
+    } else {
+      resultado = normalizarMedida([primary, cWidthLength].filter(Boolean).join(" x "));
+    }
   }
 
-  if (!resultado) return "—";
-
-  // Adiciona o prefixo Ø quando o resultado começa com diâmetro (geometria redonda)
-  if (
-    (geometry === "macico" ||
-      geometry === "redondo" ||
-      geometry === "bucha" ||
-      geometry === "tubo") &&
-    !resultado.startsWith("Ø")
-  ) {
-    resultado = `Ø ${resultado}`;
-  }
-
-  // Adiciona a unidade apenas se ainda não estiver presente
-  if (!resultado.toLowerCase().includes(unit.toLowerCase())) {
-    resultado = `${resultado} ${unit}`;
+  if (!resultado) {
+    if (measureRaw) return measureRaw;
+    return "—";
   }
 
   return resultado.trim();
