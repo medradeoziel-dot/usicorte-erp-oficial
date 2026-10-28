@@ -6,16 +6,7 @@ import {
   fetchCotacoesDb, 
   mapSupabaseStatusToQuote, 
   db,
-  SUPABASE_URL,
-  SUPABASE_ANON_KEY,
-  SupabaseCotacao
 } from '../lib/db';
-import { 
-  reservarNovaCotacaoNoSupabase, 
-  cancelarOuDescartarRascunho,
-  limparRascunhosVaziosDb
-} from '../services/cotacaoReservaService';
-import { executarMigracaoEmergenciaOrcamentos } from '../services/emergencyMigrationService';
 import { 
   formatCurrency, 
   formatNumberBR, 
@@ -54,15 +45,6 @@ import {
   baixarEstoquePorCotacao, 
   gerarContasReceberPorCotacao 
 } from '../services/inventoryFinanceService';
-import {
-  getQuoteSequentialConfig,
-  incrementQuoteSequentialConfig,
-  setQuoteSequentialConfig,
-  fetchEmitenteNumberingConfig,
-  resolveNextUniqueQuoteNumber,
-  updateEmitenteNextSequential,
-  incrementEmitenteQuoteSequential
-} from '../services/companyService';
 import { createPortal } from 'react-dom';
 import QuotePrintModal, { PrintMode } from './QuotePrintModal';
 import QuotePrintOptionsModal, { TipoImpressaoOrcamento } from './QuotePrintOptionsModal';
@@ -124,7 +106,6 @@ import {
   ChevronDown,
   Search,
   Check,
-  Lock,
   Loader2,
   X,
   Ruler,
@@ -135,6 +116,91 @@ import {
   Download,
   FileText
 } from 'lucide-react';
+
+// A sugestão é apenas visual. O gatilho SQL atribui o número definitivo no INSERT.
+// Instale numeracao_cotacao_multicomputador_v2.sql antes de usar em vários computadores.
+const normalizarStatusCotacao = (status: Quote['status']): Quote['status'] =>
+  String(status).toLowerCase() === 'rascunho' ? 'Pendente' : status;
+
+const filtroNumeroExato = (numero: string) => numero.replace(/[\\%_]/g, '\\$&');
+
+async function consultarProximoNumeroSemGravar(existingQuotes: { quoteNumber?: string }[] = []) {
+  const { data, error } = await db.from('emitente')
+    .select('proximo_numero_sequencial, prefixo_cotacao')
+    .order('created_at', { ascending: false }).limit(1).single();
+  if (error || !data) throw new Error('Não foi possível consultar a sequência do emitente.');
+  let sequential = Number(data.proximo_numero_sequencial);
+  if (!Number.isSafeInteger(sequential) || sequential < 1) {
+    throw new Error('Configure um próximo número válido no emitente.');
+  }
+  const prefix = String(data.prefixo_cotacao || `COT-${new Date().getFullYear()}-`);
+  const occupied = new Set(existingQuotes.map(q => String(q.quoteNumber || '').trim().toLowerCase()));
+  for (let attempt = 0; attempt < 10000; attempt++, sequential++) {
+    const quoteNumber = `${prefix}${String(sequential).padStart(6, '0')}`;
+    if (occupied.has(quoteNumber.toLowerCase())) continue;
+    const result = await db.from('cotacoes').select('id')
+      .ilike('numero', filtroNumeroExato(quoteNumber)).limit(1);
+    if (result.error) throw new Error('Não foi possível verificar a numeração no banco.');
+    if (!result.data?.length) return { quoteNumber, sequential, prefix };
+  }
+  throw new Error('Não foi possível encontrar um número livre. Confira o emitente.');
+}
+
+async function salvarCotacaoComIdentidadeSegura(quote: Quote, existingId: string | null, originalNumber: string | null) {
+  // Nunca passe o número como ID para um upsert: outro computador pode já tê-lo salvo.
+  let confirmedId = existingId;
+  let confirmedNumber = quote.quoteNumber;
+  try {
+    if (confirmedId) {
+      const current = await db.from('cotacoes').select('id, numero').eq('id', confirmedId).single();
+      if (current.error || !current.data) throw new Error('A cotação original não foi encontrada. Nada foi sobrescrito.');
+      if (originalNumber && String(current.data.numero) !== originalNumber) {
+        throw new Error('A identificação da cotação mudou. Reabra-a pelo histórico.');
+      }
+      if (quote.quoteNumber !== String(current.data.numero)) {
+        const conflict = await db.from('cotacoes').select('id')
+          .ilike('numero', filtroNumeroExato(quote.quoteNumber)).neq('id', confirmedId).limit(1);
+        if (conflict.error) throw conflict.error;
+        if (conflict.data?.length) throw new Error('Este número já pertence a outra cotação. Seus dados foram mantidos.');
+      }
+    } else {
+      // INSERT exclusivo, com UUID gerado pelo banco e número atribuído pelo gatilho.
+      // Só é executado dentro do clique em Salvar Orçamento, nunca ao preencher a tela.
+      const created = await db.from('cotacoes').insert([{
+        numero: quote.quoteNumber,
+        data: quote.date,
+        cliente_nome: quote.clientName,
+        contato: quote.contactPerson || '',
+        telefone: quote.clientPhone || '',
+        email: quote.clientEmail || '',
+        observacoes: quote.observations || '',
+        valor_total: quote.grandTotal,
+        status: 'pendente'
+      }]).select('id, numero').single();
+      if (created.error) throw created.error;
+      if (!created.data?.id || !created.data?.numero) {
+        throw new Error('O banco não confirmou a identificação da nova cotação. Consulte o histórico antes de tentar novamente.');
+      }
+      confirmedId = String(created.data.id);
+      confirmedNumber = String(created.data.numero);
+      quote.id = confirmedId;
+      quote.quoteNumber = confirmedNumber;
+    }
+    // O serviço existente preserva o mapeamento dos campos e dos itens.
+    // Em caso de falha parcial, mantenha este UUID na tela para retomar a MESMA cotação.
+    if (!confirmedId) throw new Error('O banco não confirmou o ID da cotação.');
+    quote.id = confirmedId;
+    const saved = await saveCotacaoDb(quote, existingId ? originalNumber || undefined : confirmedNumber);
+    if (saved.error) return { error: saved.error, confirmedId, confirmedNumber };
+    const verified = await db.from('cotacoes').select('id, numero').eq('id', confirmedId).single();
+    if (verified.error || !verified.data) throw new Error('Não foi possível confirmar a cotação gravada. Seus dados foram mantidos.');
+    confirmedNumber = String(verified.data.numero);
+    quote.quoteNumber = confirmedNumber;
+    return { error: null, confirmedId, confirmedNumber };
+  } catch (error: any) {
+    return { error, confirmedId, confirmedNumber };
+  }
+}
 
 interface SalesModuleProps {
   clients: Client[];
@@ -260,6 +326,7 @@ export default function SalesModule({
   const [editingOriginalQuoteNumber, setEditingOriginalQuoteNumber] = useState<string | null>(() => quoteToEdit?.quoteNumber || quoteToEdit?.id || null);
   const [editingQuoteCreatedAt, setEditingQuoteCreatedAt] = useState<string | null>(() => quoteToEdit?.createdAt || null);
   const [quoteForCancelNfe, setQuoteForCancelNfe] = useState<Quote | null>(null);
+  const saveInFlightRef = useRef(false);
   const [isSavingQuote, setIsSavingQuote] = useState<boolean>(false);
   const [isReservingQuote, setIsReservingQuote] = useState<boolean>(false);
   const isReservingRef = useRef<boolean>(false);
@@ -267,53 +334,12 @@ export default function SalesModule({
   const editingQuoteIdRef = useRef<string | null>(quoteToEdit?.id || null);
   const editingQuoteNumberRef = useRef<string | null>(quoteToEdit?.quoteNumber || quoteToEdit?.id || null);
   const itemsRef = useRef<QuoteItem[]>([]);
-  const quoteStatusRef = useRef<Quote['status']>('Rascunho');
+  const quoteStatusRef = useRef<Quote['status']>('Pendente');
   const numeroCotacaoRef = useRef<string>('');
   const isSavedRef = useRef<boolean>(false);
 
-  // Quote header state
-  const generateNextQuoteNumber = (quotesList?: Quote[]) => {
-    const config = getQuoteSequentialConfig();
-    const prefix = config.prefix || `COT-${new Date().getFullYear()}-`;
-    let targetSeq = typeof config.nextSequential === 'number' && !isNaN(config.nextSequential)
-      ? config.nextSequential
-      : 990;
-
-    const listToScan = quotesList && Array.isArray(quotesList) ? quotesList : savedQuotes;
-    const existingSet = new Set<string>();
-    const validSeqs: number[] = [];
-    listToScan.forEach((q: any) => {
-      const isDraftVazio = q.clientName === 'Rascunho em Edição' || q.cliente_nome === 'Rascunho em Edição';
-      const numStr = String(q.quoteNumber || q.numero || q.id || "").trim();
-      const isCorrupted = numStr.includes('202600') || numStr.includes('202620');
-      if (!isDraftVazio && !isCorrupted) {
-        existingSet.add(numStr.toLowerCase());
-        const match = numStr.match(/(\d+)$/);
-        if (match) {
-          const val = parseInt(match[1], 10);
-          if (val > 0 && val < 50000 && !String(val).startsWith('2026')) {
-            validSeqs.push(val);
-          }
-        }
-      }
-    });
-
-    const maxReal = validSeqs.length > 0 ? Math.max(...validSeqs) : 0;
-    if (maxReal >= targetSeq) {
-      targetSeq = maxReal + 1;
-    }
-
-    // Procura o próximo número sequencial livre a partir de targetSeq
-    while (existingSet.has(`${prefix}${String(targetSeq).padStart(6, "0")}`.toLowerCase())) {
-      targetSeq++;
-    }
-
-    return `${prefix}${String(targetSeq).padStart(6, "0")}`;
-  };
-
   // Sugestão sequencial oficial da aba Emitente
   const [autoSuggestedNumber, setAutoSuggestedNumber] = useState<string>('');
-  const [autoSuggestedSeq, setAutoSuggestedSeq] = useState<number>(140);
   const [isCheckingDbDuplicate, setIsCheckingDbDuplicate] = useState<boolean>(false);
   const [dbDuplicateResult, setDbDuplicateResult] = useState<{
     checkedNum: string;
@@ -338,9 +364,6 @@ export default function SalesModule({
 
     // Se estiver editando a mesma cotação original ou o rascunho reservado no banco nesta sessão, não considera duplicata
     if (originalNum && cleanNum === originalNum.trim().toLowerCase()) {
-      return { exists: false };
-    }
-    if (editingQuoteId && cleanNum === (numeroCotacao || '').trim().toLowerCase()) {
       return { exists: false };
     }
 
@@ -379,17 +402,16 @@ export default function SalesModule({
   // 1. OBTENÇÃO DA SUGESTÃO SEQUENCIAL NA ABERTURA (SEM CRIAR RASCUNHO NO BANCO):
   // Ao carregar a tela, apenas consulta a sequência oficial e preenche visualmente
   // o número sugerido (ex: COT-2026-000990), SEM efetuar nenhum INSERT ou reserva no Supabase.
-  // Um rascunho só é gerado no banco quando o usuário clicar em "Nova Cotação" ou preencher dados na tela.
+  // Preencher a tela e abrir Nova Cotação não grava nem reserva números.
   useEffect(() => {
     if (!quoteToEdit && !quoteToDuplicate && !editingQuoteId) {
-      resolveNextUniqueQuoteNumber(savedQuotes)
+      consultarProximoNumeroSemGravar(savedQuotes)
         .then(res => {
-          if (res?.quoteNumber) {
+          if (res?.quoteNumber && !editingQuoteIdRef.current && !saveInFlightRef.current) {
             setNumeroCotacao(res.quoteNumber);
             setAutoSuggestedNumber(res.quoteNumber);
-            setAutoSuggestedSeq(res.sequential);
-            setQuoteStatus('Rascunho');
-            quoteStatusRef.current = 'Rascunho';
+            setQuoteStatus('Pendente');
+            quoteStatusRef.current = 'Pendente';
             isSavedRef.current = false;
             console.log(`[SalesModule] Sugestão sequencial oficial pronta na tela: Nº ${res.quoteNumber} (sem criação de rascunho no banco)`);
           }
@@ -439,7 +461,7 @@ export default function SalesModule({
         const { data, error } = await db
           .from('cotacoes')
           .select('id, numero, cliente_nome')
-          .ilike('numero', cleanNum)
+          .ilike('numero', filtroNumeroExato(cleanNum))
           .limit(1)
           .maybeSingle();
 
@@ -479,8 +501,8 @@ export default function SalesModule({
   const [validityDays, setValidityDays] = useState<number>(10);
   const [paymentTerms, setPaymentTerms] = useState<string>('À Vista / Pix (3% Desc.)');
   const [quoteStatus, setQuoteStatus] = useState<Quote['status']>(() => {
-    if (quoteToEdit) return quoteToEdit.status || 'Pendente';
-    return 'Rascunho';
+    if (quoteToEdit) return normalizarStatusCotacao(quoteToEdit.status || 'Pendente');
+    return 'Pendente';
   });
   const [observations, setObservations] = useState<string>('Preços com impostos inclusos. Material sujeito a conferência no ato do recebimento.');
 
@@ -491,66 +513,12 @@ export default function SalesModule({
   // Items list
   const [items, setItems] = useState<QuoteItem[]>([]);
 
-  // Sincroniza refs do rascunho ativo em tempo real para os handlers de encerramento
+  // Mantém a identidade e os dados da cotação ativa sincronizados.
   editingQuoteIdRef.current = editingQuoteId;
   editingQuoteNumberRef.current = editingOriginalQuoteNumber || numeroCotacao;
   itemsRef.current = items;
   quoteStatusRef.current = quoteStatus;
   numeroCotacaoRef.current = numeroCotacao;
-
-  // E SE A TELA FOR FECHADA SEM SALVAR:
-  // 1. Ao sair/desmontar a tela do módulo de Vendas (navegação para outro menu no sistema):
-  // Se o usuário fechar a tela sem adicionar nenhum item, apaga o rascunho vazio do banco
-  // para NÃO consumir o número de sequência desnecessariamente.
-  useEffect(() => {
-    return () => {
-      const idToClean = editingQuoteIdRef.current;
-      const currentItems = itemsRef.current;
-      const currentStatus = quoteStatusRef.current;
-      const isSaved = isSavedRef.current;
-
-      if (idToClean && !isSaved && currentItems.length === 0 && (currentStatus === 'Rascunho' || (currentStatus as string) === 'RASCUNHO')) {
-        console.log(`[SalesModule] Fechando tela sem itens. Excluindo rascunho vazio ${idToClean} para liberar o número.`);
-        cancelarOuDescartarRascunho(idToClean, numeroCotacaoRef.current).catch(err => {
-          console.warn('Erro ao limpar rascunho vazio ao fechar tela:', err);
-        });
-      }
-    };
-  }, []);
-
-  // 2. Ao fechar a aba/janela do navegador ou recarregar a página (F5):
-  useEffect(() => {
-    const handleBeforeUnload = () => {
-      const idToClean = editingQuoteIdRef.current;
-      const currentItems = itemsRef.current;
-      const currentStatus = quoteStatusRef.current;
-      const isSaved = isSavedRef.current;
-
-      if (idToClean && !isSaved && currentItems.length === 0 && (currentStatus === 'Rascunho' || (currentStatus as string) === 'RASCUNHO')) {
-        const cleanUrl = SUPABASE_URL.replace(/\/$/, '');
-
-        try {
-          const deleteEndpoint = `${cleanUrl}/rest/v1/cotacoes?id=eq.${idToClean}`;
-          fetch(deleteEndpoint, {
-            method: 'DELETE',
-            headers: {
-              'apikey': SUPABASE_ANON_KEY,
-              'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-              'Content-Type': 'application/json'
-            },
-            keepalive: true
-          }).catch(() => {});
-        } catch {}
-      }
-    };
-
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    window.addEventListener('pagehide', handleBeforeUnload);
-    return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-      window.removeEventListener('pagehide', handleBeforeUnload);
-    };
-  }, []);
 
   // Item form state
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
@@ -631,7 +599,6 @@ export default function SalesModule({
   // Refs para autofoco imediato na entrada de novas cotações
   const clientSelectRef = useRef<HTMLSelectElement | null>(null);
   const clientNameInputRef = useRef<HTMLInputElement | null>(null);
-  const handleAdvanceToNextQuoteRef = useRef<(() => void) | null>(null);
 
   // Efeito responsável por sincronizar a renderização completa do documento e disparar window.print()
   useEffect(() => {
@@ -649,11 +616,6 @@ export default function SalesModule({
         setActiveDirectPrint(null);
         window.removeEventListener('afterprint', handleAfterPrint);
 
-        // FLUXO AUTOMÁTICO: Assim que a janela de impressão for fechada ou confirmada:
-        // Limpa todos os campos da tela atual, gera o novo sequencial e foca no 1º campo de digitação!
-        if (handleAdvanceToNextQuoteRef.current) {
-          handleAdvanceToNextQuoteRef.current();
-        }
       };
 
       window.addEventListener('afterprint', handleAfterPrint);
@@ -815,98 +777,11 @@ export default function SalesModule({
         // Atualiza estado do módulo com os orçamentos vindos diretamente do Supabase
         setSavedQuotes(mappedDbQuotes);
 
-        // Rotina de migração e sincronização de emergência:
-        // Verifica se existem orçamentos locais em 's_orcamentos', envia para o Supabase (INSERT/UPSERT),
-        // e SOMENTE limpa 's_orcamentos' após confirmação de gravação no banco de dados.
-        try {
-          const migRes = await executarMigracaoEmergenciaOrcamentos();
-          if (migRes.migratedCount > 0) {
-            // Se houve novos orçamentos gravados no Supabase, recarrega para atualizar a lista
-            const freshDb = await fetchCotacoesDb();
-            if (freshDb && freshDb.length > 0) {
-              const freshMapped: Quote[] = freshDb
-                .filter(q => {
-                  const num = String(q.numero || q.id || '');
-                  return !num.includes('021935') && !num.includes('21935');
-                })
-                .map(q => {
-                  const safeDateIso = getSafeISODate(q.data || q.created_at);
-                  const safeCreatedAt = q.created_at && !isNaN(new Date(q.created_at).getTime())
-                    ? new Date(q.created_at).toISOString()
-                    : (q.data && !isNaN(new Date(q.data).getTime()) ? new Date(q.data).toISOString() : new Date().toISOString());
-                  const safeUpdatedAt = q.updated_at && !isNaN(new Date(q.updated_at).getTime())
-                    ? new Date(q.updated_at).toISOString()
-                    : safeCreatedAt;
-
-                  return {
-                    id: q.id || q.numero || `db-quote-${Date.now()}`,
-                    quoteNumber: q.numero || q.id || 'COT-SEM-NUMERO',
-                    clientName: q.cliente_nome || q.clientes?.nome || q.clientes?.razao_social || q.clientes?.empresa || 'Cliente Balcão',
-                    contactPerson: q.contato || q.clientes?.contato || '',
-                    clientPhone: q.telefone || '',
-                    clientEmail: q.email || '',
-                    date: safeDateIso,
-                    validityDays: 10,
-                    paymentTerms: 'À Vista',
-                    status: mapSupabaseStatusToQuote(q.status),
-                    observations: q.observacoes || '',
-                    discount: 0,
-                    shipping: 0,
-                    subtotalTotal: Number(q.valor_total) || 0,
-                    grandTotal: Number(q.valor_total) || 0,
-                    createdAt: safeCreatedAt,
-                    updatedAt: safeUpdatedAt,
-                    // Dados Fiscais da NF-e
-                    status_nfe: q.status_nfe || 'Pendente',
-                    nfe_chave: q.nfe_chave || q.chave_acesso,
-                    chave_acesso: q.chave_acesso || q.nfe_chave,
-                    nfe_numero: q.nfe_numero,
-                    serie_nfe: q.serie_nfe,
-                    danfe_url: q.danfe_url,
-                    xml_url: q.xml_url,
-                    xml_conteudo: q.xml_conteudo,
-                    protocolo_autorizacao: q.protocolo_autorizacao || q.protocolo_nfe,
-                    protocolo_nfe: q.protocolo_nfe || q.protocolo_autorizacao,
-                    mensagem_erro_nfe: q.mensagem_erro_nfe,
-                    nfe_emitida_em: q.nfe_emitida_em,
-                    items: (q.cotacao_itens || []).map((it, idx) => ({
-                      id: String(it.id || idx),
-                      date: safeDateIso,
-                      companyName: q.cliente_nome || 'Cliente Balcão',
-                      description: it.descricao || it.produto || 'Item',
-                      constant: '0.00785',
-                      constantName: it.produto || 'Material',
-                      measure: it.medida || '',
-                      diameter: '',
-                      widthLength: '',
-                      unitPrice: Number(it.valor_unitario) || 0,
-                      quantity: Number(it.quantidade) || 1,
-                      subtotal: Number(it.valor_total) || ((Number(it.valor_unitario) || 0) * (Number(it.quantidade) || 1)),
-                      notes: it.observacao || '',
-                      drawingImage: it.desenho_url || undefined,
-                      ncm: it.ncm || '72085200',
-                      cfop: it.cfop,
-                      cfop_interno: it.cfop_interno || '5102',
-                      cfop_externo: it.cfop_externo || '6102',
-                      unidade_medida: it.unidade_medida || 'PC',
-                      unidadeMedida: it.unidade_medida || 'PC',
-                      csosn: (!it.csosn || it.csosn.includes('102') || it.csosn.includes('101')) ? '101 - Com permissão de crédito' : it.csosn
-                    }))
-                  };
-                });
-              setSavedQuotes(freshMapped);
-            }
-          }
-        } catch (migErr) {
-          console.warn('Aviso ao sincronizar emergência em SalesModule:', migErr);
-        }
-
         // 1 & 2. Se NÃO estiver em modo edição, busca a numeração viva da tabela 'emitente' e protege contra duplicidade na tabela 'cotacoes'
-        if (!editingQuoteNumberRef.current && !editingQuoteIdRef.current && !editingOriginalQuoteNumber) {
-          resolveNextUniqueQuoteNumber(mappedDbQuotes).then(res => {
-            if (res?.quoteNumber) {
+        if (!editingQuoteIdRef.current && !saveInFlightRef.current) {
+          consultarProximoNumeroSemGravar(mappedDbQuotes).then(res => {
+            if (res?.quoteNumber && !editingQuoteIdRef.current && !saveInFlightRef.current) {
               setAutoSuggestedNumber(res.quoteNumber);
-              setAutoSuggestedSeq(res.sequential);
               setNumeroCotacao(prev => (!prev || prev === res.quoteNumber || prev === autoSuggestedNumber ? res.quoteNumber : prev));
             }
           }).catch(() => {});
@@ -931,11 +806,10 @@ export default function SalesModule({
   // Atualiza automaticamente o número do orçamento quando as configurações da empresa forem salvas (somente se não estiver em edição)
   useEffect(() => {
     const handleCompanyUpdate = () => {
-      if (!editingQuoteNumberRef.current && !editingQuoteIdRef.current && !editingOriginalQuoteNumber) {
-        resolveNextUniqueQuoteNumber(savedQuotes).then(res => {
-          if (res?.quoteNumber) {
+      if (!editingQuoteIdRef.current && !saveInFlightRef.current) {
+        consultarProximoNumeroSemGravar(savedQuotes).then(res => {
+          if (res?.quoteNumber && !editingQuoteIdRef.current && !saveInFlightRef.current) {
             setAutoSuggestedNumber(res.quoteNumber);
-            setAutoSuggestedSeq(res.sequential);
             setNumeroCotacao(prev => (!prev || prev === res.quoteNumber || prev === autoSuggestedNumber ? res.quoteNumber : prev));
           }
         }).catch(() => {});
@@ -1014,79 +888,7 @@ export default function SalesModule({
     }
   }, [selectedMaterial]);
 
-  // 2. EDICÃO E SALVAMENTO VIA UPDATE NO SUPABASE:
-  // Conforme o usuário adiciona itens, cliente ou observações, as alterações são salvas/atualizadas via UPDATE
-  // na cotação já existente usando o cotacaoId (editingQuoteId).
-  const syncDraftUpdateToDb = (updatedFields?: Partial<Quote>, updatedItems?: QuoteItem[]) => {
-    const targetId = editingQuoteIdRef.current;
-    const cleanNum = (numeroCotacaoRef.current || numeroCotacao || '').trim();
-    if (!targetId || !cleanNum) return;
-
-    const currentItems = updatedItems !== undefined ? updatedItems : itemsRef.current;
-    const subtotal = Number(currentItems.reduce((sum, it) => sum + (it.subtotal || 0), 0).toFixed(2));
-    const totalWeight = Number(currentItems.reduce((sum, it) => sum + (Number(it.totalWeightKg) || 0), 0).toFixed(3));
-    const grand = Number(Math.max(0, subtotal - discountAmount + shippingAmount).toFixed(2));
-
-    const quoteToSync: Quote = {
-      id: targetId,
-      quoteNumber: cleanNum,
-      clientId: selectedClientId || undefined,
-      clientName: clientName.trim() || 'Cliente Balcão (UsiCorte)',
-      clientDocument: clientDocument.trim(),
-      contactPerson: contactPerson.trim(),
-      clientPhone: clientPhone.trim(),
-      clientEmail: clientEmail.trim(),
-      clientCity: clientCity.trim(),
-      clientState: clientState.trim(),
-      date: quoteDate,
-      validityDays: validityDays,
-      paymentTerms: paymentTerms,
-      status: quoteStatusRef.current || 'Rascunho',
-      items: currentItems,
-      discount: discountAmount,
-      discountPercent: 0,
-      shipping: shippingAmount,
-      subtotalTotal: subtotal,
-      grandTotal: grand,
-      totalWeightKg: totalWeight,
-      observations: observations,
-      createdAt: editingQuoteCreatedAt || new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      ...updatedFields
-    };
-
-    saveCotacaoDb(quoteToSync, editingOriginalQuoteNumber || undefined).catch(err => {
-      console.warn('[SalesModule] Erro ao sincronizar alteração do rascunho no Supabase:', err);
-    });
-  };
-
-  // Sincronização automática em background (com debounce) para alterações nos campos de cabeçalho
-  useEffect(() => {
-    if (!editingQuoteId || isSavingQuote || isReservingQuote) return;
-
-    const timer = setTimeout(() => {
-      syncDraftUpdateToDb();
-    }, 1200);
-
-    return () => clearTimeout(timer);
-  }, [
-    clientName,
-    selectedClientId,
-    clientDocument,
-    contactPerson,
-    clientPhone,
-    clientEmail,
-    clientCity,
-    clientState,
-    observations,
-    discountAmount,
-    shippingAmount,
-    paymentTerms,
-    validityDays,
-    quoteDate
-  ]);
-
-  // When selectedClientId changes, auto fill client data e atualiza cotação existente via UPDATE
+  // Selecionar cliente altera apenas os campos da tela.
   const handleClientSelect = (clientId: string) => {
     setSelectedClientId(clientId);
     if (!clientId) {
@@ -1097,16 +899,6 @@ export default function SalesModule({
       setClientEmail('');
       setClientCity('');
       setClientState('');
-      syncDraftUpdateToDb({
-        clientId: undefined,
-        clientName: 'Cliente Balcão (UsiCorte)',
-        clientDocument: '',
-        contactPerson: '',
-        clientPhone: '',
-        clientEmail: '',
-        clientCity: '',
-        clientState: ''
-      });
       return;
     }
 
@@ -1120,16 +912,7 @@ export default function SalesModule({
       setClientEmail(found.email);
       setClientCity(found.city);
       setClientState(found.state);
-      syncDraftUpdateToDb({
-        clientId: clientId,
-        clientName: cName,
-        clientDocument: found.document,
-        contactPerson: found.contactPerson || '',
-        clientPhone: found.phone,
-        clientEmail: found.email,
-        clientCity: found.city,
-        clientState: found.state
-      });
+
     }
   };
 
@@ -1677,6 +1460,7 @@ export default function SalesModule({
   // Add or Update item
   const handleSaveItem = (e: React.FormEvent) => {
     e.preventDefault();
+    if (saveInFlightRef.current) return;
 
     if (!itemDescription.trim()) {
       setErrorMessage('Por favor, informe a descrição do item.');
@@ -1869,71 +1653,7 @@ export default function SalesModule({
       setSuccessMessage('Item adicionado à cotação com sucesso!');
     }
 
-    // 3. Atualização no Banco de Dados / Estado:
-    // Salva automaticamente o Peso (Kg), Valor Unitário (R$) e Subtotal (R$) na lista do orçamento/pedido no Supabase
-    const cleanNum = numeroCotacao.trim();
-    if (cleanNum && updatedItemsList.length > 0) {
-      const targetId = editingQuoteId || cleanNum;
-      const newSubtotalTotal = Number(updatedItemsList.reduce((sum, it) => sum + it.subtotal, 0).toFixed(2));
-      const newGrandTotal = Number(Math.max(0, newSubtotalTotal - discountAmount + shippingAmount).toFixed(2));
-      const newTotalWeightKg = Number(updatedItemsList.reduce((sum, it) => sum + (Number(it.totalWeightKg) || 0), 0).toFixed(3));
-
-      const quoteToSync: Quote = {
-        id: targetId,
-        quoteNumber: cleanNum,
-        clientId: selectedClientId || undefined,
-        clientName: clientName.trim() || 'Cliente Balcão (UsiCorte)',
-        clientDocument: clientDocument.trim(),
-        contactPerson: contactPerson.trim(),
-        clientPhone: clientPhone.trim(),
-        clientEmail: clientEmail.trim(),
-        clientCity: clientCity.trim(),
-        clientState: clientState.trim(),
-        date: quoteDate,
-        validityDays: validityDays,
-        paymentTerms: paymentTerms,
-        status: quoteStatus,
-        items: updatedItemsList,
-        discount: discountAmount,
-        discountPercent: 0,
-        shipping: shippingAmount,
-        subtotalTotal: newSubtotalTotal,
-        grandTotal: newGrandTotal,
-        totalWeightKg: newTotalWeightKg,
-        observations: observations,
-        createdAt: editingQuoteCreatedAt || new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
-
-      const existsIdx = savedQuotes.findIndex(
-        q => (editingQuoteId && (q.id === editingQuoteId || String(q.id).toLowerCase() === String(editingQuoteId).toLowerCase())) ||
-             (editingOriginalQuoteNumber && (
-               (q.quoteNumber && q.quoteNumber.trim().toLowerCase() === editingOriginalQuoteNumber.trim().toLowerCase()) ||
-               (q.id && String(q.id).trim().toLowerCase() === editingOriginalQuoteNumber.trim().toLowerCase())
-             )) ||
-             (q.quoteNumber && q.quoteNumber.trim().toLowerCase() === cleanNum.toLowerCase()) ||
-             (q.id && q.id === cleanNum)
-      );
-
-      if (existsIdx >= 0) {
-        const nextSaved = [...savedQuotes];
-        nextSaved[existsIdx] = { ...savedQuotes[existsIdx], ...quoteToSync, id: savedQuotes[existsIdx].id || targetId };
-        setSavedQuotes(nextSaved);
-      } else {
-        setSavedQuotes([quoteToSync, ...savedQuotes]);
-      }
-      setEditingOriginalQuoteNumber(cleanNum);
-      editingQuoteNumberRef.current = cleanNum;
-
-      saveCotacaoDb(quoteToSync).then(res => {
-        if (res.data?.id) {
-          setEditingQuoteId(res.data.id);
-          editingQuoteIdRef.current = res.data.id;
-        }
-      }).catch(err => {
-        console.warn('Aviso ao sincronizar item no Supabase:', err);
-      });
-    }
+    // Itens ficam somente na tela até o clique em Salvar Orçamento.
 
     // Reset item form fields
     resetItemForm();
@@ -2247,7 +1967,6 @@ export default function SalesModule({
     setItems(nextItems);
     setSuccessMessage('Item duplicado com sucesso!');
     setTimeout(() => setSuccessMessage(null), 2500);
-    syncDraftUpdateToDb({}, nextItems);
   };
 
   const handleDeleteItem = (id: string) => {
@@ -2256,7 +1975,6 @@ export default function SalesModule({
     if (editingItemId === id) {
       resetItemForm();
     }
-    syncDraftUpdateToDb({}, nextItems);
   };
 
   // Calculations for quote totals and total weight com travas toFixed(2) e toFixed(3)
@@ -2267,7 +1985,7 @@ export default function SalesModule({
 
   // Save full quote to history (localStorage & Supabase)
   const handleSaveFullQuote = async () => {
-    if (isSavingQuote) return;
+    if (isSavingQuote || isReservingQuote || saveInFlightRef.current) return;
 
     if (items.length === 0) {
       setErrorMessage('Adicione pelo menos 1 item antes de salvar o orçamento.');
@@ -2275,8 +1993,7 @@ export default function SalesModule({
       return;
     }
 
-    const isEditing = !!(editingQuoteId || editingOriginalQuoteNumber);
-    const cleanNum = numeroCotacao.trim();
+    let cleanNum = numeroCotacao.trim();
     if (!cleanNum) {
       setErrorMessage('Informe um número válido para a cotação.');
       setTimeout(() => setErrorMessage(null), 3500);
@@ -2285,7 +2002,8 @@ export default function SalesModule({
 
     // VALIDAÇÃO DE DUPLICIDADE: Não permitir gravar se já existir aquela cotação (exceto quando em modo edição da mesma)
     const duplicateCheck = checkQuoteNumberExists(cleanNum, editingOriginalQuoteNumber);
-    if (duplicateCheck.exists) {
+    const isAutomaticNumber = !editingQuoteId && cleanNum === autoSuggestedNumber;
+    if (duplicateCheck.exists && !isAutomaticNumber) {
       const clientMsg = duplicateCheck.clientName ? ` (${duplicateCheck.clientName})` : '';
       setErrorMessage(
         `⚠️ A cotação "${cleanNum}" já existe no sistema${clientMsg}! Não é permitido salvar números duplicados. Escolha outro número.`
@@ -2296,12 +2014,10 @@ export default function SalesModule({
 
     // RESOLVE O ID CORRETO PARA ATUALIZAÇÃO (UPSERT):
     // Ao editar ou finalizar uma cotação reservada, garante que o sistema atualize o registro existente pelo ID
-    const targetId = editingQuoteId || cleanNum;
+    const targetId = editingQuoteId || ''; // Número nunca é usado como identidade de um registro novo.
 
     // Conforme instrução: Ao clicar em "Salvar / Finalizar", altera o status de 'RASCUNHO' para 'PENDENTE' (ou 'APROVADO')
-    const finalStatus: Quote['status'] = (quoteStatus === 'Rascunho' || (quoteStatus as string) === 'RASCUNHO')
-      ? 'Pendente'
-      : quoteStatus;
+    const finalStatus = normalizarStatusCotacao(quoteStatus);
 
     const currentQuoteObject: Quote = {
       id: targetId,
@@ -2330,23 +2046,40 @@ export default function SalesModule({
       updatedAt: new Date().toISOString()
     };
 
+    saveInFlightRef.current = true;
     setIsSavingQuote(true);
 
     try {
+      if (isAutomaticNumber) {
+        const next = await consultarProximoNumeroSemGravar(savedQuotes);
+        cleanNum = next.quoteNumber;
+        currentQuoteObject.quoteNumber = cleanNum;
+      }
       // 2. TRATAMENTO DE ERROS NO SALVAMENTO/EDIÇÃO:
       // Chamada assíncrona ao Supabase com try/catch. Caso falhe, exibe toast/alerta de erro e impede fechamento da tela.
-      const saveRes = await saveCotacaoDb(currentQuoteObject, editingOriginalQuoteNumber || undefined);
+      const saveRes = await salvarCotacaoComIdentidadeSegura(currentQuoteObject, editingQuoteId, editingOriginalQuoteNumber);
+      // Preserve a identidade confirmada também quando o serviço falhar ao salvar os itens.
+      if (saveRes.confirmedId) {
+        setEditingQuoteId(saveRes.confirmedId);
+        editingQuoteIdRef.current = saveRes.confirmedId;
+        setEditingOriginalQuoteNumber(saveRes.confirmedNumber);
+        editingQuoteNumberRef.current = saveRes.confirmedNumber;
+        setNumeroCotacao(saveRes.confirmedNumber);
+        cleanNum = saveRes.confirmedNumber;
+      }
 
       if (saveRes.error) {
         console.error('Erro retornado pelo Supabase ao gravar cotação:', saveRes.error);
-        const errMsg = saveRes.error.message || (typeof saveRes.error === 'string' ? saveRes.error : 'Falha na comunicação com o banco de dados');
+        const errMsg = saveRes.error.code === '23505' ? 'Outro computador utilizou esse número. Seus dados foram mantidos; escolha um número livre e tente novamente' : (saveRes.error.message || 'Falha na comunicação com o banco de dados');
         setErrorMessage(`⚠️ Falha ao salvar cotação no banco de dados: ${errMsg}. Os dados permanecem na tela para não haver perda. Tente salvar novamente.`);
         setTimeout(() => setErrorMessage(null), 8000);
         return; // Interrompe imediatamente para NÃO simular sucesso nem abrir modal
       }
 
       // Se salvou com sucesso no Supabase, registra o ID oficial confirmado pelo banco
-      const confirmedId = saveRes.data?.id || targetId;
+      const confirmedId = saveRes.confirmedId;
+      if (!confirmedId) throw new Error('O banco não confirmou o ID da cotação.');
+      currentQuoteObject.quoteNumber = cleanNum;
       currentQuoteObject.id = confirmedId;
       setEditingQuoteId(confirmedId);
       editingQuoteIdRef.current = confirmedId;
@@ -2377,21 +2110,11 @@ export default function SalesModule({
       setSavedQuotes(updatedQuotes);
       try { localStorage.removeItem('s_orcamentos'); } catch {}
 
-      // Sequência Automática do Emitente
-      const isAutoSequential = !isEditing && autoSuggestedNumber && cleanNum.toLowerCase() === autoSuggestedNumber.trim().toLowerCase();
-      if (isAutoSequential) {
-        incrementEmitenteQuoteSequential(autoSuggestedSeq).catch(err => {
-          console.warn('Erro ao atualizar proximo_numero_sequencial no Supabase:', err);
-        });
-        const nextSeq = autoSuggestedSeq + 1;
-        setAutoSuggestedSeq(nextSeq);
-        const prefix = cleanNum.replace(/\d+$/, '');
-        const nextNumStr = `${prefix}${String(nextSeq).padStart(6, '0')}`;
-        setAutoSuggestedNumber(nextNumStr);
-      }
+      // O gatilho do banco já atualizou a sequência no mesmo INSERT.
+      // Não incrementar de novo na tela: isso pulava números e concorria com outros computadores.
 
       // Se a cotação estiver Aprovada ou Faturada, realiza a baixa no estoque
-      if (quoteStatus === 'Aprovado' || quoteStatus === 'Faturado') {
+      if (finalStatus === 'Aprovado' || finalStatus === 'Faturado') {
         const baixaRes = baixarEstoquePorCotacao(currentQuoteObject);
         const finRes = gerarContasReceberPorCotacao(currentQuoteObject);
         if (baixaRes.itensBaixados > 0) {
@@ -2408,6 +2131,10 @@ export default function SalesModule({
 
       // Notificação Toast de Sucesso e abertura do Modal de Opções de Impressão
       setSuccessMessage(`✅ Orçamento ${cleanNum} salvo com sucesso no banco de dados!`);
+      try { onQuoteChange?.(currentQuoteObject); } catch (notifyError) {
+        console.warn('Cotação salva; falha ao notificar a tela principal:', notifyError);
+      }
+      await handleAdvanceToNextQuote(false, updatedQuotes);
       setShowPrintOptionsModal(true);
 
       setTimeout(() => {
@@ -2419,153 +2146,23 @@ export default function SalesModule({
       setErrorMessage(`❌ Erro inesperado ao gravar no banco: ${err?.message || 'Falha de conexão'}. Seus dados foram mantidos na tela.`);
       setTimeout(() => setErrorMessage(null), 8000);
     } finally {
+      saveInFlightRef.current = false;
       setIsSavingQuote(false);
     }
   };
 
-  // Aprovar cotação com 1 clique (baixa estoque + gera contas a receber + UPDATE direto no Supabase)
-  const handleApproveAndDeductQuote = async () => {
-    if (isSavingQuote) return;
-
-    if (items.length === 0) {
-      setErrorMessage('Adicione pelo menos 1 item antes de aprovar o orçamento.');
-      setTimeout(() => setErrorMessage(null), 3500);
-      return;
-    }
-
-    const isEditing = !!(editingQuoteId || editingOriginalQuoteNumber);
-    const cleanNum = numeroCotacao.trim();
-    if (!cleanNum) {
-      setErrorMessage('Informe um número válido para a cotação.');
-      setTimeout(() => setErrorMessage(null), 3500);
-      return;
-    }
-
-    // VALIDAÇÃO DE DUPLICIDADE: Não permitir gravar se já existir aquela cotação
-    const duplicateCheck = checkQuoteNumberExists(cleanNum, editingOriginalQuoteNumber);
-    if (duplicateCheck.exists) {
-      const clientMsg = duplicateCheck.clientName ? ` (${duplicateCheck.clientName})` : '';
-      setErrorMessage(
-        `⚠️ A cotação "${cleanNum}" já existe no sistema${clientMsg}! Não é permitido aprovar/gravar números duplicados.`
-      );
-      setTimeout(() => setErrorMessage(null), 6000);
-      return;
-    }
-
-    const targetId = editingQuoteId || cleanNum;
-
-    const currentQuoteObject: Quote = {
-      id: targetId,
-      quoteNumber: cleanNum,
-      clientId: selectedClientId || undefined,
-      clientName: clientName.trim() || 'Cliente Balcão (UsiCorte)',
-      clientDocument: clientDocument.trim(),
-      contactPerson: contactPerson.trim(),
-      clientPhone: clientPhone.trim(),
-      clientEmail: clientEmail.trim(),
-      clientCity: clientCity.trim(),
-      clientState: clientState.trim(),
-      date: quoteDate,
-      validityDays: validityDays,
-      paymentTerms: paymentTerms,
-      status: 'Aprovado',
-      items: items,
-      discount: discountAmount,
-      discountPercent: 0,
-      shipping: shippingAmount,
-      subtotalTotal: subtotalTotal,
-      grandTotal: grandTotal,
-      totalWeightKg: totalQuoteWeightKg,
-      observations: observations,
-      createdAt: editingQuoteCreatedAt || new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-
-    setIsSavingQuote(true);
-
-    try {
-      // Gravação direta no Supabase com try/catch e verificação de erro
-      const saveRes = await saveCotacaoDb(currentQuoteObject, editingOriginalQuoteNumber || undefined);
-
-      if (saveRes.error) {
-        console.error('Erro retornado pelo Supabase ao aprovar cotação:', saveRes.error);
-        const errMsg = saveRes.error.message || 'Falha de comunicação';
-        setErrorMessage(`⚠️ Erro ao salvar cotação aprovada no Supabase: ${errMsg}. Os dados permanecem na tela para nova tentativa.`);
-        setTimeout(() => setErrorMessage(null), 8000);
-        return; // Interrompe para não simular aprovação se falhou no Supabase
-      }
-
-      const confirmedId = saveRes.data?.id || targetId;
-      currentQuoteObject.id = confirmedId;
-      setEditingQuoteId(confirmedId);
-      editingQuoteIdRef.current = confirmedId;
-      setEditingOriginalQuoteNumber(cleanNum);
-      editingQuoteNumberRef.current = cleanNum;
-      setQuoteStatus('Aprovado');
-      quoteStatusRef.current = 'Aprovado';
-      isSavedRef.current = true;
-
-      // Executa baixa de estoque e contas a receber
-      const baixaRes = baixarEstoquePorCotacao(currentQuoteObject);
-      const finRes = gerarContasReceberPorCotacao(currentQuoteObject);
-
-      // Atualiza lista em memória
-      const existsIndex = savedQuotes.findIndex(
-        q => (confirmedId && (q.id === confirmedId || String(q.id).toLowerCase() === String(confirmedId).toLowerCase())) ||
-             (cleanNum && q.quoteNumber && q.quoteNumber.trim().toLowerCase() === cleanNum.toLowerCase()) ||
-             (editingOriginalQuoteNumber && (q.quoteNumber === editingOriginalQuoteNumber || q.id === editingOriginalQuoteNumber))
-      );
-
-      let updatedQuotes: Quote[];
-      if (existsIndex >= 0) {
-        updatedQuotes = [...savedQuotes];
-        updatedQuotes[existsIndex] = {
-          ...savedQuotes[existsIndex],
-          ...currentQuoteObject,
-          id: confirmedId
-        };
-      } else {
-        updatedQuotes = [currentQuoteObject, ...savedQuotes];
-      }
-      setSavedQuotes(updatedQuotes);
-      try { localStorage.removeItem('s_orcamentos'); } catch {}
-
-      // Sequência automática do emitente
-      const isAutoSequential = !isEditing && autoSuggestedNumber && cleanNum.toLowerCase() === autoSuggestedNumber.trim().toLowerCase();
-      if (isAutoSequential) {
-        incrementEmitenteQuoteSequential(autoSuggestedSeq).catch(err => {
-          console.warn('Erro ao atualizar proximo_numero_sequencial no Supabase:', err);
-        });
-        const nextSeq = autoSuggestedSeq + 1;
-        setAutoSuggestedSeq(nextSeq);
-        const prefix = cleanNum.replace(/\d+$/, '');
-        const nextNumStr = `${prefix}${String(nextSeq).padStart(6, '0')}`;
-        setAutoSuggestedNumber(nextNumStr);
-      } else {
-        console.log(`[Cotação] Número manual "${cleanNum}" aprovado. Sequência do emitente preservada intacta.`);
-      }
-
-      setSuccessMessage(`✅ Cotação ${cleanNum} APROVADA e salva com sucesso no banco de dados! ${baixaRes.itensBaixados} itens baixados no Estoque (${baixaRes.pesoTotalBaixadoKg} kg) e R$ ${formatCurrency(grandTotal)} lançado no Contas a Receber!`);
-      setTimeout(() => setSuccessMessage(null), 6000);
-    } catch (err: any) {
-      console.error('Exceção ao aprovar cotação no Supabase:', err);
-      setErrorMessage(`❌ Erro inesperado ao aprovar no banco: ${err?.message || 'Falha de conexão'}. Seus dados permanecem intactos na tela.`);
-      setTimeout(() => setErrorMessage(null), 8000);
-    } finally {
-      setIsSavingQuote(false);
-    }
+  // Aprovar apenas prepara o status. Gravação/estoque ocorrem no Salvar Orçamento.
+  const handleApproveAndDeductQuote = () => {
+    if (isSavingQuote || saveInFlightRef.current) return;
+    setQuoteStatus('Aprovado');
+    setSuccessMessage('Status Aprovado selecionado. Clique em Salvar Orçamento para confirmar.');
+    setTimeout(() => setSuccessMessage(null), 4000);
   };
 
-  // FLUXO AUTOMÁTICO PARA PRÓXIMA COTAÇÃO AO SALVAR/IMPRIMIR OU AO CLICAR EM NOVA COTAÇÃO
-  // 1. Caso o rascunho anterior estivesse vazio e em status Rascunho, descarta no Supabase
-  // 2. Reserva IMEDIATAMENTE uma nova cotação atômica no Supabase com status: 'RASCUNHO'
-  // 3. Posiciona o foco (.focus()) automaticamente no primeiro campo de digitação
-  const handleAdvanceToNextQuote = async (showNotification = true) => {
-    // Se o rascunho anterior estava totalmente vazio (sem itens e status Rascunho), descarta para não acumular
-    if (editingQuoteId && items.length === 0 && (quoteStatus === 'Rascunho' || (quoteStatus as string) === 'RASCUNHO')) {
-      cancelarOuDescartarRascunho(editingQuoteId, numeroCotacao).catch(() => {});
-    }
-
+  // Nova cotação apenas limpa a tela e consulta o próximo número, sem INSERT.
+  const handleAdvanceToNextQuote = async (showNotification = true, quotesList: Quote[] = savedQuotes) => {
+    if (isReservingRef.current) return;
+    isReservingRef.current = true;
     setEditingQuoteId(null);
     setEditingOriginalQuoteNumber(null);
     setEditingQuoteCreatedAt(null);
@@ -2583,34 +2180,33 @@ export default function SalesModule({
     setQuoteDate(new Date().toISOString().split('T')[0]);
     setValidityDays(10);
     setPaymentTerms('À Vista / Pix (3% Desc.)');
-    setQuoteStatus('Rascunho');
+    setQuoteStatus('Pendente');
     setItems([]);
     setDiscountAmount(0);
     setShippingAmount(0);
     setObservations('Preços com impostos inclusos. Material sujeito a conferência no ato do recebimento.');
     resetItemForm();
 
+    setNumeroCotacao('');
+    numeroCotacaoRef.current = '';
+    setAutoSuggestedNumber('');
+    setDbDuplicateResult(null);
+    isSavedRef.current = false;
+    itemsRef.current = [];
+    quoteStatusRef.current = 'Pendente';
     setIsReservingQuote(true);
     try {
-      const res = await reservarNovaCotacaoNoSupabase();
-      if (res?.numero) {
-        setNumeroCotacao(res.numero);
-        setAutoSuggestedNumber(res.numero);
-        setEditingQuoteId(res.id);
-        setEditingOriginalQuoteNumber(res.numero);
-        editingQuoteIdRef.current = res.id;
-        editingQuoteNumberRef.current = res.numero;
-        setQuoteStatus('Rascunho');
-        quoteStatusRef.current = 'Rascunho';
-        isSavedRef.current = false;
-        if (showNotification) {
-          setSuccessMessage(`🔒 Reserva atômica: Cotação Nº ${res.numero} gravada como Rascunho no Supabase!`);
-          setTimeout(() => setSuccessMessage(null), 3500);
-        }
+      const res = await consultarProximoNumeroSemGravar(quotesList);
+      setNumeroCotacao(res.quoteNumber);
+      setAutoSuggestedNumber(res.quoteNumber);
+      if (showNotification) {
+        setSuccessMessage(`Nova cotação Nº ${res.quoteNumber}.`);
+        setTimeout(() => setSuccessMessage(null), 3500);
       }
-    } catch (err) {
-      console.warn('Erro ao reservar próxima cotação no Supabase:', err);
+    } catch (err: any) {
+      setErrorMessage(`Não foi possível consultar o próximo número: ${err?.message || 'Falha de conexão'}.`);
     } finally {
+      isReservingRef.current = false;
       setIsReservingQuote(false);
     }
 
@@ -2625,59 +2221,6 @@ export default function SalesModule({
       }
     }, 150);
   };
-
-  const handleDiscardCurrentDraft = async () => {
-    if (!editingQuoteId) return;
-    if (confirm(`Deseja realmente cancelar e descartar o rascunho da cotação Nº ${numeroCotacao}?`)) {
-      setIsSavingQuote(true);
-      try {
-        await cancelarOuDescartarRascunho(editingQuoteId, numeroCotacao);
-        setSuccessMessage(`Rascunho da cotação Nº ${numeroCotacao} descartado com sucesso.`);
-        setTimeout(() => setSuccessMessage(null), 3500);
-        await handleAdvanceToNextQuote(false);
-      } catch (e) {
-        console.warn('Erro ao descartar rascunho:', e);
-      } finally {
-        setIsSavingQuote(false);
-      }
-    }
-  };
-
-  const [isPurgingDrafts, setIsPurgingDrafts] = useState<boolean>(false);
-
-  const handlePurgeEmptyDrafts = async () => {
-    if (!confirm('Deseja realmente limpar todos os rascunhos vazios acumulados no banco de dados e recalcular a numeração sequencial correta?')) {
-      return;
-    }
-    setIsPurgingDrafts(true);
-    try {
-      const res = await limparRascunhosVaziosDb();
-      if (res.success) {
-        setSuccessMessage(`🧹 Limpeza concluída: ${res.purgedCount} rascunhos vazios limpos do Supabase! Próxima cotação: ${res.nextQuoteNumber || 'recalculada'}.`);
-        if (res.nextQuoteNumber) {
-          setNumeroCotacao(res.nextQuoteNumber);
-          setAutoSuggestedNumber(res.nextQuoteNumber);
-        }
-        await loadQuotesFromDb();
-        setTimeout(() => setSuccessMessage(null), 5000);
-      } else {
-        setErrorMessage('Aviso na limpeza de rascunhos: ' + (res.error?.message || 'Falha'));
-        setTimeout(() => setErrorMessage(null), 5000);
-      }
-    } catch (err: any) {
-      setErrorMessage('Erro ao limpar rascunhos: ' + (err?.message || 'Erro'));
-      setTimeout(() => setErrorMessage(null), 5000);
-    } finally {
-      setIsPurgingDrafts(false);
-    }
-  };
-
-  // Mantém a referência sincronizada para o listener onafterprint
-  useEffect(() => {
-    handleAdvanceToNextQuoteRef.current = () => handleAdvanceToNextQuote(true);
-  });
-
-  const handleNewQuote = () => handleAdvanceToNextQuote(true);
 
   // Load a quote from history modal / edit action - MANTÉM FIXO o número e ID original
   const handleLoadQuoteFromHistory = (quote: Quote) => {
@@ -2702,7 +2245,7 @@ export default function SalesModule({
     setQuoteDate(getSafeISODate(quote.date || quote.createdAt));
     setValidityDays(quote.validityDays || 10);
     setPaymentTerms(quote.paymentTerms || 'À Vista / Pix (3% Desc.)');
-    setQuoteStatus(quote.status || 'Pendente');
+    setQuoteStatus(normalizarStatusCotacao(quote.status || 'Pendente'));
     setItems(quote.items || []);
     setDiscountAmount(quote.discount || 0);
     setShippingAmount(quote.shipping || 0);
@@ -2726,26 +2269,19 @@ export default function SalesModule({
     editingQuoteIdRef.current = null;
     editingQuoteNumberRef.current = null;
 
-    // 2. Resolve e RESERVA IMEDIATAMENTE um NOVO número e rascunho atômico no Supabase
+    // Apenas consulta a sugestão para duplicação, sem criar cotação no banco.
     setIsReservingQuote(true);
-    let nextUniqueNumber = generateNextQuoteNumber(savedQuotes);
     try {
-      const res = await reservarNovaCotacaoNoSupabase();
-      if (res?.numero) {
-        nextUniqueNumber = res.numero;
-        setAutoSuggestedNumber(res.numero);
-        setEditingQuoteId(res.id);
-        setEditingOriginalQuoteNumber(res.numero);
-        editingQuoteIdRef.current = res.id;
-        editingQuoteNumberRef.current = res.numero;
-        setQuoteStatus('Rascunho');
-      }
-    } catch (err) {
-      console.warn('Aviso ao gerar nova numeração sequencial para duplicação:', err);
+      const res = await consultarProximoNumeroSemGravar(savedQuotes);
+      setNumeroCotacao(res.quoteNumber);
+      setAutoSuggestedNumber(res.quoteNumber);
+      isSavedRef.current = false;
+    } catch (err: any) {
+      setNumeroCotacao('');
+      setErrorMessage(`Não foi possível consultar o próximo número: ${err?.message || 'Falha de conexão'}.`);
     } finally {
       setIsReservingQuote(false);
     }
-    setNumeroCotacao(nextUniqueNumber);
 
     // 3. Preenche dados do cliente
     setSelectedClientId(quote.clientId || '');
@@ -2852,34 +2388,6 @@ export default function SalesModule({
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };
-
-  // Sync to parent on quote update
-  useEffect(() => {
-    if (onQuoteChange) {
-      onQuoteChange(currentQuoteForModal);
-    }
-  }, [
-    numeroCotacao,
-    selectedClientId,
-    clientName,
-    clientDocument,
-    contactPerson,
-    clientPhone,
-    clientEmail,
-    clientCity,
-    clientState,
-    quoteDate,
-    validityDays,
-    paymentTerms,
-    quoteStatus,
-    items,
-    discountAmount,
-    shippingAmount,
-    subtotalTotal,
-    grandTotal,
-    totalQuoteWeightKg,
-    observations
-  ]);
 
   return (
     <div className="space-y-8">
@@ -2995,34 +2503,6 @@ export default function SalesModule({
             return null;
           })()}
 
-          {editingQuoteId && (quoteStatus === 'Rascunho' || (quoteStatus as string) === 'RASCUNHO') && (
-            <button
-              type="button"
-              onClick={handleDiscardCurrentDraft}
-              disabled={isSavingQuote || isReservingQuote}
-              className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
-              title="Descarta o rascunho atual reservado no Supabase e inicia uma nova cotação"
-            >
-              <Trash2 className="w-3.5 h-3.5 text-rose-600" />
-              Descartar Rascunho
-            </button>
-          )}
-
-          <button
-            type="button"
-            onClick={handlePurgeEmptyDrafts}
-            disabled={isPurgingDrafts}
-            className="px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
-            title="Limpa rascunhos vazios acumulados no banco de dados e recalcula a sequência oficial (ex: COT-2026-000990)"
-          >
-            {isPurgingDrafts ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-700" />
-            ) : (
-              <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-            )}
-            Limpar Rascunhos Vazios
-          </button>
-
           <button
             onClick={() => handleAdvanceToNextQuote(true)}
             className="px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
@@ -3071,7 +2551,6 @@ export default function SalesModule({
               const cleanNum = numeroCotacao.trim();
               const duplicateStatus = checkQuoteNumberExists(numeroCotacao, editingOriginalQuoteNumber);
               const isDuplicate = duplicateStatus.exists;
-              const isEditing = !!(editingQuoteId || editingOriginalQuoteNumber);
               const isCustomNumber = !!(autoSuggestedNumber && cleanNum && cleanNum.toLowerCase() !== autoSuggestedNumber.trim().toLowerCase());
 
               return (
@@ -3091,23 +2570,19 @@ export default function SalesModule({
                     <div className="flex items-center gap-1">
                       {isReservingQuote ? (
                         <span className="text-[9px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded-md flex items-center gap-1">
-                          <Loader2 className="w-2.5 h-2.5 animate-spin text-indigo-600" /> Reservando...
+                          <Loader2 className="w-2.5 h-2.5 animate-spin text-indigo-600" /> Consultando...
                         </span>
                       ) : isCheckingDbDuplicate ? (
                         <span className="text-[9px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded-md flex items-center gap-1">
                           <Loader2 className="w-2.5 h-2.5 animate-spin text-indigo-600" /> Verificando...
-                        </span>
-                      ) : editingQuoteId && (quoteStatus === 'Rascunho' || (quoteStatus as string) === 'RASCUNHO') ? (
-                        <span className="text-[9px] font-bold text-amber-800 bg-amber-100 border border-amber-300 px-1.5 py-0.5 rounded-md flex items-center gap-1" title="Número atômico reservado no Supabase para este computador">
-                          <Lock className="w-2.5 h-2.5 text-amber-700" /> Rascunho Reservado
                         </span>
                       ) : isDuplicate ? (
                         <span className="text-[9px] font-black text-rose-700 bg-rose-100 border border-rose-300 px-1.5 py-0.5 rounded-md flex items-center gap-0.5 animate-pulse" title={`Cotação já cadastrada para: ${duplicateStatus.clientName || 'Outro cliente'}`}>
                           <AlertCircle className="w-2.5 h-2.5" /> Já Existe!
                         </span>
                       ) : cleanNum ? (
-                        <span className="text-[9px] font-bold text-emerald-700 bg-emerald-100 border border-emerald-300 px-1.5 py-0.5 rounded-md flex items-center gap-0.5" title="Número livre e pronto para salvar">
-                          <Check className="w-2.5 h-2.5" /> Disponível
+                        <span className="text-[9px] font-bold text-emerald-700 bg-emerald-100 border border-emerald-300 px-1.5 py-0.5 rounded-md flex items-center gap-0.5" title="Número sugerido; confirmação definitiva somente ao salvar">
+                          <Check className="w-2.5 h-2.5" /> Previsto
                         </span>
                       ) : (
                         <span className="text-[9px] font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded-md">
@@ -3123,8 +2598,8 @@ export default function SalesModule({
                       type="text"
                       value={numeroCotacao}
                       onChange={(e) => setNumeroCotacao(e.target.value)}
-                      placeholder={isReservingQuote ? "Reservando cotação no banco..." : "Ex: COT-2026-000140 ou 5000"}
-                      disabled={isReservingQuote}
+                      placeholder={isReservingQuote ? "Consultando próximo número..." : "Ex: COT-2026-000140 ou 5000"}
+                      disabled={isReservingQuote || isSavingQuote || !!editingQuoteId}
                       title="Número da cotação editável livremente. Você pode apagar e digitar qualquer número específico ou aleatório."
                       className={`w-full bg-transparent text-xs font-mono font-black outline-none transition-colors ${
                         isDuplicate 
@@ -3179,8 +2654,6 @@ export default function SalesModule({
                   ? 'bg-blue-50 text-blue-700 border-blue-300 ring-1 ring-blue-500/20'
                   : quoteStatus === 'Aprovado'
                   ? 'bg-emerald-50 text-emerald-700 border-emerald-300 ring-1 ring-emerald-500/20'
-                  : quoteStatus === 'Rascunho'
-                  ? 'bg-amber-50 text-amber-700 border-amber-300 ring-1 ring-amber-500/20'
                   : quoteStatus === 'Faturado'
                   ? 'bg-purple-50 text-purple-700 border-purple-300 ring-1 ring-purple-500/20'
                   : 'bg-rose-50 text-rose-700 border-rose-300 ring-1 ring-rose-500/20'
@@ -3189,7 +2662,6 @@ export default function SalesModule({
             >
               <option value="Pendente">🔵 Pendente</option>
               <option value="Aprovado">🟢 Aprovado</option>
-              <option value="Rascunho">🟡 Rascunho</option>
               <option value="Faturado">🟣 Faturado</option>
               <option value="Rejeitado">🔴 Rejeitado</option>
               <option value="Cancelado">⚪ Cancelado</option>
@@ -4612,9 +4084,9 @@ export default function SalesModule({
             <div className="space-y-2 pt-2">
               <button
                 onClick={handleApproveAndDeductQuote}
-                disabled={isSavingQuote}
+                disabled={isSavingQuote || isReservingQuote}
                 className={`w-full py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-black flex items-center justify-center gap-1.5 shadow-md shadow-emerald-600/30 transition-all cursor-pointer border border-emerald-400/40 ${isSavingQuote ? 'opacity-60 cursor-not-allowed' : ''}`}
-                title="Aprova o orçamento, dá baixa no estoque de matéria-prima e lança em Contas a Receber"
+                title="Seleciona Aprovado; confirme no botão Salvar Orçamento"
               >
                 {isSavingQuote ? (
                   <>
@@ -4624,7 +4096,7 @@ export default function SalesModule({
                 ) : (
                   <>
                     <CheckCircle2 className="w-4 h-4 text-emerald-100" />
-                    Aprovar & Baixar Estoque ⚡
+                    Selecionar Aprovado
                   </>
                 )}
               </button>
@@ -4632,7 +4104,7 @@ export default function SalesModule({
               <div className="grid grid-cols-2 gap-2">
                 <button
                   onClick={handleSaveFullQuote}
-                  disabled={isSavingQuote}
+                  disabled={isSavingQuote || isReservingQuote}
                   className={`w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-100 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-xs transition-all cursor-pointer border border-slate-700 ${isSavingQuote ? 'opacity-60 cursor-not-allowed' : ''}`}
                 >
                   {isSavingQuote ? (
@@ -4699,11 +4171,7 @@ export default function SalesModule({
             // Invocação nominal das funções de impressão conforme fluxo técnico:
             if (tipo === 'CORTE_80MM') {
               // Cupom térmico 80mm abre em janela popup isolada (sem disparar window.print() na página principal)
-              imprimirOrdemCorte80mm(quoteToPrint, () => {
-                if (handleAdvanceToNextQuoteRef.current) {
-                  handleAdvanceToNextQuoteRef.current();
-                }
-              });
+              imprimirOrdemCorte80mm(quoteToPrint, () => {});
               setShowPrintOptionsModal(false);
               return;
             } else if (tipo === 'GERAL') {
@@ -4723,7 +4191,6 @@ export default function SalesModule({
           }}
           onClose={() => {
             setShowPrintOptionsModal(false);
-            handleAdvanceToNextQuote(true);
           }}
         />
       )}
@@ -4744,7 +4211,7 @@ export default function SalesModule({
       {/* MODAL PRINT PROPOSAL (PREVIEW COMPLETO) */}
       {showPrintModal && (
         <QuotePrintModal
-          quote={lastSavedQuoteForPrint || normalizeQuoteForPrint(currentQuoteForModal)}
+          quote={items.length > 0 ? normalizeQuoteForPrint(currentQuoteForModal) : lastSavedQuoteForPrint || normalizeQuoteForPrint(currentQuoteForModal)}
           initialMode={printModalMode}
           autoPrint={autoTriggerPrint}
           onClose={() => {
