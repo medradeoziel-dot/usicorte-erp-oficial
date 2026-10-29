@@ -1,219 +1,261 @@
-// Add or Update item
-  const handleSaveItem = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (saveInFlightRef.current) return;
+import React, { useState, useEffect, useRef } from 'react';
+import { Client, Quote, QuoteItem } from '../types';
+import { 
+  saveCotacaoDb, 
+  deleteCotacaoDb,
+  fetchCotacoesDb, 
+  mapSupabaseStatusToQuote, 
+  db,
+} from '../lib/db';
+import { 
+  formatCurrency, 
+  formatNumberBR, 
+  formatWeightKg,
+  formatSafeDate,
+  getSafeISODate,
+  formatarMedidasLimpa,
+  formatItemDescription,
+  getObservacaoEspecificaItem,
+  formatDimensaoPolegada,
+  formatDimensaoMm,
+  renderizarTabelaRelatorio,
+  parseNumberBR, 
+  parseDimensionToMm,
+  normalizeConstant,
+  calculateItemSubtotal, 
+  calculateItemWeightKg,
+  calculateItemUnitPrice,
+  isRetalhoOrMaoDeObra,
+  detectGeometryTypeFromText,
+  parseDimensionStrings,
+  parseDiameterOrThicknessMm,
+  calculateTheoreticalWeightAndPrice,
+  GeometryType,
+  MATERIAL_PROFILES,
+  MaterialProfile,
+  MATERIAL_PRESETS,
+  MaterialConstantPreset,
+  STANDARD_MEASURE_PRESETS,
+  StandardMeasurePreset,
+  PRODUCT_DESCRIPTION_PRESETS,
+  ProductDescriptionPreset,
+  INLINE_PRODUCT_OPTIONS,
+  LISTA_MATERIAIS_INLINE,
+  DADOS_MATERIAIS_MAP
+} from '../utils/calculator';
+import { useMaterialsCatalog } from '../services/materialsService';
+import { fileToDxfImage, isDxfFile } from '../utils/dxfRenderer';
+import { 
+  baixarEstoquePorCotacao, 
+  gerarContasReceberPorCotacao 
+} from '../services/inventoryFinanceService';
+import { createPortal } from 'react-dom';
+import QuotePrintModal, { PrintMode } from './QuotePrintModal';
+import QuotePrintOptionsModal, { TipoImpressaoOrcamento } from './QuotePrintOptionsModal';
+import EmissaoNfeModal from './EmissaoNfeModal';
+import CancelarNfeModal from './CancelarNfeModal';
+import { 
+  abrirDanfeEmNovaAba, 
+  obterOuBaixarXmlNfe, 
+  isNfeAutorizada, 
+  isNfeCancelada, 
+  downloadXmlCancelamento 
+} from '../services/nfeService';
+import { 
+  ConsultaPrintDocuments, 
+  TipoImpressaoConsulta,
+  normalizeQuoteForPrint,
+  imprimirOrcamentoGeral,
+  imprimirOrcamentoEmpresa,
+  imprimirOrcamentoPedido,
+  imprimirEtiquetas,
+  imprimirFichaCorte,
+  imprimirOrdemCorte80mm
+} from './ConsultaPrintDocuments';
+import QuoteHistoryModal from './QuoteHistoryModal';
+import MaterialAutocomplete, { AutocompleteOption } from './MaterialAutocomplete';
+import ImportExcelCsvModal from './ImportExcelCsvModal';
+import {
+  FileSpreadsheet,
+  PlusCircle,
+  Trash2,
+  Edit2,
+  Copy,
+  Printer,
+  Save,
+  RotateCcw,
+  History,
+  CheckCircle2,
+  Calculator,
+  Layers,
+  Sparkles,
+  Calendar,
+  User,
+  Phone,
+  Mail,
+  Building,
+  Tag,
+  Clock,
+  ArrowRight,
+  TrendingUp,
+  FileCheck,
+  AlertCircle,
+  HelpCircle,
+  Scale,
+  Box,
+  CircleDot,
+  Weight,
+  Zap,
+  Coins,
+  DollarSign,
+  ChevronDown,
+  Search,
+  Check,
+  Loader2,
+  X,
+  Ruler,
+  Upload,
+  Image as ImageIcon,
+  Ban,
+  FileCheck2,
+  Download,
+  FileText
+} from 'lucide-react';
 
-    if (!itemDescription.trim()) {
-      setErrorMessage('Por favor, informe a descrição do item.');
-      setTimeout(() => setErrorMessage(null), 3500);
-      return;
-    }
+// A sugestão é apenas visual. O gatilho SQL atribui o número definitivo no INSERT.
+// Instale numeracao_cotacao_multicomputador_v2.sql antes de usar em vários computadores.
+const normalizarStatusCotacao = (status: Quote['status']): Quote['status'] =>
+  String(status).toLowerCase() === 'rascunho' ? 'Pendente' : status;
 
-    const rawUnitPriceNum = isSpecialItem
-      ? (currentFormPriceKg > 0 ? currentFormPriceKg : (parseNumberBR(itemUnitPrice) || 0))
-      : (parseNumberBR(itemUnitPrice) || calculatedUnitPrice);
-    const unitPriceNum = isSpecialItem ? rawUnitPriceNum : Math.ceil(rawUnitPriceNum);
-    if (unitPriceNum <= 0) {
-      setErrorMessage('O valor unitário deve ser maior que zero (R$). Verifique as medidas ou o Preço/Kg.');
-      setTimeout(() => setErrorMessage(null), 3500);
-      return;
-    }
+const filtroNumeroExato = (numero: string) => numero.replace(/[\\%_]/g, '\\$&');
 
-    const qtyNum = parseFloat(itemQuantity) || 1;
-    if (qtyNum <= 0) {
-      setErrorMessage('A quantidade deve ser de no mínimo 1 unidade.');
-      setTimeout(() => setErrorMessage(null), 3500);
-      return;
-    }
+async function consultarProximoNumeroSemGravar(existingQuotes: { quoteNumber?: string }[] = []) {
+  const { data, error } = await db.from('emitente')
+    .select('proximo_numero_sequencial, prefixo_cotacao')
+    .order('created_at', { ascending: false }).limit(1).single();
+  if (error || !data) throw new Error('Não foi possível consultar a sequência do emitente.');
+  let sequential = Number(data.proximo_numero_sequencial);
+  if (!Number.isSafeInteger(sequential) || sequential < 1) {
+    throw new Error('Configure um próximo número válido no emitente.');
+  }
+  const prefix = String(data.prefixo_cotacao || `COT-${new Date().getFullYear()}-`);
+  const occupied = new Set(existingQuotes.map(q => String(q.quoteNumber || '').trim().toLowerCase()));
+  for (let attempt = 0; attempt < 10000; attempt++, sequential++) {
+    const quoteNumber = `${prefix}${String(sequential).padStart(6, '0')}`;
+    if (occupied.has(quoteNumber.toLowerCase())) continue;
+    const result = await db.from('cotacoes').select('id')
+      .ilike('numero', filtroNumeroExato(quoteNumber)).limit(1);
+    if (result.error) throw new Error('Não foi possível verificar a numeração no banco.');
+    if (!result.data?.length) return { quoteNumber, sequential, prefix };
+  }
+  throw new Error('Não foi possível encontrar um número livre. Confira o emitente.');
+}
 
-    const subtotal = isSpecialItem
-      ? Number((qtyNum * unitPriceNum).toFixed(2))
-      : calculateItemSubtotal(unitPriceNum, qtyNum);
-
-    const { unitWeightKg: geoUnitWeightKg, totalWeightKg: geoTotalWeightKg } = calculateItemWeightKg({
-      geometryType: itemGeometryType,
-      constant: currentFormConstant,
-      diameterMm: effectiveDiameterMm,
-      thicknessMm: effectiveThicknessMm,
-      widthMm: effectiveWidthMm,
-      lengthMm: effectiveLengthMm,
-      quantity: qtyNum,
-      diameterStr: itemDiameter,
-      thicknessStr: itemThickness
-    });
-
-    const unitWeightKg = isSpecialItem ? 0 : geoUnitWeightKg;
-    const totalWeightKg = isSpecialItem ? 0 : geoTotalWeightKg;
-
-    const priceKgNum = isSpecialItem
-      ? unitPriceNum
-      : (parseNumberBR(itemPricePerKg) || (unitWeightKg > 0 ? unitPriceNum / unitWeightKg : undefined));
-
-    const widthMmFormatted = effectiveWidthMm > 0 ? `${effectiveWidthMm}mm` : (itemWidthMm.trim() ? formatDimensaoMm(itemWidthMm) : '');
-    const lengthMmFormatted = effectiveLengthMm > 0 ? `${effectiveLengthMm}mm` : (itemLengthMm.trim() ? formatDimensaoMm(itemLengthMm) : '');
-
-    const formattedWidthLength = isSpecialItem
-      ? '—'
-      : (itemGeometryType === 'CHAPA_RETANGULO' || itemGeometryType === 'chapa'
-          ? (widthMmFormatted && lengthMmFormatted ? `${widthMmFormatted} x ${lengthMmFormatted}` : itemWidthLength.trim() || '-')
-          : (lengthMmFormatted ? `${lengthMmFormatted}` : itemWidthLength.trim() || '-'));
-
-    const itemMatName = itemConstantName.trim() || (isSpecialItem ? itemDescription.trim() : 'CHAPA');
-    const tempItemData = {
-      geometryType: itemGeometryType,
-      diameter: isSpecialItem ? '' : itemDiameter.trim(),
-      thickness: isSpecialItem ? '' : itemThickness.trim(),
-      measure: isSpecialItem ? '—' : (itemThickness.trim() || itemDiameter.trim()),
-      widthMm: effectiveWidthMm > 0 ? effectiveWidthMm : undefined,
-      lengthMm: effectiveLengthMm > 0 ? effectiveLengthMm : undefined,
-      widthLength: formattedWidthLength,
-      diameterMm: effectiveDiameterMm > 0 ? effectiveDiameterMm : undefined,
-      thicknessMm: effectiveThicknessMm > 0 ? effectiveThicknessMm : undefined
-    };
-    const medidasFormatadas = isSpecialItem
-      ? '—'
-      : formatarMedidasLimpa(tempItemData);
-
-    const thickFormatted = isSpecialItem ? '' : (effectiveThicknessMm > 0 ? formatDimensaoPolegada(effectiveThicknessMm) : (itemThickness.trim() ? formatDimensaoPolegada(itemThickness) : ''));
-    const diaFormatted = isSpecialItem ? '' : (effectiveDiameterMm > 0 ? formatDimensaoPolegada(effectiveDiameterMm) : (itemDiameter.trim() ? formatDimensaoPolegada(itemDiameter) : ''));
-    const widthFormatted = isSpecialItem ? '' : widthMmFormatted;
-    const lengthFormatted = isSpecialItem ? '' : lengthMmFormatted;
-
-    const defaultFormatDesc = isSpecialItem
-      ? (itemDescription.trim() || 'Serviço')
-      : (itemGeometryType === 'macico' || itemGeometryType === 'REDONDO_QUADRADO'
-          ? 'Trefilado'
-          : (itemGeometryType === 'bucha' || itemGeometryType === 'TUBO_BUCHA' ? 'Bucha / Tubo Mecânico' : 'Retângulo'));
-
-    const resolvedDesc = (itemDescription.trim() && itemDescription.trim().toLowerCase() !== itemMatName.trim().toLowerCase())
-      ? itemDescription.trim()
-      : defaultFormatDesc;
-
-    let updatedItemsList: QuoteItem[];
-
-    // CORREÇÃO DA CONDICIONAL DE ATUALIZAÇÃO: Garante o mapeamento seguro pelo ID ativo no state
-    if (editingItemId) {
-      updatedItemsList = items.map(item => {
-        if (item.id === editingItemId) {
-          return {
-            ...item,
-            companyName: clientName || 'UsiCorte Cliente',
-            description: resolvedDesc,
-            descricao: resolvedDesc,
-            constantName: itemMatName,
-            constanteNome: itemMatName,
-            material: itemMatName,
-            produto: itemMatName,
-            geometryType: itemGeometryType,
-            constant: isSpecialItem ? '0' : (itemConstant.trim() || '0.00785'),
-            pricePerKg: priceKgNum,
-            measure: isSpecialItem ? '—' : (medidasFormatadas || itemThickness.trim() || itemDiameter.trim()),
-            thickness: thickFormatted,
-            espessura: thickFormatted,
-            thicknessMm: effectiveThicknessMm > 0 ? effectiveThicknessMm : undefined,
-            espessuraMm: effectiveThicknessMm > 0 ? effectiveThicknessMm : undefined,
-            diameter: diaFormatted,
-            diametro: diaFormatted,
-            diameterMm: effectiveDiameterMm > 0 ? effectiveDiameterMm : undefined,
-            diametroMm: effectiveDiameterMm > 0 ? effectiveDiameterMm : undefined,
-            widthLength: formattedWidthLength,
-            widthMm: effectiveWidthMm > 0 ? effectiveWidthMm : undefined,
-            largura: widthFormatted,
-            larguraMm: effectiveWidthMm > 0 ? effectiveWidthMm : undefined,
-            lengthMm: effectiveLengthMm > 0 ? effectiveLengthMm : undefined,
-            comprimento: lengthFormatted,
-            comprimentoMm: effectiveLengthMm > 0 ? effectiveLengthMm : undefined,
-            unitWeightKg: unitWeightKg,
-            totalWeightKg: totalWeightKg,
-            pesoTotal: totalWeightKg,
-            unitPrice: unitPriceNum,
-            valorUnitario: unitPriceNum,
-            quantity: qtyNum,
-            qtd: qtyNum,
-            subtotal: subtotal,
-            notes: itemNotes.trim(),
-            observacao: itemNotes.trim(),
-            info: itemNotes.trim(),
-            medidasFormatadas: medidasFormatadas,
-            medidaFormatada: medidasFormatadas,
-            drawingImage: itemDrawingImage || undefined,
-            fotoDesenho: itemDrawingImage || undefined,
-            ncm: item.ncm || findProductOrMaterialData(itemMatName)?.ncm || '72085200',
-            cfop_interno: item.cfop_interno || findProductOrMaterialData(itemMatName)?.cfop_interno || '5102',
-            cfop_externo: item.cfop_externo || findProductOrMaterialData(itemMatName)?.cfop_externo || '6102',
-            unidade_medida: item.unidade_medida || findProductOrMaterialData(itemMatName)?.unidade_medida || 'PC',
-            unidadeMedida: item.unidadeMedida || findProductOrMaterialData(itemMatName)?.unidade_medida || 'PC',
-            csosn: (!item.csosn || item.csosn.includes('102') || item.csosn.includes('101')) 
-              ? '101 - Com permissão de crédito' 
-              : (findProductOrMaterialData(itemMatName)?.csosn || '101 - Com permissão de crédito')
-          };
-        }
-        return item;
-      });
-
-      setItems(updatedItemsList);
-      setSuccessMessage('Item atualizado com sucesso!');
-      setEditingItemId(null);
+async function salvarCotacaoComIdentidadeSegura(quote: Quote, existingId: string | null, originalNumber: string | null) {
+  // Nunca passe o número como ID para um upsert: outro computador pode já tê-lo salvo.
+  let confirmedId = existingId;
+  let confirmedNumber = quote.quoteNumber;
+  try {
+    if (confirmedId) {
+      const current = await db.from('cotacoes').select('id, numero').eq('id', confirmedId).single();
+      if (current.error || !current.data) throw new Error('A cotação original não foi encontrada. Nada foi sobrescrito.');
+      if (originalNumber && String(current.data.numero) !== originalNumber) {
+        throw new Error('A identificação da cotação mudou. Reabra-a pelo histórico.');
+      }
+      if (quote.quoteNumber !== String(current.data.numero)) {
+        const conflict = await db.from('cotacoes').select('id')
+          .ilike('numero', filtroNumeroExato(quote.quoteNumber)).neq('id', confirmedId).limit(1);
+        if (conflict.error) throw conflict.error;
+        if (conflict.data?.length) throw new Error('Este número já pertence a outra cotação. Seus dados foram mantidos.');
+      }
     } else {
-      const fiscalData = findProductOrMaterialData(itemMatName) || findProductOrMaterialData(itemConstantSelect) || findProductOrMaterialData(selectedMaterial?.id) || findProductOrMaterialData(itemDescription);
-      const newItem: QuoteItem = {
-        id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-        date: quoteDate || new Date().toISOString().split('T')[0],
-        companyName: clientName || 'UsiCorte Cliente',
-        description: resolvedDesc,
-        descricao: resolvedDesc,
-        constantName: itemMatName,
-        constanteNome: itemMatName,
-        material: itemMatName,
-        geometryType: itemGeometryType,
-        constant: isSpecialItem ? '0' : (itemConstant.trim() || '0.00785'),
-        pricePerKg: priceKgNum,
-        measure: isSpecialItem ? '—' : (medidasFormatadas || itemThickness.trim() || itemDiameter.trim()),
-        thickness: thickFormatted,
-        espessura: thickFormatted,
-        thicknessMm: effectiveThicknessMm > 0 ? effectiveThicknessMm : undefined,
-        espessuraMm: effectiveThicknessMm > 0 ? effectiveThicknessMm : undefined,
-        diameter: diaFormatted,
-        diametro: diaFormatted,
-        diameterMm: effectiveDiameterMm > 0 ? effectiveDiameterMm : undefined,
-        diametroMm: effectiveDiameterMm > 0 ? effectiveDiameterMm : undefined,
-        widthLength: formattedWidthLength,
-        widthMm: effectiveWidthMm > 0 ? effectiveWidthMm : undefined,
-        largura: widthFormatted,
-        larguraMm: effectiveWidthMm > 0 ? effectiveWidthMm : undefined,
-        lengthMm: effectiveLengthMm > 0 ? effectiveLengthMm : undefined,
-        comprimento: lengthFormatted,
-        comprimentoMm: effectiveLengthMm > 0 ? effectiveLengthMm : undefined,
-        unitWeightKg: unitWeightKg,
-        totalWeightKg: totalWeightKg,
-        pesoTotal: totalWeightKg,
-        unitPrice: unitPriceNum,
-        valorUnitario: unitPriceNum,
-        quantity: qtyNum,
-        qtd: qtyNum,
-        subtotal: subtotal,
-        notes: itemNotes.trim(),
-        observacao: itemNotes.trim(),
-        info: itemNotes.trim(),
-        medidasFormatadas: medidasFormatadas,
-        medidaFormatada: medidasFormatadas,
-        drawingImage: itemDrawingImage || undefined,
-        fotoDesenho: itemDrawingImage || undefined,
-        ncm: fiscalData?.ncm || '72085200',
-        cfop_interno: fiscalData?.cfop_interno || '5102',
-        cfop_externo: fiscalData?.cfop_externo || '6102',
-        unidade_medida: fiscalData?.unidade_medida || 'PC',
-        unidadeMedida: fiscalData?.unidade_medida || 'PC',
-        csosn: (!fiscalData?.csosn || fiscalData.csosn.includes('102') || fiscalData.csosn.includes('101')) 
-          ? '101 - Com permissão de crédito' 
-          : fiscalData.csosn
-      };
-
-      updatedItemsList = [...items, newItem];
-      setItems(updatedItemsList);
-      setSuccessMessage('Item adicionado à cotação com sucesso!');
+      // INSERT exclusivo, com UUID gerado pelo banco e número atribuído pelo gatilho.
+      // Só é executado dentro do clique em Salvar Orçamento, nunca ao preencher a tela.
+      const created = await db.from('cotacoes').insert([{
+        numero: quote.quoteNumber,
+        data: quote.date,
+        cliente_nome: quote.clientName,
+        contato: quote.contactPerson || '',
+        telefone: quote.clientPhone || '',
+        email: quote.clientEmail || '',
+        observacoes: quote.observations || '',
+        valor_total: quote.grandTotal,
+        status: 'pendente'
+      }]).select('id, numero').single();
+      if (created.error) throw created.error;
+      if (!created.data?.id || !created.data?.numero) {
+        throw new Error('O banco não confirmou a identificação da nova cotação. Consulte o histórico antes de tentar novamente.');
+      }
+      confirmedId = String(created.data.id);
+      confirmedNumber = String(created.data.numero);
+      quote.id = confirmedId;
+      quote.quoteNumber = confirmedNumber;
     }
+    // O serviço existente preserva o mapeamento dos campos e dos itens.
+    // Em caso de falha parcial, mantenha este UUID na tela para retomar a MESMA cotação.
+    if (!confirmedId) throw new Error('O banco não confirmou o ID da cotação.');
+    quote.id = confirmedId;
+    const saved = await saveCotacaoDb(quote, existingId ? originalNumber || undefined : confirmedNumber);
+    if (saved.error) return { error: saved.error, confirmedId, confirmedNumber };
+    const verified = await db.from('cotacoes').select('id, numero').eq('id', confirmedId).single();
+    if (verified.error || !verified.data) throw new Error('Não foi possível confirmar a cotação gravada. Seus dados foram mantidos.');
+    confirmedNumber = String(verified.data.numero);
+    quote.quoteNumber = confirmedNumber;
+    return { error: null, confirmedId, confirmedNumber };
+  } catch (error: any) {
+    return { error, confirmedId, confirmedNumber };
+  }
+}
 
-    resetItemForm();
-    setTimeout(() => setSuccessMessage(null), 3000);
-  };
+interface SalesModuleProps {
+  clients: Client[];
+  onNavigateToClients?: () => void;
+  selectedMaterial?: MaterialProfile | null;
+  onQuoteChange?: (quote: Quote) => void;
+  onNavigateToReports?: () => void;
+  quoteToEdit?: Quote | null;
+  onClearQuoteToEdit?: () => void;
+  quoteToDuplicate?: { quote: Quote; originalNumber: string } | null;
+  onClearQuoteToDuplicate?: () => void;
+}
+
+export default function SalesModule({ 
+  clients, 
+  onNavigateToClients,
+  selectedMaterial,
+  onQuoteChange,
+  onNavigateToReports,
+  quoteToEdit,
+  onClearQuoteToEdit,
+  quoteToDuplicate,
+  onClearQuoteToDuplicate
+}: SalesModuleProps) {
+  // Catálogo dinâmico de materiais conectado ao Supabase
+  const { profiles: dynamicMaterialProfiles, materials } = useMaterialsCatalog();
+  const activeMaterialProfiles = dynamicMaterialProfiles.length > 0 ? dynamicMaterialProfiles : MATERIAL_PROFILES;
+
+  // Helper universal para buscar dados oficiais cadastrados do produto/material (Supabase / Catálogo)
+  const findProductOrMaterialData = (searchKey: string) => {
+    if (!searchKey || !searchKey.trim()) return null;
+    const clean = searchKey.trim().toLowerCase();
+    const cleanSimple = clean.replace(/[^a-z0-9]/g, '');
+
+    // 1. Tabela de materiais do Supabase (prioridade máxima aos valores cadastrados)
+    const fromMaterials = materials.find(m =>
+      m.id.toLowerCase() === clean ||
+      m.nome.toLowerCase() === clean ||
+      (cleanSimple && m.nome.toLowerCase().replace(/[^a-z0-9]/g, '') === cleanSimple)
+    );
+    if (fromMaterials) {
+      return {
+        id: fromMaterials.id,
+        name: fromMaterials.nome,
+        descricao: fromMaterials.descricao && fromMaterials.descricao.trim() !== '' ? fromMaterials.descricao.trim() : fromMaterials.nome,
+        tipo: fromMaterials.tipo,
+        k: fromMaterials.k,
+        precoKg: fromMaterials.precoKg,
+        ncm: fromMaterials.ncm || '72085200',
+        cfop_interno: fromMaterials.cfop_interno || '5102',
+        cfop_externo: fromMaterials.cfop_externo || '6102',
+        unidade_medida: fromMaterials.unidade_medida || 'PC',
+        csosn: (!fromMaterials.csosn || fromMaterials.csosn.includes('102') || fromMaterials.csosn.includes('101')) ? '101 - Com permissão de crédito' : fromMaterials.
