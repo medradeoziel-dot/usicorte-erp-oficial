@@ -499,30 +499,51 @@ export function calculateItemUnitPrice({
 }
 
 /**
- * Normaliza uma string de medidas: quebra em tokens por "x"/"×", remove
- * tokens repetidos (causa da duplicidade tipo 5" x 300 x 5" x 300) e rejunta.
+ * Normaliza uma string de medidas:
+ * - Corrige separadores (substitui × e * por 'x').
+ * - Remove duplicações acidentais de blocos inteiros repetidos (ex: "5" x 300 x 5" x 300" -> "5" x 300").
+ * - NUNCA omite dimensões físicas legítimas quando tiverem valores iguais (ex: Chapa 150x150 mm deve
+ *   exibir explicitamente Espessura x Largura x Comprimento: "12mm x 150mm x 150mm" ou "1/2" x 150mm x 150mm").
  */
 export function normalizarMedida(valor: string | undefined | null): string {
   if (!valor) return "";
 
   const partes = valor
-    .replace(/×/g, "x")
-    .split("x")
+    .replace(/[×*]/g, "x")
+    .split(/\s*x\s*/i)
     .map((p) => p.trim())
     .filter(Boolean);
 
-  const vistas = new Set<string>();
-  const unicas: string[] = [];
+  if (partes.length === 0) return "";
 
-  for (const parte of partes) {
-    const chave = parte.toLowerCase().replace(/\s+/g, "");
-    if (!vistas.has(chave)) {
-      vistas.add(chave);
-      unicas.push(parte);
+  // 1. Detecta duplicação acidental de blocos inteiros repetidos (ex: concatenações duplicadas em relatórios legados):
+  // Caso de bloco duplo de 2 termos: [A, B, A, B] -> [A, B]
+  if (partes.length === 4) {
+    const k0 = partes[0].toLowerCase().replace(/\s+/g, "");
+    const k1 = partes[1].toLowerCase().replace(/\s+/g, "");
+    const k2 = partes[2].toLowerCase().replace(/\s+/g, "");
+    const k3 = partes[3].toLowerCase().replace(/\s+/g, "");
+    if (k0 === k2 && k1 === k3) {
+      return `${partes[0]} x ${partes[1]}`;
     }
   }
 
-  return unicas.join(" x ");
+  // Caso de bloco duplo de 3 termos: [A, B, C, A, B, C] -> [A, B, C]
+  if (partes.length === 6) {
+    const k0 = partes[0].toLowerCase().replace(/\s+/g, "");
+    const k1 = partes[1].toLowerCase().replace(/\s+/g, "");
+    const k2 = partes[2].toLowerCase().replace(/\s+/g, "");
+    const k3 = partes[3].toLowerCase().replace(/\s+/g, "");
+    const k4 = partes[4].toLowerCase().replace(/\s+/g, "");
+    const k5 = partes[5].toLowerCase().replace(/\s+/g, "");
+    if (k0 === k3 && k1 === k4 && k2 === k5) {
+      return `${partes[0]} x ${partes[1]} x ${partes[2]}`;
+    }
+  }
+
+  // NUNCA descartar dimensões legítimas individuais quando Largura == Comprimento
+  // (ex: [12mm, 150mm, 150mm] deve retornar "12mm x 150mm x 150mm" integralmente).
+  return partes.join(" x ");
 }
 
 function gcd(a: number, b: number): number {
@@ -531,28 +552,40 @@ function gcd(a: number, b: number): number {
 
 /**
  * Converte valor em milímetros para a fração de polegada canônica da UsiCorte.
- * Exemplos:
- * 25.4 -> '1"'
- * 38.1 -> '1.1/2"'
- * 50.8 -> '2"'
- * 12.7 -> '1/2"'
+ * Apenas realiza a conversão se houver uma correspondência comercial EXATA ou LIMPA
+ * (frações canônicas padrão da indústria metalúrgica: denominadores 2, 4, 8, 16 ou polegadas inteiras).
+ * 
+ * Se o valor em mm for uma bitola puramente métrica (ex: 12mm, 10mm, 20mm, 15mm, 16mm, etc.),
+ * retorna null para preservar o valor original em milímetros (ex: 12mm) sem forçar conversões
+ * quebradas ou incorretas como 15/32" ou 0.15/32".
+ * 
+ * Exemplos de equivalência comercial limpa:
+ * 25.40 -> '1"'
+ * 50.80 -> '2"'
+ * 12.70 -> '1/2"'
+ * 6.35  -> '1/4"'
  * 19.05 -> '3/4"'
- * 6.35 -> '1/4"'
+ * 38.10 -> '1.1/2"'
  * 31.75 -> '1.1/4"'
  * 63.50 -> '2.1/2"'
+ * 
+ * Exemplos que NÃO devem ser convertidos (retornam null):
+ * 12.00 -> null (mantém 12mm)
+ * 10.00 -> null (mantém 10mm)
+ * 20.00 -> null (mantém 20mm)
  */
-export function mmToInchFraction(mm: number, tolerance = 0.5): string | null {
+export function mmToInchFraction(mm: number, tolerance = 0.08): string | null {
   if (!mm || isNaN(mm) || mm <= 0) return null;
   const inches = mm / 25.4;
 
   // 1. Polegadas inteiras exatas (ex: 1", 2", 3", 4", etc.)
   const nearestWhole = Math.round(inches);
-  if (Math.abs(nearestWhole * 25.4 - mm) <= tolerance && nearestWhole > 0) {
+  if (nearestWhole > 0 && Math.abs(nearestWhole * 25.4 - mm) <= tolerance) {
     return `${nearestWhole}"`;
   }
 
-  // 2. Frações padrão (denominadores 2, 4, 8, 16, 32, 64)
-  for (const den of [2, 4, 8, 16, 32, 64]) {
+  // 2. Frações padrão comerciais (APENAS denominadores canônicos 2, 4, 8, 16 - JAMAIS 32 ou 64)
+  for (const den of [2, 4, 8, 16]) {
     const whole = Math.floor(inches);
     const rem = inches - whole;
     const num = Math.round(rem * den);
@@ -573,6 +606,8 @@ export function mmToInchFraction(mm: number, tolerance = 0.5): string | null {
 
   return null;
 }
+
+export const mmToInch = mmToInchFraction;
 
 /**
  * Formata um valor numérico ou textual para exibição em polegadas (ex: 1", 1.1/2", 2", 3/4").
@@ -617,37 +652,120 @@ export function formatDimensaoMm(val: string | number | undefined | null): strin
 }
 
 /**
- * Formata um valor numérico ou textual para exibição em polegadas (ex: 1", 1.1/2", 2", 3/4").
- * Utilizado exclusivamente para ESPESSURA e DIÂMETRO.
+ * Formata um valor numérico ou textual para exibição em polegadas (ex: 1", 1.1/2", 2", 3/4")
+ * ou milímetros limpos (ex: 12mm, 10mm, 20mm).
+ * Utilizado para ESPESSURA e DIÂMETRO.
+ * 
+ * Regra:
+ * 1. Se for uma equivalência comercial limpa em polegadas (ex: 12.7mm -> 1/2", 25.4mm -> 1"), converte para polegadas.
+ * 2. Se for um valor milimétrico sem correspondência exata em polegadas padrão (como 12mm),
+ *    MANTÉM estritamente em milímetros (ex: 12mm), sem forçar frações quebradas (como 15/32" ou 0.15/32").
+ * 3. Corrige e limpa frações legadas corrompidas que continham '0.' ou frações em 32/64 avos.
  */
 export function formatDimensaoPolegada(val: string | number | undefined | null): string {
   if (val === undefined || val === null) return '';
-  const str = String(val).trim();
+  let str = String(val).trim();
   if (!str || str === '-' || str === '—') return '';
 
-  // Se já está formatado com polegadas
+  // 1. Remoção estrita de qualquer zero ou prefixo nulo antes de frações
+  // Ex: "0.1/2" -> "1/2", "0 1/2" -> "1/2", "0,1/2" -> "1/2", "0-1/2" -> "1/2", "Ø 0.1/2" -> "Ø 1/2"
+  str = str.replace(/(?:^|(?<=[Øø\s]))0[\.\s,\-]+(\d+\/\d+)/g, '$1');
+  str = str.replace(/\b0\s*[\.\s,\-]+\s*(\d+\/\d+)/g, '$1');
+
+  // 2. Tratamento de frações legadas corrompidas com 32 ou 64 avos (ex: "15/32\"", "15/32", "0.15/32\"")
+  const legacyBrokenFracMatch = str.match(/^0?[\.\s]*(\d+)\/(32|64)["']?$/i);
+  if (legacyBrokenFracMatch) {
+    const num = parseInt(legacyBrokenFracMatch[1], 10);
+    const den = parseInt(legacyBrokenFracMatch[2], 10);
+    const approxMm = Math.round((num / den) * 25.4);
+    return `${approxMm}mm`;
+  }
+
+  // Se o número numérico puro for correspondente a uma conversão corrompida de 15/32 (11.906mm)
+  if (typeof val === 'number' && Math.abs(val - 11.90625) < 0.05) {
+    return '12mm';
+  }
+
+  // 3. Se o valor foi informado explicitamente com unidade milimétrica (ex: "12mm", "12,0 mm", "10 mm")
+  if (/mm$/i.test(str) || /\bmm\b/i.test(str)) {
+    const cleanNum = str.replace(/mm/gi, '').replace(',', '.').trim();
+    const mm = parseFloat(cleanNum);
+    if (!isNaN(mm) && mm > 0) {
+      const inchStr = mmToInchFraction(mm);
+      if (inchStr) return inchStr;
+      const finalVal = Number.isInteger(mm) ? String(mm) : String(Number(mm.toFixed(2)));
+      return `${finalVal}mm`;
+    }
+  }
+
+  // 4. Se já contém indicador de polegadas (ex: '1/2"', '1.1/2"', '2"', '1 pol')
   if (str.includes('"') || /pol|in/i.test(str)) {
-    return str
-      .replace(/\s+(\d+\/\d+)/, '.$1')
+    let clean = str
+      .replace(/(?:^|(?<=[Øø\s]))0[\.\s,\-]+(\d+\/\d+)/g, '$1') // remove '0.' antes de fração (ex: 0.1/2" -> 1/2")
+      .replace(/\b0\s*[\.\s,\-]+\s*(\d+\/\d+)/g, '$1')
+      .replace(/(\b[1-9]\d*)\s+(\d+\/\d+)/g, '$1.$2')          // normaliza "1 1/2" -> "1.1/2" (somente se inteiro > 0)
       .replace(/pol|in/gi, '')
       .trim()
       .replace(/"*$/, '"');
+
+    clean = clean.replace(/\b0\.(\d+\/\d+)/g, '$1');
+
+    // Se sobrou fração estranha com denominador 32 ou 64 (ex: 15/32"):
+    const fracCheck = clean.replace(/["'Øø\s]/g, '').match(/^(\d+)\/(\d+)$/);
+    if (fracCheck) {
+      const den = parseInt(fracCheck[2], 10);
+      if (den === 32 || den === 64) {
+        const num = parseInt(fracCheck[1], 10);
+        const approxMm = Math.round((num / den) * 25.4);
+        return `${approxMm}mm`;
+      }
+    }
+    return clean;
   }
 
-  // Se é uma fração simples ou mista (ex: "1/2" ou "1.1/2" ou "1 1/2")
-  if (/^\d+\/\d+$/.test(str)) {
+  // 5. Se é uma fração simples informada sem aspas (ex: "1/2", "3/4", "15/32")
+  const simpleFracMatch = str.match(/^(\d+)\/(\d+)$/);
+  if (simpleFracMatch) {
+    const num = parseInt(simpleFracMatch[1], 10);
+    const den = parseInt(simpleFracMatch[2], 10);
+    if (den === 32 || den === 64) {
+      const approxMm = Math.round((num / den) * 25.4);
+      return `${approxMm}mm`;
+    }
     return `${str}"`;
   }
-  if (/^\d+[\s\.]\d+\/\d+$/.test(str)) {
-    return `${str.replace(' ', '.')}"`;
+
+  // 6. Se é uma fração mista informada sem aspas (ex: "1.1/2", "1 1/2", "0.1/2")
+  const mixedFracMatch = str.match(/^(\d+)[\s\.](\d+\/\d+)$/);
+  if (mixedFracMatch) {
+    const whole = parseInt(mixedFracMatch[1], 10);
+    const frac = mixedFracMatch[2];
+    const [num, den] = frac.split('/').map(Number);
+    if (den === 32 || den === 64) {
+      const approxMm = Math.round((whole + num / den) * 25.4);
+      return `${approxMm}mm`;
+    }
+    if (whole === 0) {
+      return `${frac}"`;
+    }
+    return `${whole}.${frac}"`;
   }
 
-  // Tenta converter milímetros para polegadas se for uma bitola conhecida
-  const mm = parseNumberBR(str);
+  // 7. Se for valor decimal que corresponde a fração em polegada (ex: 0.5" -> 1/2", 0.25" -> 1/4", 0.75" -> 3/4")
+  const numDec = parseNumberBR(str);
+  if (numDec > 0 && numDec < 1) {
+    const mmFromInch = numDec * 25.4;
+    const inchFromDec = mmToInchFraction(mmFromInch);
+    if (inchFromDec) return inchFromDec;
+  }
+
+  // 8. Valores numéricos decimais ou inteiros (ex: 12, "12", 12.0, 12.7, 25.4, 50, etc.)
+  const mm = typeof val === 'number' ? val : numDec;
   if (mm > 0) {
     const inchStr = mmToInchFraction(mm);
     if (inchStr) return inchStr;
-    return `${str}mm`;
+    const finalVal = Number.isInteger(mm) ? String(mm) : String(Number(mm.toFixed(2)));
+    return `${finalVal}mm`;
   }
 
   return str;
@@ -736,6 +854,13 @@ export function formatarMedidasLimpa(item: Record<string, any>): string {
         if (!pDia.startsWith("Ø")) pDia = `Ø ${pDia}`;
         const pComp = formatDimensaoMm(rawParts[1]);
         return normalizarMedida(`${pDia} x ${pComp}`);
+      } else if (thickMm > 0 || thickPol) {
+        // Se a espessura já está definida no item e measureRaw contém duas dimensões (ex: "150 x 150"),
+        // preserva todas as 3 dimensões (Espessura x Largura x Comprimento)!
+        const pEsp = thickPol || formatDimensaoPolegada(thickMm);
+        const pLarg = formatDimensaoMm(rawParts[0]);
+        const pComp = formatDimensaoMm(rawParts[1]);
+        return normalizarMedida(`${pEsp} x ${pLarg} x ${pComp}`);
       } else {
         const pEsp = formatDimensaoPolegada(rawParts[0]);
         const pComp = formatDimensaoMm(rawParts[1]);
